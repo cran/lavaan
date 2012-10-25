@@ -252,6 +252,8 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
     if(fit.measures) {
         if(object@Options$test == "none") {
             cat("lavaan WARNING: fit measures not available if test = \"none\"\n\n")
+        } else if(!object@Fit@converged) {
+            cat("lavaan WARNING: fit measures not available if model did not converge\n\n")
         } else {
             print.fit.measures( fitMeasures(object) )
         }
@@ -286,7 +288,7 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
     print.estimate <- function(name="ERROR", i=1, z.stat=TRUE) {
        
         # cut name if (still) too long
-        name <- substr(name, 1, 13)
+        name <- strtrim(name, width=13L)
 
         if(!standardized) {
             if(is.na(se[i])) {
@@ -357,19 +359,35 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
         }
 
         makeNames <- function(NAMES, LABELS) {
+            multiB <- FALSE
+            if(any(nchar(NAMES) != nchar(NAMES, "bytes")))
+                multiB <- TRUE
+            if(any(nchar(LABELS) != nchar(LABELS, "bytes")))
+                multiB <- TRUE
             # labels?
             l.idx <- which(nchar(LABELS) > 0L)
             if(length(l.idx) > 0L) {
-                LABELS <- abbreviate(LABELS, 4)
-                LABELS[l.idx] <- paste(" (", LABELS[l.idx], ")", sep="")
-                MAX.L <- max(nchar(LABELS))
-                NAMES <- abbreviate(NAMES, minlength = (13 - MAX.L), 
-                                    strict = TRUE)
+                if(!multiB) {
+                    LABELS <- abbreviate(LABELS, 4)
+                    LABELS[l.idx] <- paste(" (", LABELS[l.idx], ")", sep="")
+                    MAX.L <- max(nchar(LABELS))
+                    NAMES <- abbreviate(NAMES, minlength = (13 - MAX.L), 
+                                        strict = TRUE)
+                } else {
+                    # do not abbreviate anything (eg in multi-byte locales)
+                    MAX.L <- 4L
+                }
                 NAMES <- sprintf(paste("%-", (13 - MAX.L), "s%", MAX.L, "s",
                                        sep=""), NAMES, LABELS)
             } else {
-                NAMES <- abbreviate(NAMES, minlength = 13, strict = TRUE)
+                if(!multiB) {
+                    NAMES <- abbreviate(NAMES, minlength = 13, strict = TRUE)
+                } else {
+                    NAMES <- sprintf(paste("%-", 13, "s", sep=""), NAMES)
+                }
             }
+
+            NAMES
         }
 
         NAMES <- object@ParTable$rhs
@@ -1090,6 +1108,7 @@ function(object, what="free") {
          modificationIndices(object)
     } else if(what == "samp" ||
               what == "sample" ||
+              what == "samplestatistics" ||
               what == "sampstat") {
         sampStat(object)
     } else if(what == "rsquare" || 
@@ -1122,6 +1141,29 @@ sampStat <- function(object, labels=TRUE) {
             if(labels) names(OUT[[g]]$mean) <- ov.names[[g]]
             class(OUT[[g]]$mean) <- c("lavaan.vector", "numeric")
         #}
+
+        if(object@Model@categorical) {
+            OUT[[g]]$th <- as.numeric(object@SampleStats@th[[g]])
+            if(length(object@Model@num.idx[[g]]) > 0L) {
+                OUT[[g]]$th <- OUT[[g]]$th[-object@Model@num.idx[[g]]]
+            }
+            if(labels) {
+                names(OUT[[g]]$th) <- 
+                    vnames(object@ParTable, type="th", group=g)
+            }
+            class(OUT[[g]]$th) <- c("lavaan.vector", "numeric")
+        }
+
+        if(object@Model@categorical &&
+           object@Model@nexo > 0L) {
+            OUT[[g]]$slopes  <- object@SampleStats@slopes[[g]]
+            if(labels) {
+                rownames(OUT[[g]]$slopes) <- ov.names[[g]]
+                colnames(OUT[[g]]$slopes) <- 
+                    vnames(object@ParTable, type="ov.x", group=g)
+                class(OUT[[g]]$slopes) <- c("lavaan.matrix", "matrix")
+            }
+        }
     }
 
     if(G == 1) {
@@ -1152,6 +1194,18 @@ function(object, labels=TRUE) {
             if(labels) names(OUT[[g]]$mean) <- ov.names[[g]]
             class(OUT[[g]]$mean) <- c("lavaan.vector", "numeric")
         #}
+
+        if(object@Model@categorical) {
+            OUT[[g]]$th <- as.numeric(object@Fit@TH[[g]])
+            if(length(object@Model@num.idx[[g]]) > 0L) {
+                OUT[[g]]$th <- OUT[[g]]$th[-object@Model@num.idx[[g]]]
+            }
+            if(labels) {
+                names(OUT[[g]]$th) <-
+                    vnames(object@ParTable, type="th", group=g)
+            }
+            class(OUT[[g]]$th) <- c("lavaan.vector", "numeric")
+        }
     }
 
     if(G == 1) {
@@ -1376,7 +1430,7 @@ function(object, ...) {
         scaled <- FALSE
         TEST <- "standard"
     } else {
-        error("lavaan WARNING: some models (but not all) have scaled test statistics")
+        stop("lavaan WARNING: some models (but not all) have scaled test statistics")
     }
 
     # which models have used a MEANSTRUCTURE?
@@ -1488,7 +1542,7 @@ function(object, ...) {
     }
 
     # Pvalue
-    Pvalue.delta <- pchisq(Chisq.delta, Df.delta, lower = FALSE)
+    Pvalue.delta <- pchisq(Chisq.delta, Df.delta, lower.tail = FALSE)
 
     aic <- bic <- rep(NA, length(mods))
     if(estimator == "ML") {

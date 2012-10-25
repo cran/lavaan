@@ -57,190 +57,97 @@ InformativeTesting <- function(model = NULL, data, constraints = NULL,
 
 
 
-
 print.InformativeTesting <- function(x, ...) {
   object <- x
-  cat("\n")
+  
+  cat("  \n")
+  cat("  Variable names in model       :", unlist(object$fitA1@Data@ov.names[1]), "\n")  
+  cat("  Number of variables           :", object$fitA1@Model@nvar[1], "\n")  
+  cat("  Number of groups              :", object$fitA1@Data@ngroups, "\n")  
+  cat("  Used sample size per group    :", unlist(object$fitA1@Data@nobs), "\n")
+  cat("  Used sample size              :", sum(unlist(object$fitA1@Data@nobs)), "\n")
+  cat("  Total sample size             :", sum(unlist(object$fitA1@Data@norig)), "\n\n")
+  cat("  Estimator                     :", object$fitA1@Options$estimator, "\n")
+  cat("  Missing data                  :", object$fitA1@Options$missing, "\n")
+  cat("  Bootstrap method              :", object$type, "\n")
+  cat("  Double bootstrap method       :", object$double.bootstrap, "\n\n\n")
+
   p.A <- object$lrt.bootA[1]
   p.B <- object$lrt.bootB[1]
   sig.A <- sig.B <- "Non-significant"
+  a.A <- a.B <- object$double.bootstrap.alpha
  
+ if (object$double.bootstrap == "FDB" | object$double.bootstrap == "standard"){
   if (object$double.bootstrap == "FDB") {
-    p.A <- attr(object$lrt.bootA, "adj.pvalue")
-    p.B <- attr(object$lrt.bootB, "adj.pvalue")
+   adj.p.A <- attr(object$lrt.bootA, "adj.pvalue")
+   adj.p.B <- attr(object$lrt.bootB, "adj.pvalue")
   }
-  
   if (object$double.bootstrap == "standard") {
-    p.adj.A <- attr(object$lrt.bootA, "adj.pvalue")
-    p.adj.B <- attr(object$lrt.bootB, "adj.pvalue")
-    alpha.adj.A <- attr(object$lrt.bootA, "adj.alpha")
-    alpha.adj.B <- attr(object$lrt.bootB, "adj.alpha")
-    alpha.A <- alpha.B <- object$double.bootstrap.alpha
-    
+   adj.p.A <- attr(object$lrt.bootA, "adj.pvalue")
+   adj.p.B <- attr(object$lrt.bootB, "adj.pvalue")
+   adj.a.A <- attr(object$lrt.bootA, "adj.alpha")
+   adj.a.B <- attr(object$lrt.bootB, "adj.alpha")
+  }
     if (attr(object$lrt.bootA, "adj.pvalue") < object$double.bootstrap.alpha) 
       sig.A <- "Significant"
     if (attr(object$lrt.bootB, "adj.pvalue") < object$double.bootstrap.alpha) 
       sig.B <- "Significant"
-    
-    cat("Order Constrained Hypothesis Testing:\n\n\n")
-    hd.txt <- sprintf(" %-16s %1s %-15s", "Double bootstrap", "=", 
-                      object$double.bootstrap)
-    ht.txt <- sprintf(" %-16s %1s %-15s", "Bootstrap type", "=", 
-                      object$type)
-    cat(ht.txt,"\n")
-    cat(hd.txt,"\n\n\n")
-    h0.txt <- sprintf("  %-22s  %8s  %15s", "", "Type A", "Type B") 
-    cat(h0.txt, "\n")
-    cat("  -------------------------------------------------\n")
-    t0.txt <- sprintf("  %-22s", "LR statistic")
-    t1.txt <- sprintf("  %2s %05.2f", "", attr(object$lrt.bootA, "LRT.original"))
-    t2.txt <- sprintf("  %9s %05.2f", "", attr(object$lrt.bootB, "LRT.original"))
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    t0.txt <- sprintf("  %-22s", "Adjusted alpha")
-    t1.txt <- sprintf("  %3s %.2f", "", alpha.adj.A)
-    t2.txt <- sprintf("  %10s %.2f", "", alpha.adj.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-    t0.txt <- sprintf("  %-22s", "P-value")
-    t1.txt <- sprintf("  %3s %.2f", "", p.A)
-    t2.txt <- sprintf("  %10s %.2f", "", p.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    t0.txt <- sprintf("  %-22s", "Alpha")
-    t1.txt <- sprintf("  %3s %.2f", "", alpha.A)
-    t2.txt <- sprintf("  %10s %.2f", "", alpha.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-    t0.txt <- sprintf("  %-22s", "Adjusted p-value")
-    t1.txt <- sprintf("  %3s %.2f", "", p.adj.A)
-    t2.txt <- sprintf("  %10s %.2f", "", p.adj.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    t0.txt <- sprintf("  %10s", "Significance")
-    t1.txt <- sprintf("  %18s", sig.A)
-    t2.txt <- sprintf("  %15s", sig.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
+ }
+ else {
+   sig.A <- sig.B <- "Inconclusive*"
   }
-  else if (object$double.bootstrap == "FDB") {
-    cat("Order Constrained Hypothesis Testing:\n\n\n")
-    hd.txt <- sprintf(" %-16s %1s %-15s", "Double bootstrap", "=", 
-                      object$double.bootstrap)
-    ht.txt <- sprintf(" %-16s %1s %-15s", "Bootstrap type", "=", object$type)
-    cat(ht.txt,"\n")
-    cat(hd.txt,"\n\n")
-    p.A <- attr(object$lrt.bootA, "adj.pvalue")
-    p.B <- attr(object$lrt.bootB, "adj.pvalue")
-    alpha.A <- alpha.B <- object$double.bootstrap.alpha
-    
-    if (attr(object$lrt.bootA, "adj.pvalue") < object$double.bootstrap.alpha) { 
-      sig.A <- "Significant"
-    }
-    if (attr(object$lrt.bootB, "adj.pvalue") < object$double.bootstrap.alpha) { 
-      sig.B <- "Significant"
-    }
-    h0.txt <- sprintf("  %-22s  %8s  %15s", "", "Type A", "Type B") 
-    cat(h0.txt, "\n")
-    cat("  -------------------------------------------------\n")
-    t0.txt <- sprintf("  %-22s", "LR statistic")
-    t1.txt <- sprintf("  %2s %05.2f", "", attr(object$lrt.bootA, "LRT.original"))
-    t2.txt <- sprintf("  %9s %05.2f", "", attr(object$lrt.bootB, "LRT.original"))
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    t0.txt <- sprintf("  %-22s", "Alpha")
-    t1.txt <- sprintf("  %3s %.2f", "", alpha.A)
-    t2.txt <- sprintf("  %10s %.2f", "", alpha.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-    t0.txt <- sprintf("  %-22s", "Adjusted p-value")
-    t1.txt <- sprintf("  %3s %.2f", "", p.A)
-    t2.txt <- sprintf("  %10s %.2f", "", p.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    t0.txt <- sprintf("  %10s", "Significance")
-    t1.txt <- sprintf("  %18s", sig.A)
-    t2.txt <- sprintf("  %15s", sig.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-  }
-  else if (object$double.bootstrap == "no") {
-    alpha.A <- alpha.B <- object$double.bootstrap.alpha
-    sig.A <- sig.B <- "Inconclusive*"
-    cat("Order Constrained Hypothesis Testing:\n\n\n")
-    hd.txt <- sprintf(" %-16s %1s %-15s", "Double bootstrap", "=", 
-                      object$double.bootstrap)
-    ht.txt <- sprintf(" %-16s %1s %-15s", "Bootstrap type", "=", object$type)
-    cat(ht.txt,"\n")
-    cat(hd.txt,"\n\n\n")
-    h0.txt <- sprintf("  %-22s  %8s  %15s", "", "Type A", "Type B") 
-    cat(h0.txt, "\n")
-    cat("  -------------------------------------------------\n")
-    t0.txt <- sprintf("  %-22s", "LR statistic")
-    t1.txt <- sprintf("  %2s %05.2f", "", attr(object$lrt.bootA, "LRT.original"))
-    t2.txt <- sprintf("  %9s %05.2f", "", attr(object$lrt.bootB, "LRT.original"))
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    t0.txt <- sprintf("  %-22s", "Alpha")
-    t1.txt <- sprintf("  %3s %.2f", "", alpha.A)
-    t2.txt <- sprintf("  %10s %.2f", "", alpha.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-    t0.txt <- sprintf("  %-22s", "P-value")
-    t1.txt <- sprintf("  %3s %.2f", "", p.A)
-    t2.txt <- sprintf("  %10s %.2f", "", p.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    t0.txt <- sprintf("  %10s", "Significance")
-    t1.txt <- sprintf("  %18s", sig.A)
-    t2.txt <- sprintf("  %15s", sig.B)
-    cat(t0.txt, t1.txt, t2.txt, "\n\n", sep="")
-    cat("  *For meaningfull results set double.bootstrap")
-  }  
+  
+ cat("Order Constrained Hypothesis Testing:\n\n")
+ h0.txt <- sprintf("  %-22s  %8s  %15s", "", "Type A", "Type B") 
+ cat(h0.txt, "\n")
+ cat("  -------------------------------------------------\n")
+ t00.txt <- sprintf("  %-22s", "LR statistic")
+ t01.txt <- sprintf("  %2s %05.2f", "", attr(object$lrt.bootA, "LRT.original"))
+ t02.txt <- sprintf("  %9s %05.2f", "", attr(object$lrt.bootB, "LRT.original"))
+
+ if (object$double.bootstrap == "standard"){
+  t10.txt <- sprintf("  %-22s", "Adjusted alpha")
+  t11.txt <- sprintf("  %3s %.2f", "", adj.a.A)
+  t12.txt <- sprintf("  %10s %.2f", "", adj.a.B)
+ }
+ if (object$double.bootstrap == "FDB" | object$double.bootstrap == "standard"){
+  t20.txt <- sprintf("  %-22s", "Adjusted p-value")
+  t21.txt <- sprintf("  %3s %.2f", "", adj.p.A)
+  t22.txt <- sprintf("  %10s %.2f", "", adj.p.B)
+ }
+ t30.txt <- sprintf("  %-22s", "P-value")
+ t31.txt <- sprintf("  %3s %.2f", "", p.A)
+ t32.txt <- sprintf("  %10s %.2f", "", p.B)
+ t40.txt <- sprintf("  %-22s", "Alpha")
+ t41.txt <- sprintf("  %3s %.2f", "", a.A)
+ t42.txt <- sprintf("  %10s %.2f", "", a.B)
+ t50.txt <- sprintf("  %10s", "Significance")
+ t51.txt <- sprintf("  %18s", sig.A)
+ t52.txt <- sprintf("  %15s", sig.B)
+
+ cat(t00.txt, t01.txt, t02.txt, "\n\n", sep="")
+ 
+ if (object$double.bootstrap == "FDB"){
+  cat(t30.txt, t31.txt, t32.txt, "\n", sep="")
+  cat(t20.txt, t21.txt, t22.txt, "\n\n", sep="")
+  cat(t40.txt, t41.txt, t42.txt, "\n\n", sep="") 
+  cat(t50.txt, t51.txt, t52.txt, "\n", sep="")
+  } 
+ else if(object$double.bootstrap == "standard"){
+  cat(t30.txt, t31.txt, t32.txt, "\n", sep="")
+  cat(t10.txt, t11.txt, t12.txt, "\n\n", sep="")
+  cat(t20.txt, t21.txt, t22.txt, "\n", sep="")
+  cat(t40.txt, t41.txt, t42.txt, "\n\n", sep="") 
+  cat(t50.txt, t51.txt, t52.txt, "\n", sep="")
+ }
+ else if(object$double.bootstrap == "no"){
+  cat(t30.txt, t31.txt, t32.txt, "\n", sep="")
+  cat(t40.txt, t41.txt, t42.txt, "\n\n", sep="") 
+  cat("  *For meaningfull results set double.bootstrap")
+ }
+
 }
 
-
-summary.InformativeTesting <- function(object, 
-                                       fit = c("H0","Hi","Hu"), 
-                                       fitmeasures = FALSE,
-                                       ...)
-{
-  if (!missing(fit)) {
-    fit <- tolower(fit) 
-    stopifnot (fit %in% c("h0","hi","hu"))
-    
-    if ("h0" %in% fit) {
-      fit.model <- sem(object$fitA1@ParTable, 
-                       group = object$fitA1@Options$group, ...)
-    }
-    else if ("hi" %in% fit) {
-      fit.model <- sem(object$fitA2@ParTable, 
-                       group = object$fitA2@Options$group, ...)
-    }
-    else if ("hu" %in% fit) {
-      fit.model <- sem(object$fitB2@ParTable, 
-                       group = object$fitB2@Options$group, ...)
-    }
-    
-    if ("hu" %in% fit)     
-      fit.m <- fitmeasures(fit.model, c("chisq", "df", "pvalue", "cfi",   
-                                        "tli", "logl", "aic", "bic", "rmsea"))
-    
-    summary(fit.model)
-    
-    if (fitmeasures & "hu" %in% fit) { 
-      cat("\n")
-      cat("Fit Measures \n\n")
-      print(fit.m)
-    }
-    else if (fitmeasures & ("h0" %in% fit | "hi" %in% fit)) {
-      cat("\n")
-      cat("Fit Measures only available for the unconstrained model Hu \n\n")
-    }    
-  }
-  if (missing(fit)) {
-    cat("  \n")
-    cat("  Variable names in model       :", unlist(object$fitA1@Data@ov.names[1]), "\n")  
-    cat("  Number of variables           :", object$fitA1@Model@nvar[1], "\n")  
-    cat("  Number of groups              :", object$fitA1@Data@ngroups, "\n")  
-    cat("  Used sample size per group    :", unlist(object$fitA1@Data@nobs), "\n")
-    cat("  Used sample size              :", sum(unlist(object$fitA1@Data@nobs)), "\n")
-    cat("  Total sample size             :", sum(unlist(object$fitA1@Data@norig)), "\n\n")
-    cat("  Estimator                     :", object$fitA1@Options$estimator, "\n")
-    cat("  Missing data                  :", object$fitA1@Options$missing, "\n")
-    cat("  Bootstrap method              :", object$type, "\n")
-    cat("  Double bootstrap method       :", object$double.bootstrap, "\n\n")
-    
-    print(object)
-  }
-}
 
 
 plot.InformativeTesting <- function(x, ..., 
@@ -261,6 +168,7 @@ plot.InformativeTesting <- function(x, ...,
                                     lty = c(1,2),
                                     lwd = 1,
                                     legend = FALSE,
+                                    bty = "o",
                                     cex.legend = 0.75,
                                     loc.legend = "topright") 
 {
@@ -269,132 +177,103 @@ plot.InformativeTesting <- function(x, ...,
   double.bootstrap <- object$double.bootstrap
   double.bootstrap.alpha <- object$double.bootstrap.alpha
   
-  stopifnot(type %in% c("all", "LRT.A", "LRT.B", 
+  stopifnot(type %in% c("all", 
+                        "LRT.A", "LRT.B", 
                         "ppvalues.A", "ppvalues.B"))
-  if (type == "ppvalues.A" | type == "ppvalues.B") 
-    stopifnot(double.bootstrap == "standard")
+
+  if (type == "ppvalues.A" | type == "ppvalues.B") stopifnot(double.bootstrap == 
+							     "standard")
   if (type == "LRT.A" | type == "LRT.B") stopifnot(return.LRT)
   if (type == "all" & !return.LRT) stopifnot (double.bootstrap != "FDB")
   
-  pvalue <- rep(as.numeric(NA), 2) 
-  pvalue[1]   <- object$lrt.bootA[1]
-  pvalue[2]   <- object$lrt.bootB[1]
+  pvalue    <- rep(as.numeric(NA), 2) 
+   pvalue[1] <- object$lrt.bootA[1]
+   pvalue[2] <- object$lrt.bootB[1]
   
-  if (ylab == "ylabel") {
-    y.lab  <- "Frequency"
-  }
-  else {
-    y.lab <- ylab
-  }
+  if (ylab == "ylabel") {y.lab  <- "Frequency" 
+   } else {y.lab <- ylab}
   
   if (return.LRT) {
-    lrt.obs <- rep(as.numeric(NA), 2) 
-    lrt.obs[1]  <- attr(object$lrt.bootA, "LRT.original")
-    lrt.obs[2]  <- attr(object$lrt.bootB, "LRT.original")
+    lrt.obs    <- rep(as.numeric(NA), 2) 
+     lrt.obs[1] <- attr(object$lrt.bootA, "LRT.original")
+     lrt.obs[2] <- attr(object$lrt.bootB, "LRT.original")
     
     lrt.A <- attr(object$lrt.bootA, "LRT")
     lrt.B <- attr(object$lrt.bootB, "LRT")
     
     if (length(lrt.A) - length(lrt.B) < 0L) {
       lrt <- cbind(c(lrt.A, rep(NA, length(lrt.B) - length(lrt.A))), lrt.B)
-    }
-    else { 
+    } else { 
       lrt <- cbind(lrt.A, c(lrt.B, rep(NA, length(lrt.A) - length(lrt.B))))
     }
     
-    if (xlab == "xlabel") { 
-      x.lrt <- c("Bootstrapped LRT values")
-    }
-    else {
-      x.lrt <- xlab
-    }
+    if (xlab == "xlabel") {x.lrt <- c("First level bootstrapped LRT values")
+     } else {x.lrt <- xlab}
     
     if (main == "main") {
-      m.lrt <- c("Distribution of bootstrapped LRT values - type A", 
-                 "Distribution of bootstrapped LRT values - type B")
+      m.lrt <- c("Distribution of bootstrapped LRT values - Type A", 
+                 "Distribution of bootstrapped LRT values - Type B")
     }
-    else {
-      m.lrt <- main
-    }
+     else {m.lrt <- main}
   } 
   
   if (double.bootstrap == "FDB") {
     lrt.q <- rep(as.numeric(NA), 2)
-    lrt.q[1] <- attr(object$lrt.bootA, "lrt.q") 
-    lrt.q[2] <- attr(object$lrt.bootB, "lrt.q")
+     lrt.q[1] <- attr(object$lrt.bootA, "lrt.q") 
+     lrt.q[2] <- attr(object$lrt.bootB, "lrt.q")
     adj.pvalue <- rep(as.numeric(NA), 2)
-    adj.pvalue[1] <- attr(object$lrt.bootA, "adj.pvalue")
-    adj.pvalue[2] <- attr(object$lrt.bootB, "adj.pvalue")
+     adj.pvalue[1] <- attr(object$lrt.bootA, "adj.pvalue")
+     adj.pvalue[2] <- attr(object$lrt.bootB, "adj.pvalue")
     
-    if (xlab == "xlabel") {
-      x.lrt <- c("Bootstrapped LRT values")
-    }
-    else {
-      x.lrt <- xlab
-    }
+    if (xlab == "xlabel") {x.lrt <- c("First level bootstrapped LRT values")
+     } else {x.lrt <- xlab}
     
     if (main == "main") {
-      m.lrt <- c("Distribution of first level LRT values - type A", 
-                 "Distribution of first level LRT values - type B")
-    }
-    else {
-      m.lrt <- main
-    }
+      m.lrt <- c("Distribution of LRT values - Type A", 
+                 "Distribution of LRT values - Type B")
+    } else {m.lrt <- main}
   }
   
   if (double.bootstrap == "standard") {
     ppvalue.A <- attr(object$lrt.bootA, "plugin.pvalues")
     ppvalue.B <- attr(object$lrt.bootB, "plugin.pvalues")
     adj.a <- rep(as.numeric(NA), 2)
-    adj.a[1] <- quantile(ppvalue.A, double.bootstrap.alpha)
-    adj.a[2] <- quantile(ppvalue.B, double.bootstrap.alpha)
+     adj.a[1] <- quantile(ppvalue.A, double.bootstrap.alpha)
+     adj.a[2] <- quantile(ppvalue.B, double.bootstrap.alpha)
     adj.ppv <- rep(as.numeric(NA), 2)
-    adj.ppv[1] <- attr(object$lrt.bootA, "adj.pvalue")
-    adj.ppv[2] <- attr(object$lrt.bootB, "adj.pvalue")
+     adj.ppv[1] <- attr(object$lrt.bootA, "adj.pvalue")
+     adj.ppv[2] <- attr(object$lrt.bootB, "adj.pvalue")
     
     if (length(ppvalue.A) - length(ppvalue.B) < 0L) {
       ppv <- cbind(c(ppvalue.A, rep(NA, length(ppvalue.B) - 
         length(ppvalue.A))), ppvalue.B)
-    }
-    else { 
+    } else { 
       ppv <- cbind(ppvalue.A, c(ppvalue.B, rep(NA, length(ppvalue.A) - 
         length(ppvalue.B))))
     }
     
     if (xlab == "xlabel") {
-      x.ppv  <- c("Bootstrapped plug-in p values")
-    }
-    else {
-      x.ppv <- xlab    
-    }
+      x.ppv  <- c("Bootstrapped plug-in p-values")
+    } else {x.ppv <- xlab}
     
     if (main == "main") {
-      m.ppv  <- c("Distribution of plug-in p values - type A", 
-                  "Distribution of plug-in p values - type B")
-    }
-    else {
-      m.ppv <- main
-    }  
+      m.ppv  <- c("Distribution of plug-in p-values - Type A", 
+                  "Distribution of plug-in p-values - Type B")
+    } else {m.ppv <- main}  
   }
   
   if (return.LRT & type == "all" & double.bootstrap != "standard") {
-    par(mfrow = c(1, 2))
-  }
+    par(mfrow = c(1, 2))}
   else if (return.LRT & type == "all" & double.bootstrap == "standard") {
-    par(mfrow = c(2, 2))
-  }
-  else if (!return.LRT & (double.bootstrap == "standard" | 
-    double.bootstrap == "FDB")) {
-    par(mfrow = c(1, 2))
-  }
+    par(mfrow = c(2, 2))}
+  else if (!return.LRT & (double.bootstrap == "standard" | double.bootstrap == "FDB")) {
+    par(mfrow = c(1, 2))}
   else if (type != "all") {
-    par(mfrow = c(1, 1))
-  }
+    par(mfrow = c(1, 1))}
   
-  if (double.bootstrap == "standard") {
-    if (type == "LRT.A" | type == "LRT.B") double.bootstrap = "no"
-  }
-  
+  if (double.bootstrap == "standard" & (type == "LRT.A" | type == "LRT.B")) 
+    double.bootstrap = "no"
+    
   if (type == "ppvalues.A" | type == "ppvalues.B") return.LRT <- FALSE
   
   if ((type == "LRT.A" & return.LRT) |
@@ -432,11 +311,10 @@ plot.InformativeTesting <- function(x, ...,
         
         if (!vline){
           legend(loc.legend, legend.obj, lty = c(0, 0),   
-                 lwd = lwd, cex = cex.legend, bty="n")
-        }
-        else {
+                 lwd = lwd, cex = cex.legend, bty = bty)
+        } else {
           legend(loc.legend, legend.obj, lty = c(lty[1], 0), col = vline.col[1],  
-                 lwd = lwd, cex = cex.legend, bty="n")
+                 lwd = lwd, cex = cex.legend, bty = bty)
         }
       }
       else if (legend & double.bootstrap == "FDB") {
@@ -448,12 +326,11 @@ plot.InformativeTesting <- function(x, ...,
         if (!vline) {
           legend(loc.legend, legend.obj, lty = c(0,0,0), 
                  col = c(vline.col, "blue"), lwd = lwd, cex = cex.legend, 
-                 bty="n")
-        }
-        else {
+                 bty = bty)
+        } else {
           legend(loc.legend, legend.obj, lty = c(lty[1],lty[2],0), 
                  col = c(vline.col[1], vline.col[2]), lwd = lwd, 
-                 cex = cex.legend, bty="n")
+                 cex = cex.legend, bty = bty)
         }
       }
     }
@@ -474,11 +351,10 @@ plot.InformativeTesting <- function(x, ...,
         legend.obj <- c(adja, adjp)
         if (!vline) {
           legend(loc.legend, legend.obj, lty = 0, col = vline.col,  
-                 lwd = lwd, cex = cex.legend, bty="n")
-        }
-        else {
+                 lwd = lwd, cex = cex.legend, bty = bty)
+        } else {
           legend(loc.legend, legend.obj, lty = lty, col = vline.col,  
-                 lwd = lwd, cex = cex.legend, bty="n")
+                 lwd = lwd, cex = cex.legend, bty = bty)
         }
       }
     }

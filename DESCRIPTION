@@ -1,6 +1,6 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.5-9
+Version: 0.5-10
 Authors@R: c(person("Yves", "Rosseel", role = c("aut", "cre"), email =
         "Yves.Rosseel@UGent.be"), person("Daniel", "Oberski", role =
         "ctb", email = "daniel.oberski@gmail.com"), person("Jarrett",
@@ -8,20 +8,25 @@ Authors@R: c(person("Yves", "Rosseel", role = c("aut", "cre"), email =
         person("Leonard", "Vanbrabant", role = "ctb", email =
         "L.G.F.Vanbrabant@uu.nl"), person("Victoria", "Savalei", role =
         "ctb", email = "vsavalei@ubc.ca"), person("Ed", "Merkle", role
-        = "ctb", email = "merklee@missouri.edu") )
+        = "ctb", email = "merklee@missouri.edu"), person("Michael",
+        "Hallquist", role = "ctb", email = "michael.hallquist at
+        gmail.com"), person("Mijke", "Rhemtulla", role = "ctb", email =
+        "mijke@ku.edu"), person("Myrsini", "Katsikatsou", role = "ctb",
+        email = "mirtok2@gmail.com") )
 Description: Fit a variety of latent variable models, including
         confirmatory factor analysis, structural equation modeling and
         latent growth curve models.
-Depends: methods, R(>= 2.14.0), MASS, boot, mvtnorm, quadprog
+Depends: methods, R(>= 2.14.0), MASS, boot, mnormt, quadprog
 Imports: stats4, stats, graphics
-Suggests: psych, qgraph
+Suggests: psych, qgraph, semTools, simsem
 License: GPL (>= 2)
 LazyData: yes
 URL: http://lavaan.org
-Packaged: 2012-09-06 19:03:50 UTC; yves
+Packaged: 2012-10-25 12:12:57 UTC; yves
 Author: Yves Rosseel [aut, cre], Daniel Oberski [ctb], Jarrett Byrnes
         [ctb], Leonard Vanbrabant [ctb], Victoria Savalei [ctb], Ed
-        Merkle [ctb]
+        Merkle [ctb], Michael Hallquist [ctb], Mijke Rhemtulla [ctb],
+        Myrsini Katsikatsou [ctb]
 Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
 Repository: CRAN
-Date/Publication: 2012-09-08 07:17:04
+Date/Publication: 2012-10-25 13:27:07
