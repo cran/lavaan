@@ -4,6 +4,7 @@ computeExpectedInformation <- function(object, samplestats=NULL, data=NULL,
                                        # is no Delta is provided, we compute 
                                        # Delta for the free parameters only
                                        Delta=computeDelta(object), 
+                                       cache=NULL,
                                        extra=FALSE) {
 
     # compute WLS.V
@@ -17,7 +18,7 @@ computeExpectedInformation <- function(object, samplestats=NULL, data=NULL,
         WLS.V <- samplestats@WLS.V
     } else if(estimator == "ML") {
         Sigma.hat <- computeSigmaHat(object)
-        if(object@meanstructure) Mu.hat <- computeMuHat(object)
+        if(samplestats@missing.flag) Mu.hat <- computeMuHat(object)
         for(g in 1:samplestats@ngroups) {
             if(samplestats@missing.flag) {
                 WLS.V[[g]] <- compute.Abeta(Sigma.hat=Sigma.hat[[g]],
@@ -100,8 +101,9 @@ computeExpectedInformationMLM <- function(object, samplestats = NULL,
 
 
 
-computeObservedInformation <- function(object, samplestats=NULL, data=NULL,
+computeObservedInformation <- function(object, samplestats=NULL, X=NULL,
                                        type="free", estimator="ML", 
+                                       cache=NULL,
                                        group.weight=TRUE) {
 
     # computing the Richardson extrapolation
@@ -116,21 +118,25 @@ computeObservedInformation <- function(object, samplestats=NULL, data=NULL,
 
         g.left <- 
             computeGradient(object=object, GLIST=x2GLIST(object, x.left), 
-                            samplestats=samplestats, type="free", estimator=estimator, 
+                            samplestats=samplestats, X=X, cache=cache,
+                            type="free", estimator=estimator, 
                             group.weight=group.weight)
         g.left2 <-    
             computeGradient(object=object, GLIST=x2GLIST(object, x.left2),
-                            samplestats=samplestats, type="free", estimator=estimator, 
+                            samplestats=samplestats, X=X, cache=cache,
+                            type="free", estimator=estimator, 
                             group.weight=group.weight)
 
         g.right <- 
             computeGradient(object=object, GLIST=x2GLIST(object, x.right),
-                            samplestats=samplestats, type="free", estimator=estimator,
+                            samplestats=samplestats, X=X, cache=cache,
+                            type="free", estimator=estimator,
                             group.weight=group.weight)
 
         g.right2 <- 
             computeGradient(object=object, GLIST=x2GLIST(object, x.right2),
-                            samplestats=samplestats, type="free", estimator=estimator,
+                            samplestats=samplestats, X=X, cache=cache,
+                            type="free", estimator=estimator,
                             group.weight=group.weight)
     
         Hessian[,j] <- ( -1 * (g.left2 - 8*g.left + 
@@ -160,7 +166,9 @@ computeObservedInformation <- function(object, samplestats=NULL, data=NULL,
     Information <- ( -1 * Hessian )
 
     # augmented Information matrix (only for fixed.x)
-    if(type == "free.fixed.x" && object@fixed.x && length(object@x.idx) > 0) {
+    # FIXME: what to do here if estimator = PML???
+    if(type == "free.fixed.x" && object@fixed.x && 
+       length(object@x.idx) > 0 && estimator != "PML") {
         idx.all <- which(object$free > 0 | (object$fixed.x > 0 &
                          object$row >= object$col))
         idx.free <- which(object$free > 0)

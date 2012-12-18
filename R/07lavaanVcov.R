@@ -1,5 +1,5 @@
 Nvcov.standard <- function(object, samplestats=NULL, data=NULL, estimator="ML", 
-                           information="observed") {
+                           cache=NULL, information="observed") {
 
     # compute information matrix
     if(information == "observed") {
@@ -9,15 +9,16 @@ Nvcov.standard <- function(object, samplestats=NULL, data=NULL, estimator="ML",
             group.weight <- TRUE
         }
         E <- computeObservedInformation(object, samplestats=samplestats, 
-                                        data=data,
+                                        X=data@X, cache=cache,
                                         estimator=estimator, type="free",
                                         group.weight=group.weight)
     } else {
         E <- computeExpectedInformation(object, samplestats=samplestats, 
-                                        data=data,
+                                        data=data, cache=cache,
                                         estimator=estimator)
     }
 
+    # handle constraints
     if(nrow(object@con.jac) > 0L) {
         H <- object@con.jac
         inactive.idx <- attr(H, "inactive.idx")
@@ -27,10 +28,6 @@ Nvcov.standard <- function(object, samplestats=NULL, data=NULL, estimator="ML",
             lambda <- lambda[-inactive.idx]
         }
         if(nrow(H) > 0L) {
-            #NVarCov <- ( E.inv - E.inv %*% t(H) %*% 
-            #                     solve(H %*% E.inv %*% t(H)) %*%
-            #                     H %*% E.inv )
-            H1 <- matrix(0,ncol(E), ncol(E))
             H0 <- matrix(0,nrow(H),nrow(H))
             H10 <- matrix(0, ncol(E), nrow(H))
             DL <- 2*diag(lambda, nrow(H), nrow(H))
@@ -46,11 +43,15 @@ Nvcov.standard <- function(object, samplestats=NULL, data=NULL, estimator="ML",
         NVarCov <- solve(E)
     }
 
+    if(estimator == "PML") {
+        NVarCov <- NVarCov * samplestats@ntotal
+    }
+
     NVarCov
 }
 
 Nvcov.bootstrap <- function(object, samplestats=NULL, options=NULL, data=NULL,
-                            partable=NULL, control=list()) {
+                            cache=NULL, partable=NULL, control=list()) {
 
     # number of bootstrap draws
     if(!is.null(options$bootstrap)) {
@@ -92,33 +93,64 @@ Nvcov.bootstrap <- function(object, samplestats=NULL, options=NULL, data=NULL,
     NVarCov
 }
 
-Nvcov.first.order <- function(object, samplestats=NULL, data=NULL) {
+Nvcov.first.order <- function(object, samplestats=NULL, data=NULL,
+                              cache=NULL, estimator="ML") {
 
     B0.group <- vector("list", samplestats@ngroups)
 
-    Sigma.hat <- computeSigmaHat(object); Mu.hat <- computeMuHat(object)
-    Delta <- computeDelta(object)
+    if(estimator == "PML") {
+        Delta <- computeDelta(object)
+        Sigma.hat <- computeSigmaHat(object)
+        TH <- computeTH(object)
+    } else {
+        Sigma.hat <- computeSigmaHat(object); Mu.hat <- computeMuHat(object)
+        Delta <- computeDelta(object)
+    }
 
     for(g in 1:samplestats@ngroups) {
-        B1 <- compute.Bbeta(Sigma.hat=Sigma.hat[[g]], 
-                            Mu.hat=Mu.hat[[g]],
-                            samplestats=samplestats, data=data, group=g)
+        if(estimator == "PML") {
+            # slow approach: compute outer product of case-wise scores
+            SC <- pml_deriv1(Sigma.hat = Sigma.hat[[g]],
+                             TH        = TH[[g]],
+                             th.idx    = object@th.idx[[g]],
+                             num.idx   = object@num.idx[[g]],
+                             X         = data@X[[g]],
+                             cache     = cache,
+                             scores    = TRUE,
+                             negative  = FALSE)
 
-        B0.group[[g]] <- t(Delta[[g]]) %*% B1 %*% Delta[[g]] 
+            # chain rule
+            group.SC <- SC %*% Delta[[g]]
 
-        #if(type=="free.fixed.x" && object@fixed.x && length(object@x.idx)>0) {
-        #    # for resid(., type="standardized")
-        #    idx.all <- which(object$free > 0 | (object$fixed.x > 0 &
-        #                     object$row >= object$col))
-        #    idx.free <- which(object$free > 0)
-        #    idx.x <- which(object$fixed.x > 0 & 
-        #                   object$row >= object$col)
-        #        
-        #    info.free.idx  <- idx.all %in% idx.free
-        #    info.fixed.idx <- idx.all %in% idx.x
-        #    B0.group[[g]][info.fixed.idx, info.free.idx] <- 0
-        #    B0.group[[g]][info.free.idx, info.fixed.idx] <- 0
-        #}
+            # outer product
+            B0.group[[g]] <- crossprod(group.SC)
+
+            # to get NACOV instead of ACOV
+            B0.group[[g]] <- B0.group[[g]] / samplestats@ntotal
+
+            # group weights (if any)
+            #group.dx <- group.w[g] * group.dx 
+        } else {
+            B1 <- compute.Bbeta(Sigma.hat=Sigma.hat[[g]], 
+                                Mu.hat=Mu.hat[[g]],
+                                samplestats=samplestats, data=data, group=g)
+
+            B0.group[[g]] <- t(Delta[[g]]) %*% B1 %*% Delta[[g]] 
+
+            #if(type=="free.fixed.x" && object@fixed.x && length(object@x.idx)>0) {
+            #    # for resid(., type="standardized")
+            #    idx.all <- which(object$free > 0 | (object$fixed.x > 0 &
+            #                     object$row >= object$col))
+            #    idx.free <- which(object$free > 0)
+            #    idx.x <- which(object$fixed.x > 0 & 
+            #                   object$row >= object$col)
+            #        
+            #    info.free.idx  <- idx.all %in% idx.free
+            #    info.fixed.idx <- idx.all %in% idx.x
+            #    B0.group[[g]][info.fixed.idx, info.free.idx] <- 0
+            #    B0.group[[g]][info.free.idx, info.fixed.idx] <- 0
+            #}
+        }
     } # g
 
     if(samplestats@ngroups > 1L) {
@@ -131,14 +163,39 @@ Nvcov.first.order <- function(object, samplestats=NULL, data=NULL) {
         B0 <- B0.group[[1]]
     }
 
-    NVarCov <- solve( B0 )
+    # handle constraints
+    E <- B0
+    if(nrow(object@con.jac) > 0L) {
+        H <- object@con.jac
+        inactive.idx <- attr(H, "inactive.idx")
+        lambda <- object@con.lambda # lagrangean coefs
+        if(length(inactive.idx) > 0L) {
+            H <- H[-inactive.idx,,drop=FALSE]
+            lambda <- lambda[-inactive.idx]
+        }
+        if(nrow(H) > 0L) {
+            H0 <- matrix(0,nrow(H),nrow(H))
+            H10 <- matrix(0, ncol(E), nrow(H))
+            DL <- 2*diag(lambda, nrow(H), nrow(H))
+            E3 <- rbind( cbind(     E,  H10, t(H)),
+                         cbind(t(H10),   DL,  H0),
+                         cbind(     H,   H0,  H0)  )
+            NVarCov <- MASS::ginv(E3)[1:ncol(E), 1:ncol(E)]
+            # FIXME: better include inactive + slacks??
+        } else {
+            NVarCov <- solve(E)
+        }
+    } else {
+        NVarCov <- solve(E)
+    }
+
     attr(NVarCov, "B0") <- B0
     attr(NVarCov, "B0.group") <- B0.group
 
     NVarCov
 }
 
-Nvcov.robust.sem <- function(object, samplestats=NULL, data=NULL,
+Nvcov.robust.sem <- function(object, samplestats=NULL, data=NULL, cache=NULL,
                              estimator = "ML", mimic = "lavaan") {
 
     # compute information matrix
@@ -164,7 +221,32 @@ Nvcov.robust.sem <- function(object, samplestats=NULL, data=NULL,
                                         extra=TRUE) 
         Gamma <- samplestats@NACOV
     }
-    E.inv <- solve(E)
+
+    # handle constraints
+    if(nrow(object@con.jac) > 0L) {
+        H <- object@con.jac
+        inactive.idx <- attr(H, "inactive.idx")
+        lambda <- object@con.lambda # lagrangean coefs
+        if(length(inactive.idx) > 0L) {
+            H <- H[-inactive.idx,,drop=FALSE]
+            lambda <- lambda[-inactive.idx]
+        }
+        if(nrow(H) > 0L) {
+            H0 <- matrix(0,nrow(H),nrow(H))
+            H10 <- matrix(0, ncol(E), nrow(H))
+            DL <- 2*diag(lambda, nrow(H), nrow(H))
+            E3 <- rbind( cbind(     E,  H10, t(H)),
+                         cbind(t(H10),   DL,  H0),
+                         cbind(     H,   H0,  H0)  )
+            E.inv <- MASS::ginv(E3)[1:ncol(E), 1:ncol(E)]
+            # FIXME: better include inactive + slacks??
+        } else {
+            E.inv <- solve(E)
+        }
+    } else {
+        E.inv <- solve(E)
+    }
+
     Delta <- attr(E, "Delta")
     WLS.V <- attr(E, "WLS.V")
 
@@ -189,19 +271,23 @@ Nvcov.robust.sem <- function(object, samplestats=NULL, data=NULL,
 }
 
 Nvcov.robust.huber.white <- function(object, samplestats=NULL, data=NULL,
-                             information="observed") {
+                                     information="observed", cache=NULL, 
+                                     estimator="ML") {
 
     # compute standard Nvcov
     E.inv <- Nvcov.standard(object      = object,
                             samplestats = samplestats,
                             data        = data,
-                            estimator   = "ML",
+                            estimator   = estimator,
+                            cache       = cache,
                             information = information)
 
     # compute first.order Nvcov
     Nvcov <- Nvcov.first.order(object      = object, 
                                samplestats = samplestats,
-                               data        = data)
+                               data        = data,
+                               cache       = cache,
+                               estimator   = estimator)
     B0 <- attr(Nvcov, "B0")
     B0.group <- attr(Nvcov, "B0.group")
 
@@ -216,7 +302,7 @@ Nvcov.robust.huber.white <- function(object, samplestats=NULL, data=NULL,
 
 
 estimateVCOV <- function(object, samplestats, options=NULL, data=NULL, 
-                         partable=NULL, control=list()) {
+                         partable=NULL, cache=NULL, control=list()) {
 
     estimator   <- options$estimator
     likelihood  <- options$likelihood
@@ -238,31 +324,38 @@ estimateVCOV <- function(object, samplestats, options=NULL, data=NULL,
                                        samplestats = samplestats,
                                        data        = data,
                                        estimator   = estimator, 
+                                       cache       = cache,
                                        information = information) )
 
     } else if(se == "first.order") {
         NVarCov <- try( Nvcov.first.order(object      = object,
                                           samplestats = samplestats,
-                                          data        = data) )
+                                          data        = data,
+                                          cache       = cache,
+                                          estimator   = estimator) )
 
     } else if(se == "robust.sem") {
         NVarCov <- try( Nvcov.robust.sem(object      = object,
                                          samplestats = samplestats,
                                          estimator   = estimator,
                                          mimic       = mimic,
+                                         cache       = cache,
                                          data        = data) )
 
     } else if(se == "robust.huber.white") {
         NVarCov <- try( Nvcov.robust.huber.white(object      = object,
                                          samplestats = samplestats,
                                          data        = data,
-                                         information = information) )
+                                         information = information,
+                                         cache       = cache,
+                                         estimator   = estimator) )
 
     } else if(se == "bootstrap") {
         NVarCov <- try( Nvcov.bootstrap(object      = object,
                                         samplestats = samplestats,
                                         options     = options,
                                         data        = data,
+                                        cache       = cache,
                                         partable    = partable,
                                         control     = control) )
     }

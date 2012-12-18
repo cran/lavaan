@@ -33,7 +33,8 @@ simulateData <- function(
                          seed = NULL,
                          empirical = FALSE,
 
-                         return.type = "data.frame"
+                         return.type = "data.frame",
+                         return.fit = FALSE
                         )
 {
     if(!is.null(seed)) set.seed(seed)
@@ -53,10 +54,13 @@ simulateData <- function(
                      auto.fix.single=auto.fix.single,
                      auto.var=auto.var,
                      auto.cov.lv.x=auto.cov.lv.x,
-                     auto.cov.y=auto.cov.y)
+                     auto.cov.y=auto.cov.y,
+                     ngroups=length(sample.nobs))
 
     # fill in any remaining NA values (needed for unstandardize)
-    # 1 for variances, 0 otherwise
+    # 1 for variances and factor loadings, 0 otherwise
+    idx <- which(lav$op == "=~" & is.na(lav$ustart))
+    if(length(idx) > 0L) lav$ustart[idx] <- 1.0
     idx <- which(lav$op == "~~" & is.na(lav$ustart) & lav$lhs == lav$rhs)
     if(length(idx) > 0L) lav$ustart[idx] <- 1.0
     idx <- which(is.na(lav$ustart))
@@ -73,8 +77,15 @@ simulateData <- function(
         # 2. unstandardized latent variables
     }
 
-    # run lavaan to set up the model matrices
-    fit <- lavaan(model=lav, sample.nobs=sample.nobs, ...)
+
+    # basic fit (ignoring thresholds
+    ord.idx <- which(lav$op == "|")
+    if(length(ord.idx) > 0L) {
+        lav.no_ord <- lav[-ord.idx,]
+    } else {
+        lav.no_ord <- lav
+    }
+    fit <- lavaan(model=lav.no_ord, sample.nobs=sample.nobs,  ...)
 
     # the model-implied moments for the population
     Sigma.hat <- computeSigmaHat(fit@Model)
@@ -91,18 +102,33 @@ simulateData <- function(
         # FIXME: change to rmvnorm once we include the library?
         if(is.null(skewness) && is.null(kurtosis)) {
             X[[g]] <- MASS::mvrnorm(n = sample.nobs[g],
-                                    mu = Mu.hat[[1L]],
-                                    Sigma = Sigma.hat[[1L]],
+                                    mu = Mu.hat[[g]],
+                                    Sigma = Sigma.hat[[g]],
                                     empirical = empirical)
         } else {
             # first generate Z
             Z <- ValeMaurelli1983(n        = sample.nobs[g], 
-                                  COR      = cov2cor(Sigma.hat[[1L]]), 
+                                  COR      = cov2cor(Sigma.hat[[g]]), 
                                   skewness = skewness,  # FIXME: per group?
                                   kurtosis = kurtosis)
             # rescale
-            X[[g]] <- scale(Z, center = Mu.hat[[1L]],
-                               scale  = 1/sqrt(diag(Sigma.hat[[1L]])))
+            X[[g]] <- scale(Z, center = Mu.hat[[g]],
+                               scale  = 1/sqrt(diag(Sigma.hat[[g]])))
+        }
+
+        # any categorical variables?
+        ov.ord <- vnames(lav, type="ov.ord", group=g)
+        if(length(ov.ord) > 0L) {
+            ov.names <- vnames(lav, type="ov", group=g)
+            # use thresholds to cut -- after standardization?
+            for(o in ov.ord) {
+                o.idx <- which(o == ov.names)
+                th.idx <- which(lav$op == "|" & lav$lhs == o)
+                th.val <- c(-Inf,sort(lav$ustar[th.idx]),+Inf)
+                # scale!!
+                xz <- scale(X[[g]][,o.idx])
+                X[[g]][,o.idx] <- as.integer(cut(xz, th.val))
+            }
         }
 
         if(return.type == "data.frame") X[[g]] <- as.data.frame(X[[g]])
@@ -128,6 +154,9 @@ simulateData <- function(
         var.names <- vnames(fit@ParTable, type="ov", group=1L)
         if(ngroups > 1L) var.names <- c(var.names, "group")
         names(Data) <- var.names
+        if(return.fit) {
+            attr(Data, "fit") <- fit
+        }
         return(Data)
 
     } else if (return.type == "cov") {

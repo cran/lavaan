@@ -119,7 +119,7 @@ testStatisticYuanBentler <- function(samplestats=samplestats,
         }
         A1.inv <- solve(A1)
 
-        trace.h1[g] <- sum( B1 * t( solve(A1) ) )
+        trace.h1[g] <- sum( B1 * t( A1.inv ) )
         trace.h0[g] <- sum( (B1 %*% Delta[[g]] %*% E.inv %*% t(Delta[[g]])) )
         #trace.UGamma[g] <- (trace.h1[g] - trace.h0[g])
         UG <- (B1 %*% A1.inv) - (B1 %*% Delta[[g]] %*% E.inv %*% t(Delta[[g]]))
@@ -189,8 +189,9 @@ testStatisticYuanBentler.Mplus <- function(samplestats=samplestats,
            
 
 computeTestStatistic <- function(object, partable=NULL, samplestats=NULL, 
-                                 options=NULL, x=NULL, VCOV=NULL,
+                                 options=NULL, x=NULL, VCOV=NULL, cache=NULL,
                                  data=NULL, control=list()) {
+
 
     mimic       <- options$mimic
     test        <- options$test
@@ -214,6 +215,7 @@ computeTestStatistic <- function(object, partable=NULL, samplestats=NULL,
                           stat=as.numeric(NA),
                           stat.group=as.numeric(NA),
                           df=df,
+                          refdist="unknown",
                           pvalue=as.numeric(NA))
         return(TEST)
     }    
@@ -236,18 +238,20 @@ computeTestStatistic <- function(object, partable=NULL, samplestats=NULL,
     } else {
         # for estimator PML, we compute the loglikelihood for the 
         # `unrestricted' model, and then compute the LRT (-2 logl - logl_un)
-        group.fx <- numeric( samplestats@ngroups )
-        for(g in 1:samplestats@ngroups) {
-            group.fx <- estimator.PML(Sigma.hat = samplestats@cov[[g]],
-                                      TH        = samplestats@th[[g]],
-                                      th.idx    = object@th.idx[[g]],
-                                      num.idx   = object@num.idx[[g]],
-                                      X         = data@X[[g]])
-        }
-        chisq.group <- 2 * (fx.group - group.fx) # LRT per group
+        #group.fx <- numeric( samplestats@ngroups )
+        #for(g in 1:samplestats@ngroups) {
+        #    group.fx <- estimator.PML(Sigma.hat = samplestats@cov[[g]],
+        #                              TH        = samplestats@th[[g]],
+        #                              th.idx    = object@th.idx[[g]],
+        #                              num.idx   = object@num.idx[[g]],
+        #                              cache     = cache[[g]],
+        #                              X         = data@X[[g]])
+        #}
+        #chisq.group <- 2 * (fx.group - group.fx) # LRT per group
 
-        cat("model fx = \n"); print(fx.group)
-        cat("unres fx = \n"); print(group.fx)
+        #cat("model fx = \n"); print(fx.group)
+        #cat("unres fx = \n"); print(group.fx)
+        chisq.group <- rep(as.numeric(NA),  samplestats@ngroups)
     }
 
     # check for negative values
@@ -256,23 +260,30 @@ computeTestStatistic <- function(object, partable=NULL, samplestats=NULL,
     # global test statistic
     chisq <- sum(chisq.group)
 
-    # pvalue  ### FIXME: what if df=0? NA? or 1? or 0?
-    pvalue <- 1 - pchisq(chisq, df)
+    # reference distribution: always chi-square, except for the
+    # non-robust version of ULS
+    if(estimator == "ULS") {
+        refdistr <- "unknown"
+        pvalue <- as.numeric(NA)
+    } else {
+        refdistr <- "chisq"
+        # pvalue  ### FIXME: what if df=0? NA? or 1? or 0?
+        pvalue <- 1 - pchisq(chisq, df)
+    }
 
     TEST[[1]] <- list(test="standard",
                       stat=chisq, 
                       stat.group=chisq.group, 
-                      df=df, 
+                      df=df,
+                      refdistr=refdistr,
                       pvalue=pvalue) 
 
     if(df == 0 && test %in% c("satorra.bentler", "yuan.bentler",
                               "mean.var.adjusted", "scaled.shifted")) {
-        TEST[[2]] <- list(test=test,
-                          stat=chisq, 
-                          stat.group=chisq.group,
-                          df=df, 
-                          pvalue=pvalue,
+        TEST[[2]] <- list(test=test, stat=chisq, stat.group=chisq.group,
+                          df=df, refdistr=refdistr, pvalue=pvalue, 
                           scaling.factor=as.numeric(NA))
+        return(TEST)
     }
 
     # some require meanstructure (for now)
@@ -312,7 +323,15 @@ computeTestStatistic <- function(object, partable=NULL, samplestats=NULL,
                                                 estimator=estimator,
                                                 extra=TRUE)
             }
-            E.inv <- solve(E)
+            E.inv <- try(solve(E))
+            if(inherits(E.inv, "try-error")) {
+                TEST[[2]] <- list(test=test, stat=as.numeric(NA), 
+                    stat.group=rep(as.numeric(NA), samplestats@ngroups),
+                    df=df, refdistr=refdistr, pvalue=as.numeric(NA),
+                    scaling.factor=as.numeric(NA))
+                warning("lavaan WARNING: could not compute scaled test statistic\n")
+                return(TEST)                
+            }
             Delta <- attr(E, "Delta")
             WLS.V <- attr(E, "WLS.V")
         }
@@ -326,7 +345,7 @@ computeTestStatistic <- function(object, partable=NULL, samplestats=NULL,
 #                augUser$exo[       idx ] <- 0L
 #                augUser$free[      idx ] <- max(augUser$free) + 1:length(idx)
 #                augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx)
-#                augModel <- Model(user           = augUser,
+#                augModel <- Model(partable       = augUser,
 #                                  start          = getModelParameters(object, type="user"),
 #                                  representation = object@representation,
 #                                  debug          = FALSE)

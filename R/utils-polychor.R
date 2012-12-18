@@ -20,30 +20,33 @@ pc_th <- function(Y, freq=NULL, prop=NULL) {
 
 pc_PI <- function(rho, th.y1, th.y2) {
 
-    TH.Y1 <- c(-Inf, th.y1, Inf); TH.Y2 <- c(-Inf, th.y2, Inf)
-    pTH.Y1 <- pnorm(TH.Y1); rowPI <- pTH.Y1[-1L] - pTH.Y1[-length(TH.Y1)]
-    pTH.Y2 <- pnorm(TH.Y2); colPI <- pTH.Y2[-1L] - pTH.Y2[-length(TH.Y2)]
+    nth.y1 <- length(th.y1); nth.y2 <- length(th.y2)
+    pth.y1 <- pnorm(th.y1);  pth.y2 <- pnorm(th.y2)
 
     # catch special case: rho = 0.0
     if(rho == 0.0) {
+        rowPI <- diff(c(0,pth.y1,1))
+        colPI <- diff(c(0,pth.y2,1))
         PI.ij <- outer(rowPI, colPI)
         return(PI.ij)
     }
+ 
+    # prepare for a single call to pbinorm
+    upper.y <- rep(th.y2, times=rep.int(nth.y1, nth.y2))
+    upper.x <- rep(th.y1, times=ceiling(length(upper.y))/nth.y1)
+    #rho <- rep(rho, length(upper.x)) # only one rho here
 
-    nr <- length(TH.Y1) - 1L; nc <- length(TH.Y2) - 1L
-    PI <- matrix(0, nr, nc)
-    for(i in seq_len(nr-1L)) {
-        for(j in seq_len(nc-1L)) {
-            PI[i,j] <- pbinorm(lower.x=TH.Y1[i-1L+1L], lower.y=TH.Y2[j-1L+1L],
-                               upper.x=TH.Y1[i   +1L], upper.y=TH.Y2[j   +1L],
-                               rho)
-        }
-    }
-    # add last col (rowSums(PI) must correspond with TH.Y1)
-    PI[,nc] <- rowPI - rowSums(PI[,1:(nc-1L),drop=FALSE])
-    # PI[nr,nc] will be wrong at this point, but gets overridden
-    # add last row (colSums(PI) must correspond with TH.Y2)
-    PI[nr,] <- colPI - colSums(PI[1:(nr-1L),,drop=FALSE])
+    BI <- pbivnorm:::pbivnorm(x=upper.x, y=upper.y, rho=rho)
+    #BI <- pbinorm1(upper.x=upper.x, upper.y=upper.y, rho=rho)
+    dim(BI) <- c(nth.y1, nth.y2)
+    BI <- rbind(0, BI, pth.y2, deparse.level = 0)
+    BI <- cbind(0, BI, c(0, pth.y1, 1), deparse.level = 0)
+
+
+
+    # get probabilities
+    nr <- nrow(BI); nc <- ncol(BI)
+    PI <- BI[-1L,-1L] - BI[-1L,-nc] - BI[-nr,-1L] + BI[-nr,-nc]
 
     # all elements should be strictly positive
     PI[PI < .Machine$double.eps] <- .Machine$double.eps
@@ -310,6 +313,31 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
     rho <- tanh(out$par)
 
     rho
+}
+
+pc_cor_gradient_noexo <- function(Y1, Y2, rho, th.y1=NULL, th.y2=NULL, 
+                                  freq=NULL) {
+
+    R <- sqrt(1-rho^2)
+    TH.Y1 <- c(-Inf, th.y1, Inf); TH.Y2 <- c(-Inf, th.y2, Inf)
+    dth.y1 <- dnorm(th.y1); dth.y2 <- dnorm(th.y2)
+    if(is.null(freq)) freq <- pc_freq(Y1, Y2)
+
+    # rho
+    PI  <- pc_PI(rho, th.y1, th.y2)
+    phi <- pc_PHI(rho, th.y1, th.y2)
+    dx.rho <- sum(freq/PI * phi)
+
+    # th.y2
+    PI.XY.inv <- 1/PI[ cbind(Y1,Y2) ]
+    dx.th.y2 <- matrix(0, length(Y2), length(th.y2))
+    for(m in 1:length(th.y2)) {
+        ki  <- dth.y2[m] * pnorm((TH.Y1[Y1+1L   ]-rho*th.y2[m])/R)
+        ki1 <- dth.y2[m] * pnorm((TH.Y1[Y1+1L-1L]-rho*th.y2[m])/R)
+        DpiDth <- ifelse(Y2 == m, (ki - ki1), ifelse(Y2 == m+1, (-ki + ki1), 0))
+        dx.th.y2[,m] <- PI.XY.inv * DpiDth
+    }
+
 }
 
 pc_cor_scores <- function(Y1, Y2, eXo=NULL, rho, fit.y1=NULL, fit.y2=NULL,

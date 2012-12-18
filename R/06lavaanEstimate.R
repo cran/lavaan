@@ -132,7 +132,7 @@ x2GLIST <- function(object, x=NULL, type="free") {
     GLIST
 }
 
-computeSigmaHat <- function(object, GLIST=NULL, extra=FALSE) {
+computeSigmaHat <- function(object, GLIST=NULL, extra=FALSE, debug=FALSE) {
 
     # state or final?
     if(is.null(GLIST)) GLIST <- object@GLIST
@@ -157,12 +157,17 @@ computeSigmaHat <- function(object, GLIST=NULL, extra=FALSE) {
         } else {
             stop("only representation LISREL has been implemented for now")
         }
+        if(debug) print(Sigma.hat[[g]])
 
         if(extra) {
             # check if matrix is positive definite
             ev <- eigen(Sigma.hat[[g]], symmetric=TRUE, only.values=TRUE)$values
-            if(any(ev < 0)) {
+            if(any(ev < .Machine$double.eps) || sum(ev) == 0) {
+                Sigma.hat.inv <-  MASS:::ginv(Sigma.hat[[g]])
+                Sigma.hat.log.det <- log(.Machine$double.eps)
                 attr(Sigma.hat[[g]], "po") <- FALSE
+                attr(Sigma.hat[[g]], "inv") <- Sigma.hat.inv
+                attr(Sigma.hat[[g]], "log.det") <- Sigma.hat.log.det
             } else {
                 ## FIXME
                 ## since we already do an 'eigen' decomposition, we should
@@ -326,18 +331,16 @@ computeETA <- function(object, GLIST=NULL, samplestats=NULL) {
     # return a list
     ETA <- vector("list", length=ngroups)
 
-    # compute TH for each group
+    # compute ETA for each group
     for(g in 1:ngroups) {
         # which mm belong to group g?
         mm.in.group <- 1:nmat[g] + cumsum(c(0,nmat))[g]
         MLIST <- GLIST[ mm.in.group ]
 
         cov.x <- samplestats@cov.x[[g]]
-        num.idx <- object@num.idx[[g]]
 
         if(representation == "LISREL") {
-            ETA.g <- computeETA.LISREL(MLIST = MLIST, cov.x = cov.x,
-                                       num.idx = num.idx)
+            ETA.g <- computeETA.LISREL(MLIST = MLIST, cov.x = cov.x)
         } else {
             stop("only representation LISREL has been implemented for now")
         }
@@ -348,9 +351,43 @@ computeETA <- function(object, GLIST=NULL, samplestats=NULL) {
     ETA
 }
 
+# COV: observed+latent variances variances/covariances
+computeCOV <- function(object, GLIST=NULL, samplestats=NULL) {
+    # state or final?
+    if(is.null(GLIST)) GLIST <- object@GLIST
+
+    ngroups        <- object@ngroups
+    nmat           <- object@nmat
+    representation <- object@representation
+
+    # return a list
+    COV <- vector("list", length=ngroups)
+
+    # compute COV for each group
+    for(g in 1:ngroups) {
+        # which mm belong to group g?
+        mm.in.group <- 1:nmat[g] + cumsum(c(0,nmat))[g]
+        MLIST <- GLIST[ mm.in.group ]
+
+        cov.x <- samplestats@cov.x[[g]]
+
+        if(representation == "LISREL") {
+            COV.g <- computeCOV.LISREL(MLIST = MLIST, cov.x = cov.x)
+        } else {
+            stop("only representation LISREL has been implemented for now")
+        }
+
+        COV[[g]] <- COV.g
+    }
+
+    COV
+}
+
 computeObjective <- function(object, GLIST=NULL, 
                              samplestats=NULL, X = NULL,
-                             estimator="ML", verbose=FALSE, forcePD=TRUE) {
+                             cache=NULL,
+                             estimator="ML", verbose=FALSE, forcePD=TRUE,
+                             debug=FALSE) {
 
     # state or final?
     if(is.null(GLIST)) GLIST <- object@GLIST
@@ -370,6 +407,7 @@ computeObjective <- function(object, GLIST=NULL,
 
     # compute moments for all groups
     Sigma.hat <- computeSigmaHat(object, GLIST=GLIST, extra=(estimator=="ML"))
+    if(debug) print(Sigma.hat)
     if(meanstructure && !categorical) {
         Mu.hat <- computeMuHat(object, GLIST=GLIST)
     } else if(categorical) {
@@ -443,12 +481,19 @@ computeObjective <- function(object, GLIST=NULL,
                                       WLS.obs = samplestats@WLS.obs[[g]], 
                                       WLS.V=samplestats@WLS.V[[g]])  
         } else if(estimator == "PML") {
+
+            #cat("DEBUG!\n")
+            #print(getModelParameters(object, GLIST=GLIST))
+            #print(Sigma.hat[[g]])
+            #print(TH[[g]])
+            #cat("*****\n")
             # Pairwise maximum likelihood
             group.fx <- estimator.PML(Sigma.hat = Sigma.hat[[g]],
                                       TH        = TH[[g]],
                                       th.idx    = th.idx[[g]],
                                       num.idx   = num.idx[[g]],
-                                      X         = X[[g]])
+                                      X         = X[[g]],
+                                      cache     = cache[[g]])
         } else {
             stop("unsupported estimator: ", estimator)
         }
@@ -666,10 +711,10 @@ computeOmega <- function(Sigma.hat=NULL, Mu.hat=NULL,
             if(attr(Sigma.hat[[g]], "po") == FALSE) {
                 # FIXME: WHAT IS THE BEST THING TO DO HERE??
                 # CURRENTLY: stop
-                stop("computeGradient: Sigma.hat is not positive definite\n")
+                warning("computeGradient: Sigma.hat is not positive definite\n")
                 #Sigma.hat[[g]] <- force.pd(Sigma.hat[[g]])
-                #Sigma.hat.inv <- inv.chol(Sigma.hat[[g]], logdet=TRUE)
-                #Sigma.hat.log.det <- attr(Sigma.hat.inv, "logdet")
+                Sigma.hat.inv <- MASS:::ginv(Sigma.hat[[g]])
+                Sigma.hat.log.det <- log(.Machine$double.eps)
             } else {
                 Sigma.hat.inv <-  attr(Sigma.hat[[g]], "inv")
                 Sigma.hat.log.det <- attr(Sigma.hat[[g]], "log.det")
@@ -743,7 +788,7 @@ computeOmega <- function(Sigma.hat=NULL, Mu.hat=NULL,
 
 
 computeGradient <- function(object, GLIST=NULL, samplestats=NULL, 
-                            X=NULL, type="free", 
+                            X=NULL, cache=NULL, type="free", 
                             estimator="ML", verbose=FALSE, forcePD=TRUE, 
                             group.weight=TRUE, constraints=TRUE,
                             Delta=NULL) {
@@ -909,16 +954,23 @@ computeGradient <- function(object, GLIST=NULL, samplestats=NULL,
 
         for(g in 1:samplestats@ngroups) {
 
+            #print(GLIST)
+            #print(getModelParameters(object, GLIST=GLIST))
+            #print(Sigma.hat[[g]])
+            #print(TH[[g]])
+            #cat("*****\n")
+
             # compute partial derivative of logLik with respect to 
             # thresholds/means, slopes, variances, correlations
             d1 <- pml_deriv1(Sigma.hat = Sigma.hat[[g]],
                              TH        = TH[[g]],
                              th.idx    = th.idx[[g]],
                              num.idx   = num.idx[[g]],
-                             X         = X[[g]])
+                             X         = X[[g]],
+                             cache     = cache[[g]])
 
             # chain rule
-            group.dx <- t(d1) %*% Delta[[g]]
+            group.dx <- as.numeric(t(d1) %*% Delta[[g]])
 
             # group weights (if any)
             group.dx <- group.w[g] * group.dx
@@ -940,11 +992,12 @@ computeGradient <- function(object, GLIST=NULL, samplestats=NULL,
 
 
 estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE, 
-                          options=NULL, control=list()) {
+                          options=NULL, cache=list(), control=list()) {
 
     estimator     <- options$estimator
     verbose       <- options$verbose
     debug         <- options$debug
+    ngroups       <- samplestats@ngroups
 
     if(samplestats@missing.flag) { 
         group.weight <- FALSE
@@ -973,6 +1026,7 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
 
         fx <- computeObjective(object, GLIST=GLIST, 
                                samplestats=samplestats, X=X,
+                               cache=cache,
                                estimator=estimator, verbose=verbose,
                                forcePD=forcePD)	
         if(debug || verbose) { 
@@ -1001,6 +1055,7 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
 
         dx <- computeGradient(object, GLIST=GLIST, samplestats=samplestats,
                               X=X,
+                              cache=cache,
                               type="free", 
                               group.weight=group.weight, ### check me!!
                               estimator=estimator,
@@ -1050,6 +1105,29 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
     if(debug) {
         cat("start.unco = ", getModelParameters(object, type="unco"), "\n")
         cat("start.x = ", start.x, "\n")
+    }
+
+    # check if the initial values produce a positive definite Sigma
+    # to begin with -- but only for estimator="ML"
+    if(estimator == "ML") {
+        Sigma.hat <- computeSigmaHat(object, extra=TRUE, debug=options$debug)
+        for(g in 1:ngroups) {
+            if(!attr(Sigma.hat[[g]], "po")) {
+                group.txt <- ifelse(ngroups > 1, 
+                                    paste("in group",g,".",sep=""), ".")
+                if(debug) print(Sigma.hat[[g]])
+                stop("lavaan ERROR: initial model-implied matrix (Sigma) is not positive definite; check your model and/or starting parameters", group.txt)
+                # FIXME: should we stop here?? or try anyway?
+                x <- start.x
+                fx <- as.numeric(NA)
+                attr(fx, "fx.group") <- rep(as.numeric(NA), ngroups)
+                attr(x, "converged")  <- FALSE
+                attr(x, "iterations") <- 0L
+                attr(x, "control")    <- control
+                attr(x, "fx")         <- fx
+                return(x)
+            }
+        }
     }
 
     # scaling factors

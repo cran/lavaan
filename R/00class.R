@@ -40,6 +40,7 @@ setClass("lavSampleStats",         # sample moments
         th.names="list",           # threshold names
         slopes="list",             # slopes exo
         cov.x="list",              # variance/covariance exo
+        bifreq="list",             # bivariate frequency tables
 
         nobs="list",               # effective number of obs (per group)
         ntotal="integer",          # total number of obs (all groups)
@@ -136,6 +137,7 @@ setClass("lavaan",
         Data        = "lavData",         # full data
         SampleStats = "lavSampleStats",  # sample statistics
         Model       = "Model",           # internal matrix representation
+        Cache       = "list",            # housekeeping stuff
         Fit         = "Fit"              # fitted results
     ) 
 )
