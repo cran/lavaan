@@ -275,7 +275,7 @@ getDataFull <- function(data          = NULL,          # data.frame
     }
 
 
-    # here, we now for sure all ov.names exist in the data.frame
+    # here, we know for sure all ov.names exist in the data.frame
     # create varTable
     ov <- varTable(data, ov.names = ov.names, ov.names.x = ov.names.x, 
                    as.data.frame. = FALSE)
@@ -287,6 +287,13 @@ getDataFull <- function(data          = NULL,          # data.frame
         if(any(f.names %in% unlist(ov.names)))
             warning(paste("lavaan WARNING: unordered factor(s) detected in data:", paste(f.names, collapse=" ")))
     }
+    # check for ordered exogenous variables
+    if("ordered" %in% ov$type[ov$name %in% unlist(ov.names.x)]) {
+        f.names <- ov$name[ov$type == "ordered" & 
+                           ov$name %in% unlist(ov.names.x)]
+        if(any(f.names %in% unlist(ov.names.x)))
+            warning(paste("lavaan WARNING: exogenous variable(s) declared as ordered in data:", paste(f.names, collapse=" ")))
+    }
     # check for zero-cases
     idx <- which(ov$nobs == 0L || ov$var == 0)
     if(length(idx) > 0L) {
@@ -296,6 +303,16 @@ getDataFull <- function(data          = NULL,          # data.frame
         rownames(OV) <- rn
         print(OV)
         stop("lavaan ERROR: some variables have no values (only missings) or no variance")
+    }
+    # check for mix small/large variances
+    if(any(ov$type == "numeric")) {
+        num.idx <- which(ov$type == "numeric")
+        min.var <- min(ov$var[num.idx])
+        max.var <- max(ov$var[num.idx])
+        rel.var <- max.var/min.var
+        if(rel.var > 100 && !std.ov) {
+            warning("lavaan WARNING: some observed variances are (at least) a factor 100 times larger than others; please rescale")
+        }
     }
 
     # prepare empty list for data.matrix per group

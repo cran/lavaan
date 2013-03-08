@@ -206,8 +206,13 @@ computeTestStatistic <- function(object, partable=NULL, samplestats=NULL,
 
     # handle equality constraints (note: we ignore inequality constraints, 
     # active or not!)
+    # we use the rank of con.jac (even if the constraints are nonlinear)
     if(nrow(object@con.jac) > 0L) {
-        df <- ( df + length(attr(object@con.jac, "ceq.idx")) )
+        ceq.idx <- attr(object@con.jac, "ceq.idx")
+        if(length(ceq.idx) > 0L) {
+            neq <- qr(object@con.jac[ceq.idx,,drop=FALSE])$rank
+            df <- df + neq
+        }
     }
 
     if(test == "none") {
@@ -323,7 +328,7 @@ computeTestStatistic <- function(object, partable=NULL, samplestats=NULL,
                                                 estimator=estimator,
                                                 extra=TRUE)
             }
-            E.inv <- try(solve(E))
+            E.inv <- try(solve(E), silent=TRUE)
             if(inherits(E.inv, "try-error")) {
                 TEST[[2]] <- list(test=test, stat=as.numeric(NA), 
                     stat.group=rep(as.numeric(NA), samplestats@ngroups),

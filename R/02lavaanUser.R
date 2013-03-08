@@ -389,6 +389,14 @@ parseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
         print(model[idx.wrong])
         stop("lavaan ERROR: syntax error in lavaan model syntax")
     }
+
+    # but perhaps we have a '+' as the first character?
+    idx.wrong <- which(grepl("^\\+", model))
+    if(length(idx.wrong) > 0) {
+        cat("lavaan: some formula(s) start with a plus (+) sign:\n")
+        print(model[idx.wrong])
+        stop("lavaan ERROR: syntax error in lavaan model syntax")
+    }
   
   
     # main operation: flatten formulas into single bivariate pieces
@@ -508,6 +516,10 @@ parseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
         }
     
         # 4. parse rhs (as rhs of a single-sided formula)
+
+        # new 0.5-12: before we do this, replace '0.2?' by 'start(0.2)*'
+        # requested by the simsem folks
+        rhs <- gsub('([0-9]*\\.*[0-9]*)\\?',"start(\\1)\\*",rhs)
         rhs.formula <- as.formula(paste("~",rhs))
         out <- parse.rhs(rhs=rhs.formula[[2L]],op=op)
     

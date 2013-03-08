@@ -37,6 +37,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                    sample.cov.rescale = "default",
                    sample.mean        = NULL,
                    sample.nobs        = NULL,
+                   ridge              = 1e-5,
 
                    # multiple groups
                    group              = NULL,
@@ -234,6 +235,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         lavaanOptions$se <- "none"; lavaanOptions$test <- "none"
     } else if(lavaanData@data.type == "moment") {
         # catch here some options that will not work with moments
+        if(lavaanOptions$se == "bootstrap") {
+            stop("lavaan ERROR: bootstrapping requires full data")
+        }
         if(estimator %in% c("MLM", "MLMV", "MLR", "ULSM", "ULSMV") &&
            is.null(NACOV)) {
             stop("lavaan ERROR: estimator ", estimator, " requires full data or user-provided NACOV")
@@ -338,6 +342,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                        missing.h1    = (lavaanOptions$missing != "listwise"),
                        WLS.V         = WLS.V,
                        NACOV         = NACOV,
+                       ridge         = ridge,
+                       debug         = lavaanOptions$debug,
                        verbose       = lavaanOptions$verbose)
                                                  
     } else if(lavaanData@data.type == "moment") {
@@ -351,15 +357,20 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                            meanstructure = lavaanOptions$meanstructure,
                            WLS.V         = WLS.V,
                            NACOV         = NACOV,
+                           ridge         = ridge,
                            rescale       = lavaanOptions$sample.cov.rescale)
-                           
     } else {
         # no data
+        th.idx <- vector("list", length=lavaanData@ngroups)
+        for(g in 1:lavaanData@ngroups) {
+            th.idx[[g]] <- getIDX(lavaanParTable, type="th")
+        }
         lavaanSampleStats <- new("lavSampleStats", ngroups=lavaanData@ngroups,
                                  nobs=as.list(rep(0L, lavaanData@ngroups)),
-                                 cov.x=vector("list", length=lavaanData@ngroups),
+                                 cov.x=vector("list",length=lavaanData@ngroups),
+                                 th.idx=th.idx,
                                  missing.flag=FALSE)
-    } 
+    }
     timing$Sample <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
     if(debug) print(str(lavaanSampleStats))
@@ -395,6 +406,17 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                   debug          = lavaanOptions$debug)
         timing$Model <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
+  
+        # if no data, call setModelParameters once (for categorical case)
+        if(lavaanData@data.type == "none" && lavaanModel@categorical) {
+            lavaanModel <- setModelParameters(lavaanModel, 
+                                              x=getModelParameters(lavaanModel))
+        }
+    }
+
+    # check for categorical
+    if(lavaanModel@categorical && lavaanOptions$se == "bootstrap") {
+        stop("lavaan ERROR: bootstrap not supported (yet) for categorical data")
     }
 
     # prepare cache -- stuff needed for estimation, but also post-estimation
@@ -484,7 +506,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 attr(x, "control") <- control
                 FX <- try(computeObjective(lavaanModel, 
                                            samplestats = lavaanSampleStats,
-                                           estimator = lavaanOptions$estimator))
+                                           estimator = lavaanOptions$estimator),
+                          silent=TRUE)
                 if(inherits(FX, "try-error")) {
                     # eg non-full rank design matrix
                     FX <- as.numeric(NA)
@@ -610,7 +633,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         attr(x, "control") <- control
         attr(x, "fx") <- 
             computeObjective(lavaanModel, samplestats = lavaanSampleStats, 
-                             X=lavaanData@X,
+                             X=lavaanData@X, cache = lavaanCache,
                              estimator = lavaanOptions$estimator)
     }
     timing$Estimate <- (proc.time()[3] - start.time)
@@ -673,7 +696,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             warning("lavaan WARNING: some estimated variances are negative")
         
         # 2. is cov.lv (PSI) positive definite?
-        if(length(vnames(lavaanParTable, type="lv")) > 0L) {
+        if(length(vnames(lavaanParTable, type="lv.regular")) > 0L) {
             ETA <- computeETA(lavaanModel, samplestats=lavaanSampleStats)
             for(g in 1:lavaanData@ngroups) {
                 txt.group <- ifelse(lavaanData@ngroups > 1L,
@@ -708,7 +731,8 @@ cfa <- sem <- function(model = NULL, data = NULL,
     orthogonal = FALSE, std.lv = FALSE, std.ov = FALSE,
     missing = "default", ordered = NULL, 
     sample.cov = NULL, sample.cov.rescale = "default", sample.mean = NULL,
-    sample.nobs = NULL, group = NULL, group.label = NULL,
+    sample.nobs = NULL, ridge = 1e-5,
+    group = NULL, group.label = NULL,
     group.equal = "", group.partial = "", cluster = NULL, constraints = "",
     estimator = "default", likelihood = "default", 
     information = "default", se = "default", test = "default",
@@ -740,7 +764,8 @@ growth <- function(model = NULL, data = NULL,
     orthogonal = FALSE, std.lv = FALSE, std.ov = FALSE,
     missing = "default", ordered = NULL, 
     sample.cov = NULL, sample.cov.rescale = "default", sample.mean = NULL,
-    sample.nobs = NULL, group = NULL, group.label = NULL,
+    sample.nobs = NULL, ridge = 1e-5,
+    group = NULL, group.label = NULL,
     group.equal = "", group.partial = "", cluster = NULL, constraints = "",
     estimator = "default", likelihood = "default", 
     information = "default", se = "default", test = "default",

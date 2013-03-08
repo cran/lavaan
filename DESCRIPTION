@@ -1,6 +1,6 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.5-11
+Version: 0.5-12
 Authors@R: c(person("Yves", "Rosseel", role = c("aut", "cre"), email =
         "Yves.Rosseel@UGent.be"), person("Daniel", "Oberski", role =
         "ctb", email = "daniel.oberski@gmail.com"), person("Jarrett",
@@ -22,11 +22,12 @@ Suggests: psych, qgraph, semTools, simsem, lavaan.survey
 License: GPL (>= 2)
 LazyData: yes
 URL: http://lavaan.org
-Packaged: 2012-12-18 14:39:14 UTC; yves
+Packaged: 2013-03-08 15:15:43 UTC; yves
 Author: Yves Rosseel [aut, cre], Daniel Oberski [ctb], Jarrett Byrnes
         [ctb], Leonard Vanbrabant [ctb], Victoria Savalei [ctb], Ed
         Merkle [ctb], Michael Hallquist [ctb], Mijke Rhemtulla [ctb],
         Myrsini Katsikatsou [ctb]
 Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
+NeedsCompilation: no
 Repository: CRAN
-Date/Publication: 2012-12-19 07:27:14
+Date/Publication: 2013-03-08 17:04:27
