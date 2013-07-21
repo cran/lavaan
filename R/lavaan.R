@@ -113,7 +113,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         categorical <- TRUE
     } else if(!is.null(data) && length(ordered) > 0L) {
         categorical <- TRUE
-    } else if(lav_dataframe_check_ordered(frame=data, ov.names=ov.names.y)) {
+    } else if(is.data.frame(data) && 
+              lav_dataframe_check_ordered(frame=data, ov.names=ov.names.y)) {
         categorical <- TRUE
     } else {
         categorical <- FALSE
@@ -152,6 +153,11 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     # some additional checks for estimator="PML"
     if(lavaanOptions$estimator == "PML") {
         ov.types <- lav_dataframe_check_vartype(data, ov.names=ov.names.y)
+        # ordered argument?
+        if(length(ordered) > 0L) {
+            ord.idx <- which(ov.names.y %in% ordered)
+            ov.types[ord.idx] <- "ordered"
+        }
         # 0. at least some variables must be ordinal
         if(!any(ov.types == "ordered")) {
             stop("lavaan ERROR: estimator=\"PML\" is only available if some variables are ordinal")
@@ -291,20 +297,18 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     # 2b. change meanstructure flag?
     if(any(lavaanParTable$op == "~1")) lavaanOptions$meanstructure <- TRUE
 
-    # 2c. prepare constraints functions
+    # 2c. get partable attributes
+    pta <- lav_partable_attributes(lavaanParTable)
     timing$ParTable <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
     # 3. get sample statistics
-    # here we know the number of groups!
-    ov.names <- lapply(as.list(1:lavaanData@ngroups),
-                       function(x) vnames(lavaanParTable, type="ov", x))
-
     if(!is.null(slotSampleStats)) {
         lavaanSampleStats <- slotSampleStats
     } else if(lavaanData@data.type == "full") {
         lavaanSampleStats <- lavSampleStatsFromData(
                        Data          = lavaanData,
+                       missing       = lavaanOptions$missing,
                        rescale       = (lavaanOptions$estimator == "ML" &&
                                         lavaanOptions$likelihood == "normal"),
                        estimator     = lavaanOptions$estimator,
@@ -322,7 +326,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                            sample.cov    = sample.cov,
                            sample.mean   = sample.mean,
                            sample.nobs   = sample.nobs,
-                           ov.names      = ov.names,
+                           ov.names      = pta$vnames$ov,
                            estimator     = lavaanOptions$estimator,
                            mimic         = lavaanOptions$mimic,
                            meanstructure = lavaanOptions$meanstructure,
@@ -386,9 +390,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     }
 
     # check for categorical
-    if(lavaanModel@categorical && lavaanOptions$se == "bootstrap") {
-        stop("lavaan ERROR: bootstrap not supported (yet) for categorical data")
-    }
+    #if(lavaanModel@categorical && lavaanOptions$se == "bootstrap") {
+    #    stop("lavaan ERROR: bootstrap not supported (yet) for categorical data")
+    #}
 
     # prepare cache -- stuff needed for estimation, but also post-estimation
     lavaanCache <- vector("list", length=lavaanData@ngroups)
@@ -487,7 +491,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                     attr(x, "fx") <- as.numeric(NA)
                 } 
                 attr(x, "fx") <- FX
-            } else if(checkLinearConstraints(lavaanModel) == TRUE) {
+            } else if(lav_constraints_check_linear(lavaanModel) == TRUE) {
 
                 require(quadprog)
 
@@ -662,22 +666,34 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if(attr(x, "converged")) { # only if estimation was successful
         # 1. check for Heywood cases, negative (residual) variances, ...
         var.idx <- which(lavaanParTable$op == "~~" &
+                         !lavaanParTable$lhs %in% unlist(pta$vnames$ov.ord) &
                          lavaanParTable$lhs == lavaanParTable$rhs)
         if(length(var.idx) > 0L && any(lavaanFit@est[var.idx] < 0.0))
             warning("lavaan WARNING: some estimated variances are negative")
         
         # 2. is cov.lv (PSI) positive definite?
         if(length(vnames(lavaanParTable, type="lv.regular")) > 0L) {
-            ETA <- computeETA(lavaanModel, samplestats=lavaanSampleStats)
+            ETA <- computeVETA(lavaanModel, samplestats=lavaanSampleStats)
             for(g in 1:lavaanData@ngroups) {
                 txt.group <- ifelse(lavaanData@ngroups > 1L,
-                                    paste("in group", g, ".", sep=""), ".")
+                                    paste("in group", g, ".", sep=""), "")
                 eigvals <- eigen(ETA[[g]], symmetric=TRUE, 
                                  only.values=TRUE)$values
-                if(any(eigvals < 0))
+                if(any(eigvals < -1 * .Machine$double.eps^(3/4)))
                     warning("lavaan WARNING: covariance matrix of latent variables is not positive definite;", txt.group, " use inspect(fit,\"cov.lv\") to investigate.")
             }
         }
+
+        # 3. is THETA positive definite
+        THETA <- computeTHETA(lavaanModel)
+        for(g in 1:lavaanData@ngroups) {
+                txt.group <- ifelse(lavaanData@ngroups > 1L,
+                                    paste("in group", g, ".", sep=""), "")
+                eigvals <- eigen(THETA[[g]], symmetric=TRUE,
+                                 only.values=TRUE)$values
+                if(any(eigvals < -1 * .Machine$double.eps^(3/4)))
+                    warning("lavaan WARNING: residual covariance matrix is not positive definite;", txt.group, " use inspect(fit,\"cov.ov\") to investigate.")
+            }
     }
 
     # 10. construct lavaan object
@@ -686,6 +702,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                   timing       = timing,                 # list
                   Options      = lavaanOptions,          # list
                   ParTable     = lavaanParTable,         # list
+                  pta          = pta,                    # list
                   Data         = lavaanData,             # S4 class
                   SampleStats  = lavaanSampleStats,      # S4 class
                   Model        = lavaanModel,            # S4 class

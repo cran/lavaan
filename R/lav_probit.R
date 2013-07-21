@@ -59,6 +59,7 @@ contains = "lavML",
 fields = list(y = "integer", X = "matrix", 
               nobs = "integer", nexo = "integer", nth = "integer", 
               weights = "numeric", offset = "numeric",
+              missing.values = "logical", missing.idx = "integer",
               Y1 = "matrix", Y2 = "matrix",
               th.idx = "integer", slope.idx = "integer",
               # cache:
@@ -80,6 +81,12 @@ initialize = function(y, X=NULL, y.levels=length(tabulate(y)),
         nexo <<- 0L
     } else {
         X <<- unname(X); nexo <<- ncol(X)
+    }
+    if(any(is.na(y)) || (!is.null(X) && any(is.na(X)) )) {
+        missing.values <<- TRUE
+        missing.idx <<- which(apply(cbind(y, X), 1, function(x) any(is.na(x))))
+    } else {
+        missing.values <<- FALSE
     }
 
     # weights and offset
@@ -167,23 +174,49 @@ hessian = function(x) {
     if(length(probits) == 0L) lik(); scores() # not initialized
     gnorm <- function(x) { -x * dnorm(x) }
     wtpr <- weights/probits
-
     dxa <- Y1*p1 - Y2*p2
-    dx2.alpha <- -1 * (crossprod(dxa, (dxa * wtpr / probits)) -
-                        ( crossprod(Y1 * gnorm(z1) * wtpr, Y1) -
-                          crossprod(Y2 * gnorm(z2) * wtpr, Y2) ) )
+
+    # handle missing values -- FIXME!!! better approach?
+    # we could also adapt crossprod, to work pairwise...
+    if(missing.values) {
+        .probits <- probits[-missing.idx]
+        .wtpr <- wtpr[-missing.idx]
+        .dxa <- dxa[-missing.idx,,drop=FALSE]
+        .Y1 <- Y1[-missing.idx,,drop=FALSE]
+        .Y2 <- Y2[-missing.idx,,drop=FALSE]
+        .z1 <- z1[-missing.idx]
+        .z2 <- z2[-missing.idx]
+        .X <- X[-missing.idx,,drop=FALSE] 
+        .p1 <- p1[-missing.idx]
+        .p2 <- p2[-missing.idx]
+    } else {
+        .probits <- probits
+        .wtpr <- wtpr
+        .dxa <- dxa
+        .Y1 <- Y1
+        .Y2 <- Y2
+        .z1 <- z1
+        .z2 <- z2
+        .X <- X
+        .p1 <- p1
+        .p2 <- p2
+    }
+
+    dx2.alpha <- -1 * (crossprod(.dxa, (.dxa * .wtpr / .probits)) -
+                        ( crossprod(.Y1 * gnorm(.z1) * .wtpr, .Y1) -
+                          crossprod(.Y2 * gnorm(.z2) * .wtpr, .Y2) ) )
 
     # only for empty X
     if(nexo == 0L) return(dx2.alpha)
 
-    dxb <-  X*p1 - X*p2
-    dx2.beta <- -1 * (crossprod(dxb, (dxb * wtpr / probits)) -
-                       ( crossprod(X * gnorm(z1) * wtpr, X) - 
-                         crossprod(X * gnorm(z2) * wtpr, X) ) )
+    dxb <-  .X*.p1 - .X*.p2
+    dx2.beta <- -1 * (crossprod(dxb, (dxb * .wtpr / .probits)) -
+                       ( crossprod(.X * gnorm(.z1) * .wtpr, .X) - 
+                         crossprod(.X * gnorm(.z2) * .wtpr, .X) ) )
 
-    dx.ab <- crossprod(dxa, (dxb * wtpr / probits)) -
-               ( crossprod(Y1 * gnorm(z1) * wtpr, X) -
-                 crossprod(Y2 * gnorm(z2) * wtpr, X) )
+    dx.ab <- crossprod(.dxa, (dxb * .wtpr / .probits)) -
+               ( crossprod(.Y1 * gnorm(.z1) * .wtpr, .X) -
+                 crossprod(.Y2 * gnorm(.z2) * .wtpr, .X) )
 
     rbind( cbind(dx2.alpha,   dx.ab, deparse.level=0),
            cbind(t(dx.ab), dx2.beta, deparse.level=0)  )

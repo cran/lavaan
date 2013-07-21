@@ -31,7 +31,22 @@ lavData <- function(data          = NULL,          # data.frame
 
     # 1) full data
     if(!is.null(data)) {
-        stopifnot(is.data.frame(data)) ## FIXME!! we should also allow matrices
+        if(!is.data.frame(data)) {
+            # is it a matrix?
+            if(is.matrix(data)) {
+                if(nrow(data) == ncol(data)) {
+                    # perhaps it is a covariance matrix?
+                    stop("lavaan WARNING: data argument looks like a covariance matrix; please use the sample.cov argument instead")
+                } else {
+                    # or perhaps it is a data matrix?
+                    warning("lavaan WARNING: data argument has been coerced to a data.frame")
+                    ### FIXME, we should avoid as.data.frame() and handle
+                    ### data matrices directly
+                    data <- as.data.frame(data)
+                }
+            }
+        }
+
         lavData <- getDataFull(data              = data,
                                group             = group,
                                group.label       = group.label,
@@ -42,11 +57,12 @@ lavData <- function(data          = NULL,          # data.frame
                                missing           = missing,
                                warn              = warn,
                                allow.single.case = allow.single.case)
+        sample.cov <- NULL # not needed, but just in case
     }
     
     
     # 2) sample moments
-    else if(!is.null(sample.cov)) {
+    if(is.null(data) && !is.null(sample.cov)) {
         
         # we also need the number of observations (per group)
         if(is.null(sample.nobs))
@@ -126,10 +142,10 @@ lavData <- function(data          = NULL,          # data.frame
                        ov          = ov,
                        missing     = "listwise")
 
-
+    }
 
     # 3) data.type = "none":  both data and sample.cov are NULL
-    } else {
+    if(is.null(data) && is.null(sample.cov)) { 
         if(is.null(sample.nobs)) sample.nobs <- 0L
         sample.nobs <- as.list(sample.nobs)
         ngroups <- length(unlist(sample.nobs))
@@ -317,9 +333,19 @@ getDataFull <- function(data          = NULL,          # data.frame
         print(OV)
         stop("lavaan ERROR: some variables have only 1 observation or no finite variance")
     }
+    # check for ordered variables with only 1 level
+    idx <- which(ov$type == "ordered" & ov$nlev == 1L)
+    if(length(idx) > 0L) {
+        OV <- as.data.frame(ov)
+        rn <- rownames(OV)
+        rn[idx] <- paste(rn[idx], "***", sep="")
+        rownames(OV) <- rn
+        print(OV)
+        stop("lavaan ERROR: ordered variable(s) has/have only 1 level")
+    }
     # check for mix small/large variances (NOT including exo variables)
     if(!std.ov && !allow.single.case && warn && any(ov$type == "numeric")) {
-        num.idx <- which(ov$type == "numeric" & ov$exo == 1L)
+        num.idx <- which(ov$type == "numeric" & ov$exo == 0L)
         if(length(num.idx) > 0L) {
             min.var <- min(ov$var[num.idx])
             max.var <- max(ov$var[num.idx])
@@ -379,10 +405,14 @@ getDataFull <- function(data          = NULL,          # data.frame
         user.ordered.names <- ov$name[ov$type == "ordered" &
                                       ov$user == 1L]
         user.ordered.idx <- which(ov.names[[g]] %in% user.ordered.names)
-        for(i in seq_len(length(user.ordered.idx))) {
-            X[[g]][,i] <- as.numeric(as.factor(X[[g]][,i]))
+        if(length(user.ordered.idx) > 0L) {
+            for(i in user.ordered.idx) {
+                X[[g]][,i] <- as.numeric(as.factor(X[[g]][,i]))
+            }
         }
 
+        ## FIXME: 
+        ## - why also in X? (for samplestats, for now)
         if(length(exo.idx) > 0L) {
             eXo[[g]] <- data.matrix( data[case.idx[[g]], exo.idx, drop=FALSE] )
             dimnames(eXo[[g]]) <- NULL
@@ -399,7 +429,7 @@ getDataFull <- function(data          = NULL,          # data.frame
         }
 
         # missing data
-        if(missing != "listwise") {
+        if(missing == "ml") {
             # get missing patterns
             Mp[[g]] <- getMissingPatterns(X[[g]])
             # checking!

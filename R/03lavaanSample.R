@@ -5,7 +5,9 @@
 
 lavSampleStatsFromData <- function(Data          = NULL,
                                    DataX         = NULL,
+                                   DataeXo       = NULL,
                                    DataOvnames   = NULL,
+                                   DataOvnamesx  = NULL,
                                    DataOv        = NULL,
                                    missing       = "listwise",
                                    rescale       = FALSE,
@@ -28,10 +30,13 @@ lavSampleStatsFromData <- function(Data          = NULL,
         ngroups <- Data@ngroups
         nobs <- Data@nobs
         ov.names <- Data@ov.names
+        ov.names.x <- Data@ov.names.x
         DataOv <- Data@ov
+        eXo <- Data@eXo
     } else if(!is.null(DataX)) {
         stopifnot(is.list(DataX), is.matrix(DataX[[1L]]))
         X <- DataX
+        eXo <- DataeXo
         ngroups <- length(X)
         Mp <- vector("list", length=ngroups)
         nobs <- vector("list", length=ngroups)
@@ -41,7 +46,8 @@ lavSampleStatsFromData <- function(Data          = NULL,
             }
             nobs[[g]] <- nrow(X[[g]])
         }
-        ov.names <- DataOvnames
+        ov.names   <- DataOvnames
+        ov.names.x <- DataOvnamesx
     } else {
         stop("both Data and DataX argument are NULL")
     }
@@ -55,6 +61,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
     th.idx      <- vector("list", length=ngroups)
     th.names    <- vector("list", length=ngroups)
     slopes      <- vector("list", length=ngroups)
+    mean.x      <- vector("list", length=ngroups)
     cov.x       <- vector("list", length=ngroups)
     bifreq      <- vector("list", length=ngroups)
     # extra sample statistics per group
@@ -112,7 +119,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
         ov.types  <- DataOv$type[ match(ov.names[[g]], DataOv$name) ]
         ov.levels <- DataOv$nlev[ match(ov.names[[g]], DataOv$name) ]
         CAT <- list()
-        if(!is.null(Data) && "ordered" %in% ov.types) {
+        if("ordered" %in% ov.types) {
             categorical <- TRUE
             if(estimator %in% c("PML","ML")) {
                 WLS.W <- FALSE
@@ -126,9 +133,10 @@ lavSampleStatsFromData <- function(Data          = NULL,
                               ov.names=ov.names[[g]], 
                               ov.types=ov.types,
                               ov.levels=ov.levels,
-                              ov.names.x=Data@ov.names.x[[g]],
-                              eXo=Data@eXo[[g]], ## FIXME, will not work with bootstrap
+                              ov.names.x=ov.names.x[[g]],
+                              eXo=eXo[[g]],
                               group = g, # for error messages only
+                              missing = missing, # listwise or pairwise?
                               WLS.W = WLS.W,
                               verbose=debug)
             if(verbose) cat("done\n")
@@ -145,6 +153,15 @@ lavSampleStatsFromData <- function(Data          = NULL,
         }
 
         # fill in the other slots
+        if(!is.null(eXo[[g]])) {
+            cov.x[[g]] <- cov(eXo[[g]], use="pairwise")
+            if(rescale) {
+                # we 'transform' the sample cov (divided by n-1) 
+                # to a sample cov divided by 'n'
+                cov.x[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov.x[[g]]
+            }
+            mean.x[[g]] <- colMeans(eXo[[g]])
+        }
         if(categorical) {
             var[[g]]  <- CAT$VAR
             cov[[g]]  <- unname(CAT$COV)
@@ -159,14 +176,6 @@ lavSampleStatsFromData <- function(Data          = NULL,
             th.names[[g]] <- unlist(CAT$TH.NAMES)
 
             slopes[[g]] <- CAT$SLOPES
-            if(!is.null(Data@eXo[[g]])) {
-                cov.x[[g]] <- cov(Data@eXo[[g]], use="pairwise")
-                if(rescale) {
-                    # we 'transform' the sample cov (divided by n-1) 
-                    # to a sample cov divided by 'n'
-                    cov.x[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov.x[[g]]
-                }               
-            }
         } else {
             cov[[g]]  <-   cov(X[[g]], use="pairwise") # must be pairwise
             var[[g]]  <-   diag(cov[[g]])
@@ -339,6 +348,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
                        cov          = cov,
                        var          = var,
                        slopes       = slopes,
+                       mean.x       = mean.x,
                        cov.x        = cov.x,
                        bifreq       = bifreq,
  
@@ -382,8 +392,13 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
 
     # matrix -> list
     if(!is.list(sample.cov)) sample.cov  <- list(sample.cov)
-    if(!is.null(sample.mean) && !is.list(sample.mean))
+    if(!is.null(sample.mean) && !is.list(sample.mean)) {
+        # check if sample.mean is string (between single quotes)
+        if(is.character(sample.mean)) {
+            sample.mean <- char2num(sample.mean)
+        }
         sample.mean <- list(sample.mean)
+    }
 
     # number of groups
     ngroups <- length(sample.cov)
@@ -398,6 +413,7 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
     th.idx      <- vector("list", length=ngroups)
     th.names    <- vector("list", length=ngroups)
     slopes      <- vector("list", length=ngroups)
+    mean.x      <- vector("list", length=ngroups)
     cov.x       <- vector("list", length=ngroups)
     bifreq      <- vector("list", length=ngroups)
     # extra sample statistics per group
@@ -580,6 +596,7 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
                        cov          = cov,
                        var          = var,
                        slopes       = slopes,
+                       mean.x       = mean.x,
                        cov.x        = cov.x,
                        bifreq       = bifreq,
 

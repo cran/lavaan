@@ -87,6 +87,10 @@ Model <- function(partable       = NULL,
     nmat <- unlist(attr(REP, "mmNumber"))
     num.idx <- vector("list", length=ngroups)
     nexo <- integer(ngroups)
+    ov.x.dummy.ov.idx <- vector(mode="list", length=ngroups)
+    ov.x.dummy.lv.idx <- vector(mode="list", length=ngroups)
+    ov.y.dummy.ov.idx <- vector(mode="list", length=ngroups)
+    ov.y.dummy.lv.idx <- vector(mode="list", length=ngroups)
 
     offset <- 0L
     for(g in 1:ngroups) {
@@ -183,23 +187,24 @@ Model <- function(partable       = NULL,
 
             # representation specific stuff
             if(representation == "LISREL" && mmNames[mm] == "lambda") { 
-                ov.dummy.names <- attr(REP, "ov.dummy.names")[[g]]
+                ov.dummy.names.nox <- attr(REP, "ov.dummy.names.nox")[[g]]
+                ov.dummy.names.x   <- attr(REP, "ov.dummy.names.x")[[g]]
+                ov.dummy.names <- c(ov.dummy.names.nox, ov.dummy.names.x)
                 # define dummy latent variables
                 if(length(ov.dummy.names)) {
                     # in this case, lv.names will be extended with the dummys
                     LV.names <- mmDimNames$psi[[1]]
                     row..idx <- match(ov.dummy.names, ov.names)
                     col..idx <- match(ov.dummy.names, LV.names)
+                    # Fix lambda values to 1.0
                     tmp[ cbind(row..idx, col..idx)] <- 1.0
+
+                    ov.x.dummy.ov.idx[[g]] <- match(ov.dummy.names.x,ov.names)
+                    ov.x.dummy.lv.idx[[g]] <- match(ov.dummy.names.x,LV.names)
+                    ov.y.dummy.ov.idx[[g]] <- match(ov.dummy.names.nox,ov.names)
+                    ov.y.dummy.lv.idx[[g]] <- match(ov.dummy.names.nox,LV.names)
                 }
             }
-
-            # representation specific stuff (part 2)
-            #if(representation == "LISREL" && mmNames[mm] == "psi") {
-            #    # this only seems to happen in the categorical case
-            #    idx <- which(diag(tmp) == 0.0)
-            #    diag(tmp)[idx] <- 1.0
-            #}
 
             # representation specific
             if(representation == "LISREL" && mmNames[mm] == "delta") {
@@ -510,7 +515,11 @@ Model <- function(partable       = NULL,
                  cin.function=cin.function,
                  cin.jacobian=cin.jacobian, 
                  nexo=nexo,
-                 fixed.x=fixed.x)
+                 fixed.x=fixed.x,
+                 ov.x.dummy.ov.idx=ov.x.dummy.ov.idx,
+                 ov.x.dummy.lv.idx=ov.x.dummy.lv.idx,
+                 ov.y.dummy.ov.idx=ov.y.dummy.ov.idx,
+                 ov.y.dummy.lv.idx=ov.y.dummy.lv.idx)
 
     if(debug) {
          cat("lavaan DEBUG: lavaanModel\n")

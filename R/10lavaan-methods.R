@@ -1124,6 +1124,8 @@ function(object, what="free") {
               what == "samplestatistics" ||
               what == "sampstat") {
         sampStat(object)
+    } else if(what == "data") {
+        lav_inspect_data(object)
     } else if(what == "rsquare" || 
               what == "r-square" ||
               what == "r2") {
@@ -1148,6 +1150,11 @@ function(object, what="free") {
               what == "modelcor.all" ||
               what == "cor.all") {
         getModelCor(object, labels=TRUE)
+    } else if(what == "theta" ||
+              what == "cov.ov") {
+        getModelTheta(object, labels=TRUE)
+    } else if(what == "cor.ov") {
+        getModelTheta(object, correlation.metric=TRUE, labels=TRUE)
     } else if(what == "converged") {
         object@Fit@converged
     } else {
@@ -1258,7 +1265,7 @@ function(object, labels=TRUE) {
 
 
 setMethod("vcov", "lavaan",
-function(object, labels=TRUE) {
+function(object, labels=TRUE, attributes.=FALSE) {
 
     # check for convergence first!
     if(object@Fit@npar > 0L && !object@Fit@converged)
@@ -1268,14 +1275,25 @@ function(object, labels=TRUE) {
         VarCov <- matrix(0,0,0)
     } else {
         VarCov <- estimateVCOV(object@Model, samplestats=object@SampleStats, 
-                               options=object@Options,
-                               data=object@Data
+                               options=object@Options, data=object@Data,
+                               partable=object@Partable, cache=object@Cache,
+                               control=list()
                               )
     }
 
     if(labels) {
         colnames(VarCov) <- rownames(VarCov) <- 
             getParameterLabels(object@ParTable, type="free")
+    }
+ 
+    if(!attributes.) {
+        attr(VarCov, "E.inv") <- NULL
+        attr(VarCov, "B0") <- NULL
+        attr(VarCov, "B0.group") <- NULL
+        attr(VarCov, "Delta") <- NULL
+        attr(VarCov, "WLS.V") <- NULL
+        attr(VarCov, "BOOT.COEF") <- NULL
+        attr(VarCov, "BOOT.TEST") <- NULL
     }
 
     class(VarCov) <- c("lavaan.matrix.symmetric", "matrix")
@@ -1431,18 +1449,20 @@ function(object, ...) {
 
     # list of models
     mods <- c(list(object), dots[modp])
-    names(mods) <- sapply(as.list(mcall)[c(FALSE, TRUE, modp)], as.character)
+    names(mods) <- sapply(as.list(mcall)[c(FALSE, TRUE, modp)], deparse)
 
-    # put them in order (using number of free parameters)
-    nfreepar <- sapply(mods, function(x) x@Fit@npar)
-    if(any(duplicated(nfreepar))) { ## FIXME: what to do here?
-        # what, same number of free parameters?
-        # maybe, we need to count number of constraints
-        ncon <- sapply(mods, function(x) { nrow(x@Model@con.jac) })
-        nfreepar <- nfreepar - ncon
-    }
+    ## put them in order (using number of free parameters)
+    #nfreepar <- sapply(mods, function(x) x@Fit@npar)
+    #if(any(duplicated(nfreepar))) { ## FIXME: what to do here?
+    #    # what, same number of free parameters?
+    #    # maybe, we need to count number of constraints
+    #    ncon <- sapply(mods, function(x) { nrow(x@Model@con.jac) })
+    #    nfreepar <- nfreepar - ncon
+    #}
 
-    mods <- mods[order(nfreepar, decreasing = TRUE)]
+    # put them in order (using degrees of freedom)
+    ndf <- sapply(mods, function(x) x@Fit@test[[1]]$df)    
+    mods <- mods[order(ndf)]
 
     # here come the checks
     if(TRUE) {
@@ -1781,7 +1801,7 @@ getModelCovLV <- function(object, correlation.metric=FALSE, labels=TRUE) {
     G <- object@Data@ngroups
 
     # compute lv covar
-    OUT <- lavaan:::computeETA(object@Model, samplestats=object@SampleStats)
+    OUT <- lavaan:::computeVETA(object@Model, samplestats=object@SampleStats)
 
     # correlation?
     if(correlation.metric) {
@@ -1794,6 +1814,12 @@ getModelCovLV <- function(object, correlation.metric=FALSE, labels=TRUE) {
         for(g in 1:G) {
             psi.idx <- psi.group[g]
             NAMES <- object@Model@dimNames[[psi.idx]][[1L]]
+            # remove all dummy latent variables
+            lv.idx <- c(object@Model@ov.y.dummy.lv.idx[[g]],
+                        object@Model@ov.x.dummy.lv.idx[[g]])
+            if(!is.null(lv.idx)) {
+                NAMES <- NAMES[-lv.idx]
+            }
             colnames(OUT[[g]]) <- rownames(OUT[[g]]) <- NAMES
             class(OUT[[g]]) <- c("lavaan.matrix.symmetric", "matrix")
         }
@@ -1835,6 +1861,60 @@ getModelCov <- function(object, correlation.metric=FALSE, labels=TRUE) {
                        object@Model@dimNames[[psi.idx]][[1L]])
             colnames(OUT[[g]]) <- rownames(OUT[[g]]) <- NAMES
             class(OUT[[g]]) <- c("lavaan.matrix.symmetric", "matrix")
+        }
+    }
+
+    if(G == 1) {
+        OUT <- OUT[[1]]
+    } else {
+        names(OUT) <- unlist(object@Data@group.label)
+    }
+
+    OUT
+}
+
+
+getModelTheta <- function(object, correlation.metric=FALSE, labels=TRUE) {
+
+    G <- object@Data@ngroups
+
+    # get residual covariances
+    OUT <- lavaan:::computeTHETA(object@Model)
+
+    # correlation?
+    if(correlation.metric) {
+        OUT <- lapply(OUT, cov2cor)
+    }
+
+    # we need lambda for labels
+    lambda.group <- which(names(object@Model@GLIST) == "lambda")
+    if(labels) {
+        for(g in 1:G) {
+            lambda.idx <- lambda.group[g]
+            NAMES <- object@Model@dimNames[[lambda.idx]][[1L]]
+            colnames(OUT[[g]]) <- rownames(OUT[[g]]) <- NAMES
+            class(OUT[[g]]) <- c("lavaan.matrix.symmetric", "matrix")
+        }
+    }
+
+    if(G == 1) {
+        OUT <- OUT[[1]]
+    } else {
+        names(OUT) <- unlist(object@Data@group.label)
+    }
+
+    OUT
+}
+
+
+lav_inspect_data <- function(object, labels = TRUE) {
+
+    G <- object@Data@ngroups
+    OUT <- object@Data@X
+
+    if(labels) {
+        for(g in 1:G) {
+            colnames(OUT[[g]]) <- object@Data@ov.names[[g]]
         }
     }
 
