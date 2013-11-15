@@ -65,6 +65,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                    WLS.V              = NULL,
                    NACOV              = NULL,
 
+                   # zero values
+                   zero.add           = "default",
+                   zero.keep.margins  = "default",
+
                    # starting values
                    start              = "default",
 
@@ -143,6 +147,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             sample.cov.rescale = sample.cov.rescale,
             information = information, se = se, test = test, 
             bootstrap = bootstrap, mimic = mimic,
+            zero.add = zero.add, zero.keep.margins = zero.keep.margins,
             representation = representation, do.fit = do.fit, verbose = verbose,
             warn = warn, debug = debug)
         lavaanOptions <- setLavaanOptions(opt)
@@ -315,11 +320,13 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                        mimic         = lavaanOptions$mimic,
                        meanstructure = lavaanOptions$meanstructure,
                        missing.h1    = (lavaanOptions$missing != "listwise"),
-                       WLS.V         = WLS.V,
-                       NACOV         = NACOV,
-                       ridge         = ridge,
-                       debug         = lavaanOptions$debug,
-                       verbose       = lavaanOptions$verbose)
+                       WLS.V             = WLS.V,
+                       NACOV             = NACOV,
+                       ridge             = ridge,
+                       zero.add          = lavaanOptions$zero.add,
+                       zero.keep.margins = lavaanOptions$zero.keep.margins,
+                       debug             = lavaanOptions$debug,
+                       verbose           = lavaanOptions$verbose)
                                                  
     } else if(lavaanData@data.type == "moment") {
         lavaanSampleStats <- lavSampleStatsFromMoments(
@@ -400,6 +407,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         TH <- computeTH(lavaanModel)
         for(g in 1:lavaanData@ngroups) {
             nvar <- ncol(lavaanData@X[[g]])
+            nobs <- nrow(lavaanData@X[[g]])
             th.idx <- lavaanModel@th.idx[[g]]
             # pairwise tables, as a long vector
             PW <- pairwiseTables(data=lavaanData@X[[g]], no.x=nvar)$pairTables
@@ -410,7 +418,14 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             LONG <- LongVecInd(no.x               = nvar,
                                all.thres          = TH[[g]],
                                index.var.of.thres = th.idx)
-            lavaanCache[[g]] <- list(bifreq=bifreq, LONG=LONG)
+            lavaanCache[[g]] <- list(bifreq=bifreq, nobs=nobs, LONG=LONG)
+        }
+    }
+    # copy response patterns to cache -- FIXME!! (data not included 
+    # in Model only functions)
+    if(lavaanData@data.type == "full" && !is.null(lavaanData@Rp[[1L]])) {
+        for(g in 1:lavaanData@ngroups) {
+            lavaanCache[[g]]$pat <- lavaanData@Rp[[g]]$pat
         }
     }
 
@@ -419,7 +434,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     x <- NULL
     if(do.fit && lavaanModel@nx.free > 0L) {
         # catch simple linear regression models
-        if(length(unique(lavaanParTable$lhs[lavaanParTable$op == "~"])) == 1L && 
+        if(lavaanData@data.type == "full" &&
+           length(unique(lavaanParTable$lhs[lavaanParTable$op == "~"])) == 1L && 
            length(vnames(lavaanParTable,   "lv")) == 0L &&
            #FALSE && # to debug
            sum(nchar(FLAT$fixed)) == 0 && # no fixed values in parTable
@@ -493,8 +509,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 attr(x, "fx") <- FX
             } else if(lav_constraints_check_linear(lavaanModel) == TRUE) {
 
-                require(quadprog)
-
                 A.ceq <- A.cin <- matrix(0, lavaanModel@nx.free, 0)
                 if(!is.null(body(lavaanModel@ceq.function)))
                     A.ceq <- t(lavJacobianC(func=lavaanModel@ceq.function, 
@@ -539,7 +553,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 #}
                 X.X <- crossprod(X)
                 out <- solve.QP(Dmat=X.X, dvec=X.Y, Amat=A, 
-                                bvec=rep(0, NCOL(A)), 
+                                bvec=rep(0, NCOL(A)), ### FIXME!!! always zero
                                 meq=length(lavaanModel@x.ceq.idx))
                 x.beta <- out$solution
                 residuals <- Y - (X %*% x.beta)
@@ -726,7 +740,8 @@ cfa <- sem <- function(model = NULL, data = NULL,
     information = "default", se = "default", test = "default",
     bootstrap = 1000L, mimic = "default", representation = "default",
     do.fit = TRUE, control = list(), WLS.V = NULL, NACOV = NULL,
-    start = "default", verbose = FALSE, warn = TRUE, debug = FALSE) {
+    zero.add = "default", zero.keep.margins = "default", start = "default",
+    verbose = FALSE, warn = TRUE, debug = FALSE) {
 
     mc <- match.call()
 
@@ -741,7 +756,7 @@ cfa <- sem <- function(model = NULL, data = NULL,
     mc$auto.cov.y      = TRUE
     mc$auto.th         = TRUE
     mc$auto.delta      = TRUE
-    mc[[1L]] <- as.name("lavaan")
+    mc[[1L]] <- quote(lavaan::lavaan)
 
     eval(mc, parent.frame())
 }
@@ -759,7 +774,8 @@ growth <- function(model = NULL, data = NULL,
     information = "default", se = "default", test = "default",
     bootstrap = 1000L, mimic = "default", representation = "default",
     do.fit = TRUE, control = list(), WLS.V = NULL, NACOV = NULL,
-    start = "default", verbose = FALSE, warn = TRUE, debug = FALSE) {
+    zero.add = "default", zero.keep.margins = "default", start = "default",
+    verbose = FALSE, warn = TRUE, debug = FALSE) {
 
     mc <- match.call()
 
@@ -773,7 +789,7 @@ growth <- function(model = NULL, data = NULL,
     mc$auto.cov.y      = TRUE
     mc$auto.th         = TRUE
     mc$auto.delta      = TRUE
-    mc[[1L]] <- as.name("lavaan")
+    mc[[1L]] <- quote(lavaan::lavaan)
 
     eval(mc, parent.frame())
 }

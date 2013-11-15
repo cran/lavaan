@@ -43,9 +43,9 @@ Nvcov.standard <- function(object, samplestats=NULL, data=NULL, estimator="ML",
         NVarCov <- solve(E)
     }
 
-    if(estimator == "PML") {
-        NVarCov <- NVarCov * samplestats@ntotal
-    }
+    #if(estimator == "PML") {
+    #    NVarCov <- NVarCov * samplestats@ntotal
+    #}
 
     NVarCov
 }
@@ -183,10 +183,22 @@ Nvcov.first.order <- function(object, samplestats=NULL, data=NULL,
             NVarCov <- MASS::ginv(E3)[1:ncol(E), 1:ncol(E)]
             # FIXME: better include inactive + slacks??
         } else {
-            NVarCov <- solve(E)
+            # check if E is pd 
+            eigvals <- eigen(E, symmetric = TRUE, only.values = TRUE)$values
+            if(any(eigvals < -1 * .Machine$double.eps^(3/4))) {
+                warning("lavaan WARNING: matrix based on first order outer product of the derivatives is not positive definite; the standard errors may not be thrustworthy")
+            }
+            NVarCov <- MASS::ginv(E) ## FIXME: should we allow this?
         }
     } else {
-        NVarCov <- solve(E)
+        # NVarCov <- solve(E)
+        # check if E is pd 
+        eigvals <- eigen(E, symmetric = TRUE, only.values = TRUE)$values
+        if(any(eigvals < -1 * .Machine$double.eps^(3/4))) {
+            warning("lavaan WARNING: matrix based on first order outer product of the derivatives is not positive definite; the standard errors may not be thrustworthy")
+        }
+
+        NVarCov <- MASS::ginv(E) ## FIXME: should we allow this?
     }
 
     attr(NVarCov, "B0") <- B0
@@ -368,7 +380,8 @@ estimateVCOV <- function(object, samplestats, options=NULL, data=NULL,
     if(! inherits(NVarCov, "try-error") ) {
 
         # denominator!
-        if(estimator == "ML" && likelihood == "normal") {
+        if(estimator %in% c("ML","PML","FML") && 
+           likelihood == "normal") {
             N <- samplestats@ntotal
         } else {
             N <- samplestats@ntotal - samplestats@ngroups

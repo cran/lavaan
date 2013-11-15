@@ -1,34 +1,47 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.5-14
-Authors@R: c(person("Yves", "Rosseel", role = c("aut", "cre"),
+Version: 0.5-15
+Authors@R: c(person(given = "Yves", family = "Rosseel", 
+                    role  = c("aut", "cre"),
                     email = "Yves.Rosseel@UGent.be"),
-             person("Daniel", "Oberski", role = "ctb",
+             person(given = "Daniel", family = "Oberski", 
+                    role = "ctb",
                     email = "daniel.oberski@gmail.com"),
-             person("Jarrett", "Byrnes", role = "ctb", 
+             person(given = "Jarrett", family = "Byrnes", 
+                    role = "ctb", 
                     email = "byrnes@nceas.ucsb.edu"),
-             person("Leonard", "Vanbrabant", role = "ctb",
+             person(given = "Leonard", family = "Vanbrabant", 
+                    role = "ctb",
                     email = "L.G.F.Vanbrabant@uu.nl"),
-             person("Victoria", "Savalei", role = "ctb",
+             person(given = "Victoria", family = "Savalei", 
+                    role = "ctb",
                     email = "vsavalei@ubc.ca"),
-             person("Ed", "Merkle", role = "ctb",
+             person(given = "Ed", family = "Merkle", 
+                    role = "ctb",
                     email = "merklee@missouri.edu"),
-             person("Michael", "Hallquist", role = "ctb",
+             person(given = "Michael", family = "Hallquist", 
+                    role = "ctb",
                     email = "michael.hallquist at gmail.com"),
-             person("Mijke", "Rhemtulla", role = "ctb",
+             person(given = "Mijke", family = "Rhemtulla", 
+                    role = "ctb",
                     email = "mijke@ku.edu"),
-             person("Myrsini", "Katsikatsou", role = "ctb",
-                    email = "mirtok2@gmail.com")
-            )  
+             person(given = "Myrsini", family = "Katsikatsou", 
+                    role = "ctb",
+                    email = "mirtok2@gmail.com"),
+             person(given = "Mariska", family = "Barendse", 
+                    role = "ctb",
+                    email = "m.t.barendse@rug.nl")
+            )
+Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
 Description: Fit a variety of latent variable models, including confirmatory
-    factor analysis, structural equation modeling and latent growth curve models.
-Depends: methods, R(>= 2.14.0), MASS, boot, mnormt, pbivnorm, quadprog
-Imports: stats4, stats, graphics
+   factor analysis, structural equation modeling and latent growth curve models.
+Depends: R(>= 2.14.0), methods
+Imports: stats4, stats, graphics, MASS, mnormt, pbivnorm, quadprog
 Suggests: lavaan.survey, semPlot, semTools, simsem
 License: GPL (>= 2)
 LazyData: yes
 URL: http://lavaan.org
-Packaged: 2013-07-21 09:13:35 UTC; yves
+Packaged: 2013-11-15 13:42:44 UTC; yves
 Author: Yves Rosseel [aut, cre],
   Daniel Oberski [ctb],
   Jarrett Byrnes [ctb],
@@ -37,8 +50,8 @@ Author: Yves Rosseel [aut, cre],
   Ed Merkle [ctb],
   Michael Hallquist [ctb],
   Mijke Rhemtulla [ctb],
-  Myrsini Katsikatsou [ctb]
-Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
+  Myrsini Katsikatsou [ctb],
+  Mariska Barendse [ctb]
 NeedsCompilation: no
 Repository: CRAN
-Date/Publication: 2013-07-21 11:34:50
+Date/Publication: 2013-11-15 15:04:35

@@ -235,7 +235,7 @@ short.summary <- function(object) {
         } 
     } # test != none
 
-    cat("\n")
+    #cat("\n")
 }
 
 setMethod("show", "lavaan",
@@ -270,7 +270,7 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
     if(estimates) {
 
     # main part: parameter estimates
-    cat("Parameter estimates:\n\n")
+    cat("\nParameter estimates:\n\n")
     t0.txt <- sprintf("  %-40s", "Information")
     tmp.txt <- object@Options$information
     t1.txt <- sprintf("  %10s", paste(toupper(substring(tmp.txt,1,1)), 
@@ -797,32 +797,34 @@ standardizedSolution <- standardizedsolution <- function(object, type="std.all")
         LIST$est.std <- standardize.est.all.nox(object)
     }
 
-    # add 'se' for standardized parameters
-    # TODO!!
-    if(type == "std.lv") {
-        JAC <- lavJacobianD(func=standardize.est.lv.x, x=object@Fit@est,
-                            object=object)
-    } else if(type == "std.all") {
-        JAC <- lavJacobianD(func=standardize.est.all.x, x=object@Fit@est,
-                            object=object)
-    } else if(type == "std.nox") {
-        JAC <- lavJacobianD(func=standardize.est.all.nox.x, x=object@Fit@est,
-                            object=object)
-    }
-    JAC <- JAC[unco.idx,unco.idx]
-    VCOV <- as.matrix(vcov(object, labels=FALSE))
-    # handle eq constraints in fit@Model@eq.constraints.K
-    if(object@Model@eq.constraints) {
-        JAC <- JAC %*% object@Model@eq.constraints.K       
-    }
-    COV <- JAC %*% VCOV %*% t(JAC)
-    LIST$se <- rep(NA, length(LIST$lhs))
-    LIST$se[unco.idx] <- sqrt(diag(COV))
+    if(object@Options$se != "none") {
+        # add 'se' for standardized parameters
+        # TODO!!
+        if(type == "std.lv") {
+            JAC <- lavJacobianD(func=standardize.est.lv.x, x=object@Fit@est,
+                                object=object)
+        } else if(type == "std.all") {
+            JAC <- lavJacobianD(func=standardize.est.all.x, x=object@Fit@est,
+                                object=object)
+        } else if(type == "std.nox") {
+            JAC <- lavJacobianD(func=standardize.est.all.nox.x, x=object@Fit@est,
+                                object=object)
+        }
+        JAC <- JAC[unco.idx,unco.idx]
+        VCOV <- as.matrix(vcov(object, labels=FALSE))
+        # handle eq constraints in fit@Model@eq.constraints.K
+        if(object@Model@eq.constraints) {
+            JAC <- JAC %*% object@Model@eq.constraints.K       
+        }
+        COV <- JAC %*% VCOV %*% t(JAC)
+        LIST$se <- rep(NA, length(LIST$lhs))
+        LIST$se[unco.idx] <- sqrt(diag(COV))
 
-    # add 'z' column
-    tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
-    LIST$z <- LIST$est.std / tmp.se
-    LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
+        # add 'z' column
+        tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
+        LIST$z <- LIST$est.std / tmp.se
+        LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
+    }
 
     # if single group, remove group column
     if(object@Data@ngroups == 1L) LIST$group <- NULL
@@ -876,6 +878,30 @@ parameterEstimates <- parameterestimates <-
             fac <- qnorm(a)
             ci <- LIST$est + LIST$se %o% fac
         } else if(object@Options$se == "bootstrap") {
+
+            # local copy of 'norm.inter' from boot package (not exported!)
+            norm.inter <- function(t, alpha)  {
+                t <- t[is.finite(t)]; R <- length(t); rk <- (R + 1) * alpha
+                if (!all(rk > 1 & rk < R)) 
+                     warning("extreme order statistics used as endpoints")
+                k <- trunc(rk); inds <- seq_along(k)
+                out <- inds; kvs <- k[k > 0 & k < R]
+                tstar <- sort(t, partial = sort(union(c(1, R), c(kvs, kvs+1))))
+                ints <- (k == rk)
+                if (any(ints)) out[inds[ints]] <- tstar[k[inds[ints]]]
+                out[k == 0] <- tstar[1L]
+                out[k == R] <- tstar[R]
+                not <- function(v) xor(rep(TRUE,length(v)),v)
+                temp <- inds[not(ints) & k != 0 & k != R]
+                temp1 <- qnorm(alpha[temp])
+                temp2 <- qnorm(k[temp]/(R+1))
+                temp3 <- qnorm((k[temp]+1)/(R+1))
+                tk <- tstar[k[temp]]
+                tk1 <- tstar[k[temp]+1L]
+                out[temp] <- tk + (temp1-temp2)/(temp3-temp2)*(tk1 - tk)
+                cbind(round(rk, 2), out)
+            }
+
             stopifnot(!is.null(BOOT))
             stopifnot(boot.ci.type %in% c("norm","basic","perc","bca.simple"))
             if(boot.ci.type == "norm") {
@@ -892,7 +918,7 @@ parameterEstimates <- parameterestimates <-
                 alpha <- (1 + c(level, -level))/2
 
                 # free.idx only
-                qq <- apply(BOOT, 2, boot:::norm.inter, alpha)
+                qq <- apply(BOOT, 2, norm.inter, alpha)
                 free.idx <- which(object@ParTable$free & 
                                   !duplicated(object@ParTable$free))
                 ci[free.idx,] <- 2*ci[free.idx,] - t(qq[c(3,4),])
@@ -906,7 +932,7 @@ parameterEstimates <- parameterestimates <-
                     } else {
                         BOOT.def <- t(BOOT.def)
                     }
-                    qq <- apply(BOOT.def, 2, boot:::norm.inter, alpha)
+                    qq <- apply(BOOT.def, 2, norm.inter, alpha)
                     ci[def.idx,] <- 2*ci[def.idx,] - t(qq[c(3,4),])
                 }
 
@@ -917,7 +943,7 @@ parameterEstimates <- parameterestimates <-
                 alpha <- (1 + c(-level, level))/2
 
                 # free.idx only
-                qq <- apply(BOOT, 2, boot:::norm.inter, alpha)
+                qq <- apply(BOOT, 2, norm.inter, alpha)
                 free.idx <- which(object@ParTable$free & 
                                   !duplicated(object@ParTable$free))
                 ci[free.idx,] <- t(qq[c(3,4),])
@@ -931,7 +957,7 @@ parameterEstimates <- parameterestimates <-
                     } else {
                         BOOT.def <- t(BOOT.def)
                     }
-                    qq <- apply(BOOT.def, 2, boot:::norm.inter, alpha)
+                    qq <- apply(BOOT.def, 2, norm.inter, alpha)
                     def.idx <- which(object@ParTable$op == ":=")
                     ci[def.idx,] <- t(qq[c(3,4),])
                 }
@@ -953,7 +979,7 @@ parameterEstimates <- parameterestimates <-
                    w <- qnorm(sum(t < t0)/length(t))
                    a <- 0.0 #### !!! ####
                    adj.alpha <- pnorm(w + (w + zalpha)/(1 - a*(w + zalpha)))
-                   qq <- boot:::norm.inter(t, adj.alpha)
+                   qq <- norm.inter(t, adj.alpha)
                    ci[free.idx[i],] <- qq[,2]
                }
 
@@ -972,7 +998,7 @@ parameterEstimates <- parameterestimates <-
                        w <- qnorm(sum(t < t0)/length(t))
                        a <- 0.0 #### !!! ####
                        adj.alpha <- pnorm(w + (w + zalpha)/(1 - a*(w + zalpha)))
-                       qq <- boot:::norm.inter(t, adj.alpha)
+                       qq <- norm.inter(t, adj.alpha)
                        ci[def.idx[i],] <- qq[,2]
                    }
                }
@@ -1044,6 +1070,8 @@ varTable <- vartable <- function(object, ov.names=names(object),
 
     if(inherits(object, "lavaan")) {
         VAR <- object@Data@ov
+    } else if(inherits(object, "lavData")) {
+        VAR <- object@ov
     } else if(inherits(object, "data.frame")) {
         VAR <- lav_dataframe_vartable(frame = object, ov.names = ov.names, 
                                       ov.names.x = ov.names.x, 
@@ -1155,6 +1183,10 @@ function(object, what="free") {
         getModelTheta(object, labels=TRUE)
     } else if(what == "cor.ov") {
         getModelTheta(object, correlation.metric=TRUE, labels=TRUE)
+    } else if(what == "coverage") {
+        getDataMissingCoverage(object, labels=TRUE)
+    } else if(what %in% c("patterns", "pattern")) {
+        getDataMissingPatterns(object, labels=TRUE)
     } else if(what == "converged") {
         object@Fit@converged
     } else {
@@ -1270,6 +1302,10 @@ function(object, labels=TRUE, attributes.=FALSE) {
     # check for convergence first!
     if(object@Fit@npar > 0L && !object@Fit@converged)
         stop("lavaan ERROR: model did not converge")
+
+    if(object@Options$se == "none") {
+        stop("lavaan ERROR: vcov not available if se=\"none\"")
+    }
 
     if(object@Fit@npar == 0) {
         VarCov <- matrix(0,0,0)
@@ -1423,7 +1459,6 @@ function(object, ...) {
     ngroups <- object@Data@ngroups
     nobs <- object@SampleStats@nobs
     ntotal <- object@SampleStats@ntotal
-    npar <- object@Fit@npar
 
     # shortcut for single argument (just plain LRT)
     if(!any(modp)) {
@@ -1554,8 +1589,10 @@ function(object, ...) {
 
                 # original M (Satorra)
                 Delta1 <- computeDelta(mods[[m]]@Model)
+                npar <- ncol(Delta1[[1]])
                 WLS.V <- getWLS.V(object)
                 Gamma <- getSampleStatsNACOV(object)
+                
 
                 # weight WLS.V
                 for(g in 1:ngroups) {
@@ -1801,7 +1838,7 @@ getModelCovLV <- function(object, correlation.metric=FALSE, labels=TRUE) {
     G <- object@Data@ngroups
 
     # compute lv covar
-    OUT <- lavaan:::computeVETA(object@Model, samplestats=object@SampleStats)
+    OUT <- computeVETA(object@Model, samplestats=object@SampleStats)
 
     # correlation?
     if(correlation.metric) {
@@ -1817,8 +1854,9 @@ getModelCovLV <- function(object, correlation.metric=FALSE, labels=TRUE) {
             # remove all dummy latent variables
             lv.idx <- c(object@Model@ov.y.dummy.lv.idx[[g]],
                         object@Model@ov.x.dummy.lv.idx[[g]])
-            if(!is.null(lv.idx)) {
+            if(length(lv.idx) > 0L) {
                 NAMES <- NAMES[-lv.idx]
+                OUT[[g]] <- OUT[[g]][-lv.idx, -lv.idx, drop=FALSE]
             }
             colnames(OUT[[g]]) <- rownames(OUT[[g]]) <- NAMES
             class(OUT[[g]]) <- c("lavaan.matrix.symmetric", "matrix")
@@ -1843,7 +1881,7 @@ getModelCov <- function(object, correlation.metric=FALSE, labels=TRUE) {
     G <- object@Data@ngroups
 
     # compute extended model implied covariance matrix (both ov and lv)
-    OUT <- lavaan:::computeCOV(object@Model, samplestats=object@SampleStats)
+    OUT <- computeCOV(object@Model, samplestats=object@SampleStats)
 
     # correlation?
     if(correlation.metric) {
@@ -1879,7 +1917,7 @@ getModelTheta <- function(object, correlation.metric=FALSE, labels=TRUE) {
     G <- object@Data@ngroups
 
     # get residual covariances
-    OUT <- lavaan:::computeTHETA(object@Model)
+    OUT <- computeTHETA(object@Model)
 
     # correlation?
     if(correlation.metric) {
@@ -1894,6 +1932,69 @@ getModelTheta <- function(object, correlation.metric=FALSE, labels=TRUE) {
             NAMES <- object@Model@dimNames[[lambda.idx]][[1L]]
             colnames(OUT[[g]]) <- rownames(OUT[[g]]) <- NAMES
             class(OUT[[g]]) <- c("lavaan.matrix.symmetric", "matrix")
+        }
+    }
+
+    if(G == 1) {
+        OUT <- OUT[[1]]
+    } else {
+        names(OUT) <- unlist(object@Data@group.label)
+    }
+
+    OUT
+}
+
+getDataMissingCoverage <- function(object, labels=TRUE) {
+
+    G <- object@Data@ngroups
+
+    # get missing covarage
+    OUT <- vector("list", G)
+   
+    for(g in 1:G) {
+        if(!is.null(object@Data@Mp[[g]])) {
+            OUT[[g]] <- object@Data@Mp[[g]]$coverage
+        } else {
+            nvar <- length(object@Data@ov.names[[g]])
+            OUT[[g]] <- matrix(1.0, nvar, nvar)
+        }
+
+        if(labels) {
+            NAMES <- object@Data@ov.names[[g]]
+            colnames(OUT[[g]]) <- rownames(OUT[[g]]) <- NAMES
+            class(OUT[[g]]) <- c("lavaan.matrix.symmetric", "matrix")
+        }
+    }
+
+    if(G == 1) {
+        OUT <- OUT[[1]]
+    } else {
+        names(OUT) <- unlist(object@Data@group.label)
+    }
+
+    OUT
+}
+
+getDataMissingPatterns <- function(object, labels = TRUE) {
+
+    G <- object@Data@ngroups
+
+    # get missing covarage
+    OUT <- vector("list", G)
+   
+    for(g in 1:G) {
+        if(!is.null(object@Data@Mp[[g]])) {
+            OUT[[g]] <- object@Data@Mp[[g]]$pat
+        } else {
+            nvar <- length(object@Data@ov.names[[g]])
+            OUT[[g]] <- matrix(TRUE, 1L, nvar)
+            rownames(OUT[[g]]) <- object@Data@nobs[[g]]
+        }
+
+        if(labels) {
+            NAMES <- object@Data@ov.names[[g]]
+            colnames(OUT[[g]]) <- NAMES
+            class(OUT[[g]]) <- c("lavaan.matrix", "matrix")
         }
     }
 

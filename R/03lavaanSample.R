@@ -3,23 +3,25 @@
 # initial version: YR 25/03/2009
 # major revision: YR 5/11/2011: separate data.obs and sample statistics
 
-lavSampleStatsFromData <- function(Data          = NULL,
-                                   DataX         = NULL,
-                                   DataeXo       = NULL,
-                                   DataOvnames   = NULL,
-                                   DataOvnamesx  = NULL,
-                                   DataOv        = NULL,
-                                   missing       = "listwise",
-                                   rescale       = FALSE,
-                                   missing.h1    = TRUE,
-                                   estimator     = "ML",
-                                   mimic         = "lavaan",
-                                   meanstructure = FALSE,
-                                   WLS.V         = NULL,
-                                   NACOV         = NULL,
-                                   ridge         = 1e-5,
-                                   debug         = FALSE,
-                                   verbose       = FALSE) {
+lavSampleStatsFromData <- function(Data              = NULL,
+                                   DataX             = NULL,
+                                   DataeXo           = NULL,
+                                   DataOvnames       = NULL,
+                                   DataOvnamesx      = NULL,
+                                   DataOv            = NULL,
+                                   missing           = "listwise",
+                                   rescale           = FALSE,
+                                   missing.h1        = TRUE,
+                                   estimator         = "ML",
+                                   mimic             = "lavaan",
+                                   meanstructure     = FALSE,
+                                   WLS.V             = NULL,
+                                   NACOV             = NULL,
+                                   ridge             = 1e-5,
+                                   zero.add          = c(0.5, 0.0),
+                                   zero.keep.margins = TRUE,
+                                   debug             = FALSE,
+                                   verbose           = FALSE) {
 
     # ridge default
     ridge.eps <- 0.0
@@ -121,7 +123,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
         CAT <- list()
         if("ordered" %in% ov.types) {
             categorical <- TRUE
-            if(estimator %in% c("PML","ML")) {
+            if(estimator %in% c("ML","PML","FML")) {
                 WLS.W <- FALSE
             } else {
                 WLS.W <- TRUE
@@ -138,6 +140,8 @@ lavSampleStatsFromData <- function(Data          = NULL,
                               group = g, # for error messages only
                               missing = missing, # listwise or pairwise?
                               WLS.W = WLS.W,
+                              zero.add = zero.add,
+                              zero.keep.margins = zero.keep.margins,
                               verbose=debug)
             if(verbose) cat("done\n")
             # if (and only if) all variables are ordinal, store pairwise
@@ -188,7 +192,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
             mean[[g]] <- apply(X[[g]], 2, mean, na.rm=TRUE)
         
             # icov and cov.log.det (but not if missing)
-            if(is.null(Mp[[g]])) {
+            if(missing != "ml") {
                 tmp <- try(inv.chol(cov[[g]], logdet=TRUE), silent=TRUE)
                 if(inherits(tmp, "try-error")) {
                     if(ngroups > 1) {
@@ -203,7 +207,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
                     tmp <- try(inv.chol(cov[[g]], logdet=TRUE), silent=TRUE)
                     if(inherits(tmp, "try-error")) {
                         # emergency values
-                        icov[[g]] <- MASS:::ginv(cov[[g]])
+                        icov[[g]] <- MASS::ginv(cov[[g]])
                         cov.log.det[[g]] <- log(.Machine$double.eps)
                     } else {
                         cov.log.det[[g]] <- attr(tmp, "logdet")
@@ -238,7 +242,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
         }
 
         # if missing = "fiml", sample statistics per pattern
-        if(!is.null(Mp[[g]])) {
+        if(missing == "ml") {
             missing.flag. <- TRUE
             missing.[[g]] <- 
                 getMissingPatternStats(X  = X[[g]],
@@ -330,7 +334,7 @@ lavSampleStatsFromData <- function(Data          = NULL,
                         WLS.V[[g]] <- DWLS
                     }
                 }
-            } else if(estimator == "PML") {
+            } else if(estimator == "PML" || estimator == "FML") {
                 # no WLS.V here
             }
         }
@@ -535,7 +539,7 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
             tmp <- try(inv.chol(cov[[g]], logdet=TRUE), silent=TRUE)
             if(inherits(tmp, "try-error")) {
                 # emergency values
-                icov[[g]] <- MASS:::ginv(cov[[g]])
+                icov[[g]] <- MASS::ginv(cov[[g]])
                 cov.log.det[[g]] <- log(.Machine$double.eps)
             } else {
                 cov.log.det[[g]] <- attr(tmp, "logdet")

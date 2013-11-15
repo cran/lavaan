@@ -267,7 +267,7 @@ dup3 <- function(n = 1L) {
 #    tmp[vech.idx(n)] <- 1:nstar
 #    tmp[vechru.idx(n)] <- 1:nstar
 #
-#    x <- Matrix:::sparseMatrix(i = 1:(n*n), j = vec(tmp), x = 1.0)
+#    x <- Matrix::sparseMatrix(i = 1:(n*n), j = vec(tmp), x = 1.0)
 #
 #    x
 #}
@@ -447,6 +447,9 @@ sqrtSymmetricMatrix <- function(S = matrix(0,0,0)) {
     # eigen decomposition
     S.eigen <- eigen(S)
     V <- S.eigen$vectors; d <- S.eigen$values
+
+    # 'fix' slightly negative tiny numbers
+    d[d < 0] <- 0.0
 
     # sqrt the eigenvalues and reconstruct
     S.sqrt <- V %*% diag(sqrt(d), n, n) %*% t(V)

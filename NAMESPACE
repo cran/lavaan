@@ -9,6 +9,17 @@ importFrom("stats",
            update,
            anova,
            vcov)
+importFrom("graphics",
+           plot)
+importFrom("methods",
+           show)
+importFrom("quadprog",
+           solve.QP)
+importFrom("mnormt",
+           dmnorm,
+           sadmvn)
+importFrom("pbivnorm",
+           pbivnorm)
 
 # AIC and friends...
 if(getRversion() >= "2.13.0") {
@@ -43,15 +54,20 @@ export("lavaan", "cfa", "sem", "growth",
        "simulateData",
        "estfun.lavaan", "lavScores",
        "lavTables", 
+       # "lavTablesFitCp", "lavTablesFitCf", "lavTablesFitCm",
        "lavExport",
        "lavMatrixRepresentation",
        "mplus2lavaan" #,
+       #"prelav",
+       #"lavData",
+       #"lavCor", "lavCorFit" #,
        #"lavPredict"
       )
 
 # export Classes
 exportClasses(
-              "lavaan"
+              "lavaan" #,
+              #"lavData"
              )
 
 # export Methods
@@ -72,7 +88,10 @@ S3method(print, lavaan.data.frame)
 S3method(print, lavaan.matrix)
 S3method(print, lavaan.matrix.symmetric)
 S3method(print, lavaan.vector)
+S3method(print, prelav)
 S3method(pairs, lavaan)
 S3method(print, InformativeTesting)
 S3method(plot, InformativeTesting)
-#S3method(summary, lavaan.boot)
+# S3method(print, lavaan.tables.fit.Cf)
+# S3method(print, lavaan.tables.fit.Cp)
+# S3method(print, lavaan.tables.fit.Cm)

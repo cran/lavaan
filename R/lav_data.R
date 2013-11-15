@@ -1,7 +1,8 @@
 # constructor for the 'lavData' class
 #
 # the lavData class describes how the data looks like
-#  - do we have a full data frame, or only sample statistics
+#  - do we have a full data frame, or only sample statistics?
+#    (TODO: allow for patterns + freq, if data is categorical)
 #  - variable type ("numeric", "ordered", ...)
 #  - how many groups, how many observations, ...
 #  - what about missing patterns?
@@ -12,7 +13,7 @@
 lavData <- function(data          = NULL,          # data.frame
                     group         = NULL,          # multiple groups?
                     group.label   = NULL,          # custom group labels?
-                    ov.names      = names(data),   # variables needed in model
+                    ov.names      = NULL,          # variables needed in model
                     ordered       = NULL,          # ordered variables
                     ov.names.x    = character(0),  # exo variables
                     std.ov        = FALSE,         # standardize ov's?
@@ -24,13 +25,23 @@ lavData <- function(data          = NULL,          # data.frame
                     allow.single.case = FALSE      # allow single case (for newdata in predict)
                    ) 
 {
-    # three scenarios:
-    #    1) data is full data.frame
+    # four scenarios:
+    #    0) data is already a lavData object: do nothing
+    #    1) data is full data.frame (or a matrix)
     #    2) data are sample statistics only
     #    3) no data at all
 
     # 1) full data
     if(!is.null(data)) {
+ 
+       # catch lavaan/lavData objects
+        if(inherits(data, "lavData")) {
+            return(data)
+        } else if(inherits(data, "lavaan")) {
+            return(data@Data)
+        }
+
+        # catch matrix 
         if(!is.data.frame(data)) {
             # is it a matrix?
             if(is.matrix(data)) {
@@ -42,21 +53,23 @@ lavData <- function(data          = NULL,          # data.frame
                     warning("lavaan WARNING: data argument has been coerced to a data.frame")
                     ### FIXME, we should avoid as.data.frame() and handle
                     ### data matrices directly
-                    data <- as.data.frame(data)
+                    data <- as.data.frame(data, stringsAsFactors = FALSE)
                 }
+            } else {
+                stop("lavaan ERROR: data object of class ", class(data))
             }
         }
 
-        lavData <- getDataFull(data              = data,
-                               group             = group,
-                               group.label       = group.label,
-                               ov.names          = ov.names,
-                               ordered           = ordered,
-                               ov.names.x        = ov.names.x,
-                               std.ov            = std.ov,
-                               missing           = missing,
-                               warn              = warn,
-                               allow.single.case = allow.single.case)
+        lavData <- lav_data_full(data              = data,
+                                 group             = group,
+                                 group.label       = group.label,
+                                 ov.names          = ov.names,
+                                 ordered           = ordered,
+                                 ov.names.x        = ov.names.x,
+                                 std.ov            = std.ov,
+                                 missing           = missing,
+                                 warn              = warn,
+                                 allow.single.case = allow.single.case)
         sample.cov <- NULL # not needed, but just in case
     }
     
@@ -101,17 +114,23 @@ lavData <- function(data          = NULL,          # data.frame
             ngroups <- 1L; group.label <- character(0)
             if(!is.matrix(sample.cov))
                 stop("lavaan ERROR: sample.cov must be a matrix or a list of matrices")
+            sample.cov <- list(sample.cov)
         }
 
-        # handle ov.names
-        if(!is.list(ov.names)) {
+        # get ov.names
+        if (is.null(ov.names)) {
+            ov.names <- lapply(sample.cov, row.names)            
+        } else if (!is.list(ov.names)) {
+            # duplicate ov.names for each group
             tmp <- ov.names; ov.names <- vector("list", length=ngroups)
             ov.names[1:ngroups] <- list(tmp)
         } else {
-            if(length(ov.names) != ngroups)
+            if (length(ov.names) != ngroups)
                 stop("lavaan ERROR: ov.names assumes ", length(ov.names),
                      " groups; data contains ", ngroups, " groups")
+            # nothing to do
         }
+
         # handle ov.names.x
         if(!is.list(ov.names.x)) {
             tmp <- ov.names.x; ov.names.x <- vector("list", length=ngroups)
@@ -140,12 +159,19 @@ lavData <- function(data          = NULL,          # data.frame
                        ov.names    = ov.names, 
                        ov.names.x  = ov.names.x,
                        ov          = ov,
-                       missing     = "listwise")
+                       std.ov      = FALSE,
+                       missing     = "listwise",
+                       case.idx    = vector("list", length=ngroups),
+                       Mp          = vector("list", length=ngroups),
+                       Rp          = vector("list", length=ngroups),
+                       X           = vector("list", length=ngroups),
+                       eXo         = vector("list", length=ngroups)
+                      )
 
     }
 
     # 3) data.type = "none":  both data and sample.cov are NULL
-    if(is.null(data) && is.null(sample.cov)) { 
+    if(is.null(data) && is.null(sample.cov)) {
         if(is.null(sample.nobs)) sample.nobs <- 0L
         sample.nobs <- as.list(sample.nobs)
         ngroups <- length(unlist(sample.nobs))
@@ -155,9 +181,18 @@ lavData <- function(data          = NULL,          # data.frame
             group.label <- character(0)
 
         # handle ov.names
+        if(is.null(ov.names)) {
+            warning("lavaan WARNING: ov.names is NULL")
+            ov.names <- character(0L)
+        }
         if(!is.list(ov.names)) {
             tmp <- ov.names; ov.names <- vector("list", length=ngroups)
             ov.names[1:ngroups] <- list(tmp)
+        } else {
+            if (length(ov.names) != ngroups)
+                stop("lavaan ERROR: ov.names assumes ", length(ov.names),
+                     " groups; sample.nobs suggests ", ngroups, " groups")
+            # nothing to do    
         }
         # handle ov.names.x
         if(!is.list(ov.names.x)) {
@@ -183,7 +218,13 @@ lavData <- function(data          = NULL,          # data.frame
                        ov.names    = ov.names, 
                        ov.names.x  = ov.names.x,
                        ov          = ov,
-                       missing     = "listwise")
+                       missing     = "listwise",
+                       case.idx    = vector("list", length=ngroups),
+                       Mp          = vector("list", length=ngroups),
+                       Rp          = vector("list", length=ngroups),
+                       X           = vector("list", length=ngroups),
+                       eXo         = vector("list", length=ngroups)
+                      )
     }
 
     lavData
@@ -191,17 +232,18 @@ lavData <- function(data          = NULL,          # data.frame
 
 
 # handle full data
-getDataFull <- function(data          = NULL,          # data.frame
-                        group         = NULL,          # multiple groups?
-                        group.label   = NULL,          # custom group labels?
-                        ov.names      = names(data),   # variables needed in model
-                        ordered       = NULL,          # ordered variables
-                        ov.names.x    = character(0),  # exo variables
-                        std.ov        = FALSE,         # standardize ov's?
-                        missing       = "listwise",    # remove missings?
-                        warn          = TRUE,          # produce warnings?
-                        allow.single.case = FALSE      # allow single case data?
-                       )
+lav_data_full <- function(data          = NULL,          # data.frame
+                          group         = NULL,          # multiple groups?
+                          group.label   = NULL,          # custom group labels?
+                          ov.names      = NULL,          # variables needed 
+                                                         # in model
+                          ordered       = NULL,          # ordered variables
+                          ov.names.x    = character(0),  # exo variables
+                          std.ov        = FALSE,         # standardize ov's?
+                          missing       = "listwise",    # remove missings?
+                          warn          = TRUE,          # produce warnings?
+                          allow.single.case = FALSE      # allow single case?
+                        )
 {
     # number of groups and group labels
     if(!is.null(group) && length(group) > 0L) {
@@ -246,6 +288,15 @@ getDataFull <- function(data          = NULL,          # data.frame
     }
 
     # ov.names
+    if(is.null(ov.names)) {
+        ov.names <- names(data)
+        # remove 'group' name from ov.names
+        if(length(group) > 0L) {
+            group.idx <- which(ov.names == group)
+            ov.names <- ov.names[-group.idx]
+        }
+    }
+
     if(ngroups > 1L) {
         if(is.list(ov.names)) {
             if(length(ov.names) != ngroups)
@@ -295,16 +346,17 @@ getDataFull <- function(data          = NULL,          # data.frame
 
     # here, we know for sure all ov.names exist in the data.frame
     # create varTable
+    # FIXME: should we add the 'group' variable (no for now)
     ov <- lav_dataframe_vartable(frame = data, ov.names = ov.names, 
                                  ov.names.x = ov.names.x, ordered = ordered,
                                  as.data.frame. = FALSE)
 
     # do some checking
-    # check for unordered factors
+    # check for unordered factors (but only if nlev > 2)
     if("factor" %in%  ov$type) {
-        f.names <- ov$name[ov$type == "factor"]
+        f.names <- ov$name[ov$type == "factor" & ov$nlev > 2L]
         if(warn && any(f.names %in% unlist(ov.names)))
-            warning(paste("lavaan WARNING: unordered factor(s) detected in data:", paste(f.names, collapse=" ")))
+            warning(paste("lavaan WARNING: unordered factor(s) with more than 2 levels detected in data:", paste(f.names, collapse=" ")))
     }
     # check for ordered exogenous variables
     if("ordered" %in% ov$type[ov$name %in% unlist(ov.names.x)]) {
@@ -351,9 +403,13 @@ getDataFull <- function(data          = NULL,          # data.frame
             max.var <- max(ov$var[num.idx])
             rel.var <- max.var/min.var
             if(rel.var > 1000) {
-                warning("lavaan WARNING: some observed variances are (at least) a factor 1000 times larger than others; please rescale")
+                warning("lavaan WARNING: some observed variances are (at least) a factor 1000 times larger than others; use varTable(fit) to investigate")
             }
         }
+    }
+    # check for all-exogenous variables (eg in f <~ x1 + x2 + x3)
+    if(all(ov$exo == 1L)) {
+        warning("lavaan WARNING: all observed variables are exogenous; model may not be identified")
     }
 
     # prepare empty list for data.matrix per group
@@ -363,6 +419,7 @@ getDataFull <- function(data          = NULL,          # data.frame
     Mp       <- vector("list", length=ngroups)
     X        <- vector("list", length=ngroups)
     eXo      <- vector("list", length=ngroups)
+    Rp       <- vector("list", length=ngroups)
 
     # for each group
     for(g in 1:ngroups) {
@@ -429,7 +486,7 @@ getDataFull <- function(data          = NULL,          # data.frame
         }
 
         # missing data
-        if(missing == "ml") {
+        if(missing != "listwise") {
             # get missing patterns
             Mp[[g]] <- getMissingPatterns(X[[g]])
             # checking!
@@ -444,6 +501,12 @@ getDataFull <- function(data          = NULL,          # data.frame
             }
             # in case we had observations with only missings
             nobs[[g]] <- Mp[[g]]$nobs
+        }
+
+        # response patterns (categorical only, no exogenous variables)
+        all.ordered <- all(ov.names[[g]] %in% ov$name[ov$type == "ordered"])
+        if(length(exo.idx) == 0L && all.ordered) {
+            Rp[[g]] <- lav_data_resppatterns(X[[g]])
         }
 
         # warn if we have a small number of observations (but NO error!)
@@ -474,7 +537,97 @@ getDataFull <- function(data          = NULL,          # data.frame
                       missing         = missing,
                       X               = X,
                       eXo             = eXo,
-                      Mp              = Mp
+                      Mp              = Mp,
+                      Rp              = Rp
                      )
     lavData                     
 }
+
+# get response patterns (empty records have already been removed!)
+lav_data_resppatterns <- function(X) {
+
+    ntotal <- nrow(X); nvar <- ncol(X)
+
+    # identify, label and sort response patterns 
+    id <- apply(X, MARGIN = 1, paste, collapse = "")
+
+    # sort patterns (from high occurence to low occurence)
+    TABLE <- sort(table(id), decreasing = TRUE)
+    order <- names(TABLE)
+    npatterns <- length(TABLE)
+    pat <- X[match(order, id), , drop = FALSE]
+    row.names(pat) <- as.character(TABLE)
+
+    total.patterns <- prod(apply(X, 2, max))
+    empty.patterns <- total.patterns - npatterns
+    # return a list
+    #out <- list(nobs=ntotal, nvar=nvar,
+    #            id=id, npatterns=npatterns,
+    #            order=order, pat=pat)
+
+    # only return pat
+    out <- list(npatterns=npatterns, pat=pat, total.patterns=total.patterns,
+                empty.patterns=empty.patterns)
+
+    out
+}
+
+setMethod("show", "lavData",
+function(object) {
+    # print 'lavData' object
+    lav_data_print_short(object)
+})
+
+lav_data_print_short <- function(object) {
+     # flag
+     listwise <- object@missing == "listwise"
+
+     if(object@ngroups == 1L) {
+        if(listwise) {
+            cat(sprintf("  %-40s", ""), sprintf("  %10s", "Used"),
+                                        sprintf("  %10s", "Total"),
+                "\n", sep="")
+        }
+        t0.txt <- sprintf("  %-40s", "Number of observations")
+        t1.txt <- sprintf("  %10i", object@nobs[[1L]])
+        t2.txt <- ifelse(listwise,
+                  sprintf("  %10i", object@norig[[1L]]), "")
+        cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
+    } else {
+        if(listwise) {
+            cat(sprintf("  %-40s", ""), sprintf("  %10s", "Used"),
+                                        sprintf("  %10s", "Total"),
+                "\n", sep="")
+        }
+        t0.txt <- sprintf("  %-40s", "Number of observations per group")
+        cat(t0.txt, "\n")
+        for(g in 1:object@ngroups) {
+            t.txt <- sprintf("  %-40s  %10i", object@group.label[[g]],
+                                              object@nobs[[g]])
+            t2.txt <- ifelse(listwise,
+                      sprintf("  %10i", object@norig[[g]]), "")
+            cat(t.txt, t2.txt, "\n", sep="")
+        }
+    }
+    cat("\n")
+
+    # missing patterns?
+    if(!is.null(object@Mp[[1L]])) {
+        if(object@ngroups == 1L) {
+            t0.txt <- sprintf("  %-40s", "Number of missing patterns")
+            t1.txt <- sprintf("  %10i",
+                              object@Mp[[1L]]$npatterns)
+            cat(t0.txt, t1.txt, "\n\n", sep="")
+        } else {
+            t0.txt <- sprintf("  %-40s", "Number of missing patterns per group")
+            cat(t0.txt, "\n")
+            for(g in 1:object@ngroups) {
+                t.txt <- sprintf("  %-40s  %10i", object@group.label[[g]],
+                                 object@Mp[[g]]$npatterns)
+                cat(t.txt, "\n", sep="")
+            }
+            cat("\n")
+        }
+    }
+}
+

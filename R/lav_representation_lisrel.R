@@ -522,17 +522,20 @@ computeEETA.LISREL <- function(MLIST=NULL, mean.x=NULL,
             # fill in exo values
             eeta[lv.dummy.idx] <- sample.mean[ov.dummy.idx]
  
-            # Note: instead of sample.mean, we need 
-            # sample.mean - lambda %*% eta (ie intercepts, not means)
-            # otherwise, ov.y.dummy elements are off
-            # (ignored, since they are not used??)
+            # Note: instead of sample.mean, we need 'intercepts'
+            # sample.mean = NU + LAMBDA..IB.inv %*% ALPHA
+            # so,
+            # solve(LAMBDA..IB.inv) %*% (sample.mean - NU) = ALPHA
+            # where
+            # - LAMBDA..IB.inv only contains 'dummy' variables, and is square
+            # - NU elements are not needed (since not in ov.dummy.idx)
             tmp <- -BETA; nr <- nrow(BETA); i <- seq_len(nr);
-            tmp[cbind(i, i)] <- 1
-            IB.inv <- solve(tmp)       
-            eeta1 <- IB.inv %*% eeta # to get 1:nfac elements
-            eeta[c(3,4)] <- eeta[c(3,4)] - BETA[c(3,4),] %*% eeta1
-        
-        } else {
+            tmp[cbind(i, i)] <- 1; IB.inv <- solve(tmp)
+            LAMBDA..IB.inv <- LAMBDA %*% IB.inv
+            LAMBDA..IB.inv.dummy <- LAMBDA..IB.inv[ov.dummy.idx, lv.dummy.idx]
+            eeta[lv.dummy.idx] <- ( solve(LAMBDA..IB.inv.dummy) %*% 
+                                    sample.mean[ov.dummy.idx] )
+        } else { 
             eeta <- matrix(0, nfac, 1)
         }
     } else {
@@ -587,15 +590,19 @@ computeEETAx.LISREL <- function(MLIST=NULL, eXo=NULL,
             eeta <- matrix(0, nfac, 1)
             eeta[lv.dummy.idx] <- sample.mean[ov.dummy.idx]
 
-            # Note: instead of sample.mean, we need 
-            # sample.mean - lambda %*% eta (ie intercepts, not means)
-            # otherwise, ov.y.dummy elements are off
-            # (ignored, since they are not used??)
+            # Note: instead of sample.mean, we need 'intercepts'
+            # sample.mean = NU + LAMBDA..IB.inv %*% ALPHA
+            # so,
+            # solve(LAMBDA..IB.inv) %*% (sample.mean - NU) = ALPHA
+            # where
+            # - LAMBDA..IB.inv only contains 'dummy' variables, and is square
+            # - NU elements are not needed (since not in ov.dummy.idx)
             tmp <- -BETA; nr <- nrow(BETA); i <- seq_len(nr);
-            tmp[cbind(i, i)] <- 1
-            IB.inv <- solve(tmp)
-            eeta1 <- IB.inv %*% eeta # to get 1:nfac elements
-            eeta[c(3,4)] <- eeta[c(3,4)] - BETA[c(3,4),] %*% eeta1
+            tmp[cbind(i, i)] <- 1; IB.inv <- solve(tmp)
+            LAMBDA..IB.inv <- LAMBDA %*% IB.inv
+            LAMBDA..IB.inv.dummy <- LAMBDA..IB.inv[ov.dummy.idx, lv.dummy.idx]
+            eeta[lv.dummy.idx] <- ( solve(LAMBDA..IB.inv.dummy) %*%
+                                    sample.mean[ov.dummy.idx] )
         } else {
             eeta <- matrix(0, nfac, 1)
         }
@@ -903,11 +910,14 @@ setResidualElements.LISREL <- function(MLIST=NULL,
     }
 
     # special case: PSI=0, and lambda=I (eg ex3.12)
-    if(sum(diag(MLIST$psi)) == 0.0 && all(diag(MLIST$lambda) == 1)) {
+    if(ncol(MLIST$psi) > 0L && 
+       sum(diag(MLIST$psi)) == 0.0 && all(diag(MLIST$lambda) == 1)) {
         ### FIXME: more elegant/general solution??
         diag(MLIST$psi) <- 1
         Sigma.hat <- computeSigmaHat.LISREL(MLIST = MLIST, delta=FALSE)
         diag.Sigma <- diag(Sigma.hat) - 1.0
+    } else if(ncol(MLIST$psi) == 0L) {
+        diag.Sigma <- rep(0, ncol(MLIST$theta))
     } else {
         Sigma.hat <- computeSigmaHat.LISREL(MLIST = MLIST, delta=FALSE)
         diag.Sigma <- diag(Sigma.hat)
@@ -1148,7 +1158,7 @@ derivative.sigma.LISREL <- function(m="lambda",
     PSI    <- MLIST$psi
  
     # only lower.tri part of sigma (not same order as elimination matrix?)
-    v.idx <- lavaan:::vech.idx( nvar  ); pstar <- nvar*(nvar+1)/2
+    v.idx <- vech.idx( nvar  ); pstar <- nvar*(nvar+1)/2
 
     # shortcut for gamma, nu, alpha and tau: empty matrix
     if(m == "nu" || m == "alpha" || m == "tau" || m == "gamma") {
@@ -1191,7 +1201,7 @@ derivative.sigma.LISREL <- function(m="lambda",
     } else if(m == "beta") {
         DX <- IK %*% ( t(IB.inv..PSI..tIB.inv..tLAMBDA) %x% LAMBDA..IB.inv )
         # this is not really needed (because we select idx=m.el.idx)
-        DX[,lavaan:::diag.idx(nfac)] <- 0.0
+        DX[,diag.idx(nfac)] <- 0.0
         if(delta.flag) 
              DX <- DX * as.numeric(DELTA %x% DELTA)
     } else if(m == "psi") {
@@ -1204,8 +1214,8 @@ derivative.sigma.LISREL <- function(m="lambda",
         #imatrix <- matrix(1:nfac^2,nfac,nfac)
         #lower.idx <- imatrix[lower.tri(imatrix, diag=FALSE)]
         #upper.idx <- imatrix[upper.tri(imatrix, diag=FALSE)]
-        lower.idx <- lavaan:::vech.idx(nfac, diag=FALSE)
-        upper.idx <- lavaan:::vechru.idx(nfac, diag=FALSE)
+        lower.idx <- vech.idx(nfac, diagonal=FALSE)
+        upper.idx <- vechru.idx(nfac, diagonal=FALSE)
         # NOTE YR: upper.idx (see 3 lines up) is wrong in MH patch!
         # fixed again 13/06/2012 after bug report of Mijke Rhemtulla.
 
@@ -1224,8 +1234,8 @@ derivative.sigma.LISREL <- function(m="lambda",
         DD <- diag(DELTA[,1], nvar, nvar)
         DD.Omega <- (DD %*% Omega)
         A <- DD.Omega %x% diag(nvar); B <- diag(nvar) %x% DD.Omega
-        DX <- A[,lavaan:::diag.idx(nvar),drop=FALSE] + 
-              B[,lavaan:::diag.idx(nvar),drop=FALSE]
+        DX <- A[,diag.idx(nvar),drop=FALSE] + 
+              B[,diag.idx(nvar),drop=FALSE]
     } else {
         stop("wrong model matrix names: ", m, "\n")
     }
@@ -1273,7 +1283,7 @@ derivative.mu.LISREL <- function(m="alpha",
     } else if(m == "beta") {
         DX <- t(IB.inv %*% ALPHA) %x% (LAMBDA %*% IB.inv)
         # this is not really needed (because we select idx=m.el.idx)
-        DX[,lavaan:::diag.idx(nfac)] <- 0.0
+        DX[,diag.idx(nfac)] <- 0.0
     } else if(m == "alpha") {
         DX <- LAMBDA %*% IB.inv
     } else {
@@ -1356,7 +1366,7 @@ derivative.th.LISREL <- function(m="tau",
     } else if(m == "beta") {
         DX <- (-1) * t(IB.inv %*% ALPHA) %x% (LAMBDA %*% IB.inv)
         # this is not really needed (because we select idx=m.el.idx)
-        DX[,lavaan:::diag.idx(nfac)] <- 0.0
+        DX[,diag.idx(nfac)] <- 0.0
         DX <- K_nu %*% DX
         if(delta.flag)
             DX <- DX * as.numeric(K_nu %*% DELTA)
@@ -1417,7 +1427,7 @@ derivative.pi.LISREL <- function(m="lambda",
     } else if(m == "beta") {
         DX <- t(IB.inv %*% GAMMA) %x% (LAMBDA %*% IB.inv)
         # this is not really needed (because we select idx=m.el.idx)
-        DX[,lavaan:::diag.idx(nfac)] <- 0.0
+        DX[,diag.idx(nfac)] <- 0.0
         if(delta.flag)
             DX <- DX * DELTA.diag
     } else if(m == "gamma") {
@@ -1467,10 +1477,10 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL, meanstructure=TRUE,
         MLIST <- lapply(MLIST, function(x) {x[,] <- rnorm(length(x)); x})
         # fix
         diag(MLIST$beta) <- 0.0
-        MLIST$psi[ lavaan:::vechru.idx(nfac) ] <-  
-            MLIST$psi[ lavaan:::vech.idx(nfac) ]
-        MLIST$theta[ lavaan:::vechru.idx(nvar) ] <-  
-            MLIST$theta[ lavaan:::vech.idx(nvar) ]
+        MLIST$psi[ vechru.idx(nfac) ] <-  
+            MLIST$psi[ vech.idx(nfac) ]
+        MLIST$theta[ vechru.idx(nvar) ] <-  
+            MLIST$theta[ vech.idx(nvar) ]
         if(delta) MLIST$delta[,] <- abs(MLIST$delta)*10
     }
 
@@ -1516,9 +1526,9 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL, meanstructure=TRUE,
 
     for(mm in names(MLIST)) {
         if(mm %in% c("psi", "theta")) {
-            x <- lavaan:::vech(MLIST[[mm]])
+            x <- vech(MLIST[[mm]])
         } else {
-            x <- lavaan:::vec(MLIST[[mm]])
+            x <- vec(MLIST[[mm]])
         }
 
         # 1. sigma
@@ -1527,7 +1537,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL, meanstructure=TRUE,
                                        MLIST=MLIST)
         if(mm %in% c("psi","theta")) {
             # remove duplicated columns of symmetric matrices 
-            idx <- lavaan:::vechru.idx(sqrt(ncol(DX2)), diag=FALSE)
+            idx <- vechru.idx(sqrt(ncol(DX2)), diagonal=FALSE)
             DX2 <- DX2[,-idx]
         }
         cat("[SIGMA] mm = ", sprintf("%-8s:", mm), "sum delta = ", 
@@ -1540,7 +1550,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL, meanstructure=TRUE,
                                        MLIST=MLIST)
         if(mm %in% c("psi","theta")) {
             # remove duplicated columns of symmetric matrices 
-            idx <- lavaan:::vechru.idx(sqrt(ncol(DX2)), diag=FALSE)
+            idx <- vechru.idx(sqrt(ncol(DX2)), diagonal=FALSE)
             DX2 <- DX2[,-idx]
         }
         cat("[MU   ] mm = ", sprintf("%-8s:", mm), "sum delta = ",
@@ -1555,7 +1565,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL, meanstructure=TRUE,
                                     MLIST=MLIST, th.idx=th.idx)
         if(mm %in% c("psi","theta")) {
             # remove duplicated columns of symmetric matrices 
-            idx <- lavaan:::vechru.idx(sqrt(ncol(DX2)), diag=FALSE)
+            idx <- vechru.idx(sqrt(ncol(DX2)), diagonal=FALSE)
             DX2 <- DX2[,-idx]
         }
         cat("[TH   ] mm = ", sprintf("%-8s:", mm), "sum delta = ",
@@ -1570,7 +1580,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL, meanstructure=TRUE,
                                     MLIST=MLIST)
         if(mm %in% c("psi","theta")) {
             # remove duplicated columns of symmetric matrices 
-            idx <- lavaan:::vechru.idx(sqrt(ncol(DX2)), diag=FALSE)
+            idx <- vechru.idx(sqrt(ncol(DX2)), diagonal=FALSE)
             DX2 <- DX2[,-idx]
         }
         cat("[PI   ] mm = ", sprintf("%-8s:", mm), "sum delta = ",

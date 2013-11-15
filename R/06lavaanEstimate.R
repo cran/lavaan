@@ -154,7 +154,7 @@ computeSigmaHat <- function(object, GLIST=NULL, extra=FALSE, debug=FALSE) {
             # check if matrix is positive definite
             ev <- eigen(Sigma.hat[[g]], symmetric=TRUE, only.values=TRUE)$values
             if(any(ev < .Machine$double.eps) || sum(ev) == 0) {
-                Sigma.hat.inv <-  MASS:::ginv(Sigma.hat[[g]])
+                Sigma.hat.inv <-  MASS::ginv(Sigma.hat[[g]])
                 Sigma.hat.log.det <- log(.Machine$double.eps)
                 attr(Sigma.hat[[g]], "po") <- FALSE
                 attr(Sigma.hat[[g]], "inv") <- Sigma.hat.inv
@@ -175,7 +175,7 @@ computeSigmaHat <- function(object, GLIST=NULL, extra=FALSE, debug=FALSE) {
     Sigma.hat
 }
 
-### FIXME::: replace by computeEY (to allow for GAMMA in continuous case)?
+### FIXME:: replace by computeEY (to allow for GAMMA in continuous case)?
 computeMuHat <- function(object, GLIST=NULL) {
 
     # state or final?
@@ -736,15 +736,26 @@ computeObjective <- function(object, GLIST=NULL,
             group.fx <- estimator.WLS(WLS.est = WLS.est,
                                       WLS.obs = samplestats@WLS.obs[[g]], 
                                       WLS.V=samplestats@WLS.V[[g]])  
+            attr(group.fx, "WLS.est") <- WLS.est
         } else if(estimator == "PML") {
-
-            #cat("DEBUG!\n")
-            #print(getModelParameters(object, GLIST=GLIST))
-            #print(Sigma.hat[[g]])
-            #print(TH[[g]])
-            #cat("*****\n")
             # Pairwise maximum likelihood
             group.fx <- estimator.PML(Sigma.hat = Sigma.hat[[g]],
+                                      TH        = TH[[g]],
+                                      th.idx    = th.idx[[g]],
+                                      num.idx   = num.idx[[g]],
+                                      X         = X[[g]],
+                                      cache     = cache[[g]])
+        } else if(estimator == "FML") { 
+            # Full maximum likelihood (underlying multivariate normal)
+            group.fx <- estimator.FML(Sigma.hat = Sigma.hat[[g]],
+                                      TH        = TH[[g]],
+                                      th.idx    = th.idx[[g]],
+                                      num.idx   = num.idx[[g]],
+                                      X         = X[[g]],
+                                      cache     = cache[[g]])
+        } else if(estimator == "MML") { 
+            # marginal maximum likelihood
+            group.fx <- estimator.MML(Sigma.hat = Sigma.hat[[g]],
                                       TH        = TH[[g]],
                                       th.idx    = th.idx[[g]],
                                       num.idx   = num.idx[[g]],
@@ -755,8 +766,9 @@ computeObjective <- function(object, GLIST=NULL,
         }
 
         if(estimator == "ML") {
-            group.fx <- 0.5 * group.fx
-        } else if(estimator == "PML") {
+            group.fx <- 0.5 * group.fx ## FIXME
+        } else if(estimator == "PML" || estimator == "FML" || 
+                  estimator == "MML") {
             # do nothing
         } else {
             group.fx <- 0.5 * (samplestats@nobs[[g]]-1)/samplestats@nobs[[g]] * group.fx
@@ -905,8 +917,8 @@ computeDelta <- function(object, GLIST.=NULL, m.el.idx.=NULL, x.el.idx.=NULL) {
                                                  MLIST=GLIST[ mm.in.group ])
                 if(categorical) {
                     # reorder: first variances (of numeric), then covariances
-                    cov.idx  <- lavaan:::vech.idx(nvar[g])
-                    covd.idx <- lavaan:::vech.idx(nvar[g], diag=FALSE)
+                    cov.idx  <- vech.idx(nvar[g])
+                    covd.idx <- vech.idx(nvar[g], diagonal=FALSE)
 
                     var.idx <- which(is.na(match(cov.idx, 
                                                  covd.idx)))[num.idx[[g]]]
@@ -969,7 +981,7 @@ computeOmega <- function(Sigma.hat=NULL, Mu.hat=NULL,
                 # CURRENTLY: stop
                 warning("computeGradient: Sigma.hat is not positive definite\n")
                 #Sigma.hat[[g]] <- force.pd(Sigma.hat[[g]])
-                Sigma.hat.inv <- MASS:::ginv(Sigma.hat[[g]])
+                Sigma.hat.inv <- MASS::ginv(Sigma.hat[[g]])
                 Sigma.hat.log.det <- log(.Machine$double.eps)
             } else {
                 Sigma.hat.inv <-  attr(Sigma.hat[[g]], "inv")
@@ -1063,7 +1075,7 @@ computeGradient <- function(object, GLIST=NULL, samplestats=NULL,
 
     # group.w
     if(group.weight) {
-        if(estimator == "ML") {
+        if(estimator %in% c("ML","PML","FML","MML")) {
             group.w <- (unlist(samplestats@nobs)/samplestats@ntotal)
         } else {
             # FIXME: double check!
@@ -1205,7 +1217,8 @@ computeGradient <- function(object, GLIST=NULL, samplestats=NULL,
 
     } # WLS
 
-    else if(estimator == "PML") {
+    else if(estimator == "PML" || estimator == "FML" ||
+            estimator == "MML") {
 
         if(type != "free") {
             stop("FIXME: type != free in computeGradient for estimator PML")
@@ -1223,15 +1236,28 @@ computeGradient <- function(object, GLIST=NULL, samplestats=NULL,
 
             # compute partial derivative of logLik with respect to 
             # thresholds/means, slopes, variances, correlations
-            d1 <- pml_deriv1(Sigma.hat = Sigma.hat[[g]],
-                             TH        = TH[[g]],
-                             th.idx    = th.idx[[g]],
-                             num.idx   = num.idx[[g]],
-                             X         = X[[g]],
-                             cache     = cache[[g]])
+            if(estimator == "PML") {
+                d1 <- pml_deriv1(Sigma.hat = Sigma.hat[[g]],
+                                 TH        = TH[[g]],
+                                 th.idx    = th.idx[[g]],
+                                 num.idx   = num.idx[[g]],
+                                 X         = X[[g]],
+                                 cache     = cache[[g]])
+            } else {
+                d1 <- fml_deriv1(Sigma.hat = Sigma.hat[[g]],
+                                 TH        = TH[[g]],
+                                 th.idx    = th.idx[[g]],
+                                 num.idx   = num.idx[[g]],
+                                 X         = X[[g]],
+                                 cache     = cache[[g]])
+            }
 
-            # chain rule
-            group.dx <- as.numeric(t(d1) %*% Delta[[g]])
+            # chain rule (logLik)
+            #group.dx <- as.numeric(t(d1) %*% Delta[[g]])
+
+            # chain rule (fmin)
+            ### FIXME why -1L ???
+            group.dx <- as.numeric(t(d1) %*% Delta[[g]])/samplestats@nobs[[g]]
 
             # group weights (if any)
             group.dx <- group.w[g] * group.dx
@@ -1291,7 +1317,7 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
                                estimator=estimator, verbose=verbose,
                                forcePD=forcePD)	
         if(debug || verbose) { 
-            cat("Objective function  = ", sprintf("%12.10f", fx), "\n", sep="") 
+            cat("Objective function  = ", sprintf("%18.16f", fx), "\n", sep="") 
         }
         if(debug) {
             cat("Current unconstrained parameter values =\n")
@@ -1370,7 +1396,7 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
 
     # check if the initial values produce a positive definite Sigma
     # to begin with -- but only for estimator="ML"
-    if(estimator %in% c("ML","PML")) {
+    if(estimator %in% c("ML","PML","FML","MML")) {
         Sigma.hat <- computeSigmaHat(object, extra=TRUE, debug=options$debug)
         for(g in 1:ngroups) {
             if(!attr(Sigma.hat[[g]], "po")) {
@@ -1417,6 +1443,30 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
         INIT_NELDER_MEAD <- control$init_nelder_mead
     }
 
+    # gradient: analytic, numerical or NULL?
+    if(is.null(control$gradient)) {
+        GRADIENT <- first.derivative.param
+    } else {
+        if(is.logical(control$gradient)) {
+            if(control$gradient) {
+                GRADIENT <- first.derivative.param
+            } else {
+                GRADIENT <- NULL
+            }
+        } else if(is.character(control$gradient)) {
+            if(control$gradient == "analytic") {
+                GRADIENT <- first.derivative.param
+            } else if(control$gradient == "numerical") {
+                GRADIENT <- first.derivative.param.numerical
+            } else if(control$gradient == "NULL") {
+                GRADIENT <- NULL
+            } else {
+                warning("lavaan WARNING: control$gradient should be analytic, numerical or NULL")
+                GRADIENT <- NULL
+            }
+        }
+    }
+
     # optimizer
     if(is.null(body(object@ceq.function)) && 
        is.null(body(object@cin.function)) ) {
@@ -1459,15 +1509,17 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
                                iter.max=10000L,
                                trace=0L,
                                #abs.tol=1e-20, ### important!! fx never negative
-                               abs.tol=(.Machine$double.eps * 10))
+                               abs.tol=(.Machine$double.eps * 10),
+                               rel.tol=1e-10,
+                               x.tol=1.5e-8,
+                               xf.tol=2.2e-14)
         control.nlminb <- modifyList(control.nlminb, control)
         control <- control.nlminb[c("eval.max", "iter.max", "trace",
-                                    "abs.tol")]
-        #cat("DEBUG: control = ", unlist(control.nlminb), "\n")
+                                    "abs.tol", "rel.tol", "x.tol", "xf.tol")]
+        #cat("DEBUG: control = "); print(str(control.nlminb)); cat("\n")
         optim.out <- nlminb(start=start.x,
                             objective=minimize.this.function,
-                            gradient=first.derivative.param,
-                            #gradient=first.derivative.param.numerical,
+                            gradient=GRADIENT,
                             control=control,
                             scale=SCALE,
                             verbose=verbose) 
@@ -1505,7 +1557,7 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
         #trace <- 0L; if(verbose) trace <- 1L
         optim.out <- optim(par=start.x,
                            fn=minimize.this.function,
-                           gr=first.derivative.param,
+                           gr=GRADIENT,
                            method="BFGS",
                            control=control,
                            hessian=FALSE,
@@ -1544,7 +1596,7 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
                                     "factr", "pgtol")]
         optim.out <- optim(par=start.x,
                            fn=minimize.this.function,
-                           gr=first.derivative.param,
+                           gr=GRADIENT,
                            method="L-BFGS-B",
                            control=control,
                            hessian=FALSE,
@@ -1589,8 +1641,7 @@ estimateModel <- function(object, samplestats=NULL, X=NULL, do.fit=TRUE,
         trace <- FALSE; if(verbose) trace <- TRUE
         optim.out <- nlminb.constr(start = start.x,
                                    objective=minimize.this.function,
-                                   gradient=first.derivative.param,
-                                   #gradient=first.derivative.param.numerical,
+                                   gradient=GRADIENT,
                                    control=control,
                                    scale=SCALE,
                                    verbose=verbose,

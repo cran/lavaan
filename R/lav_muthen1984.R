@@ -2,6 +2,8 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
                        ov.names.x=character(0L), eXo=NULL, verbose=FALSE,
                        missing="listwise",
                        WLS.W=TRUE, # do we need asymptotic variance of stats?
+                       zero.add = c(0.5, 0.0),
+                       zero.keep.margins = TRUE,
                        group=1L) { # group only for error messages
 
     # internal function lav_crossprod2
@@ -19,8 +21,8 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
         upper <- apply(combn(ncol(A),2),2,
                        function(x) sum(A[,x[1]] * A[,x[2]], na.rm=TRUE))
         tmp <- diag(apply(A, 2, function(x) sum(x*x, na.rm=TRUE)))
-        tmp[ lavaan:::vechru.idx(ndim, diag=FALSE) ] <- upper
-        tmp[ lavaan:::vech.idx(  ndim, diag=FALSE) ] <- upper
+        tmp[ vechru.idx(ndim, diagonal=FALSE) ] <- upper
+        tmp[ vech.idx(  ndim, diagonal=FALSE) ] <- upper
         tmp
     }
     
@@ -162,7 +164,7 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
 
     # LAVAAN style: col-wise! (LISREL style: row-wise using vechr.idx)
     PSTAR <- matrix(0, nvar, nvar)
-    PSTAR[lavaan:::vech.idx(nvar, diag=FALSE)] <- 1:pstar
+    PSTAR[vech.idx(nvar, diagonal=FALSE)] <- 1:pstar
     for(j in seq_len(nvar-1L)) {
         for(i in (j+1L):nvar) {
             if(verbose) { cat(" i = ", i, " j = ", j, 
@@ -187,7 +189,9 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
                 COR[i,j] <- COR[j,i] <- out
             } else if(ov.types[i] == "ordered" && ov.types[j] == "ordered") {
                 # polychoric correlation
-                out <- pc_cor_TS(fit.y1=FIT[[i]], fit.y2=FIT[[j]])
+                out <- pc_cor_TS(fit.y1=FIT[[i]], fit.y2=FIT[[j]],
+                                 zero.add = zero.add, 
+                                 zero.keep.margins = zero.keep.margins)
                 COR[i,j] <- COR[j,i] <- out
             }
             # check for near 1.0 correlations

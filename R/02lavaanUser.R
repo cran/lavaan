@@ -233,6 +233,7 @@ lavaanify <- lavParTable <- function(
     # FIXME!!!
     # b1 == b3
     # b2 == b3 does not work
+    # better a general approach for linear constraints!
     #if(length(CON) > 0L) {
     #    el.idx <- integer(0L)
     #    for(el in 1:length(CON)) {
@@ -249,6 +250,8 @@ lavaanify <- lavParTable <- function(
     #                    LIST$label[rhs.idx] <- LIST$label[lhs.idx]
     #                }
     #                LIST$free[ rhs.idx] <- 0L
+                     # FIXME: what is needed is to replace all occurences
+                     #        of rhs.idx by lhs.idx in CON!!!
     #            }
     #        }
     #    }
@@ -426,6 +429,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     MOD <- vector("list", length=0L)
     CON <- vector("list", length=0L)
     GRP <- 1L
+    GRP_OP <- FALSE
     for(i in 1:length(model)) {
         x <- model[i]
         if(debug) {
@@ -506,8 +510,11 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
             FLAT.start[FLAT.idx] <- ""
             FLAT.label[FLAT.idx] <- ""
             FLAT.rhs.mod.idx[FLAT.idx] <- 0L
+            if(GRP_OP) {
+                GRP <- GRP + 1L
+            }
             FLAT.group[FLAT.idx] <- GRP
-            GRP <- GRP + 1L
+            GRP_OP <- TRUE
             next
         }
     
@@ -528,6 +535,8 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
         rhs <- gsub('([0-9]*\\.*[0-9]*)\\?',"start(\\1)\\*",rhs)
         rhs.formula <- as.formula(paste("~",rhs))
         out <- parse.rhs(rhs=rhs.formula[[2L]],op=op)
+
+        if(debug) print(out)
     
         # for each lhs element
         for(l in 1:length(lhs.names)) {
@@ -536,31 +545,36 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
             for(j in 1:length(out)) {
         
                 # catch intercepts
-                if(op == "~" && names(out)[j] == "intercept") {
-                    #op <- "~1"
-                    rhs.name <- ""
+                if(names(out)[j] == "intercept") {
+                    if(op == "~") {
+                        rhs.name <- ""
+                    } else {
+                        stop("lavaan ERROR: right-hand side of formula contains an intercept, but operator is \"", op, "\" in: ", x)
+                    }
                 } else {
                     rhs.name <- names(out)[j]
                 }
         
                 # check if we not already have this combination (in this group)
                 # 1. asymmetric (=~, ~, ~1)
-                idx <- which(FLAT.lhs == lhs.names[l] &
-                             FLAT.op  == op &
-                             FLAT.group == GRP &
-                             FLAT.rhs == rhs.name)
-                if(length(idx) > 0L) {
-                    stop("lavaan ERROR: duplicate model element in: ", model[i])
+                if(op != "~~") {
+                    idx <- which(FLAT.lhs == lhs.names[l] &
+                                 FLAT.op  == op &
+                                 FLAT.group == GRP &
+                                 FLAT.rhs == rhs.name)
+                    if(length(idx) > 0L) {
+                        stop("lavaan ERROR: duplicate model element in: ", model[i])
+                    }
+                } else {
+                    # 2. symmetric (~~)
+                    idx <- which(FLAT.lhs == rhs.name &
+                                 FLAT.op  == "~~" &
+                                 FLAT.group == GRP &
+                                 FLAT.rhs == lhs.names[l])
+                    if(length(idx) > 0L) {
+                        stop("lavaan ERROR: duplicate model element in: ", model[i])
+                    }
                 }
-                # 2. symmetric (~~)
-                idx <- which(FLAT.lhs == rhs.name &
-                             FLAT.op  == "~~" &
-                             FLAT.group == GRP &
-                             FLAT.rhs == lhs.names[l])
-                if(length(idx) > 0L) {
-                    stop("lavaan ERROR: duplicate model element in: ", model[i])
-                }
-        
                 FLAT.idx <- FLAT.idx + 1L
                 FLAT.lhs[FLAT.idx] <- lhs.names[l]
                 FLAT.op[ FLAT.idx] <- op
@@ -695,10 +709,16 @@ parse.rhs <- function(rhs, op="") {
             NAME <- all.vars(rhs)
             if(length(NAME) > 0L) {
                 names(out)[1L] <- NAME
-            } else { # intercept
-                names(out)[1L] <- "intercept"
-                if(as.character(rhs) == "0")
+            } else { # intercept or zero?
+                if(as.character(rhs) == "1") {
+                    names(out)[1L] <- "intercept"
+                } else if(as.character(rhs) == "0") {
+                    names(out)[1L] <- "zero"
                     out[[1L]]$fixed <- 0
+                } else {
+                    names(out)[1L] <- "constant"
+                    out[[1L]]$fixed <- 0 
+                }
             }
             break
         } else if(rhs[[1L]] == "*") { # last one, but with modifier
