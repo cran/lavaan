@@ -43,6 +43,7 @@ setClass("lavSampleStats",         # sample moments
         mean.x="list",             # mean exo
         cov.x="list",              # variance/covariance exo
         bifreq="list",             # bivariate frequency tables
+        group.w="list",            # group weight
 
         nobs="list",               # effective number of obs (per group)
         ntotal="integer",          # total number of obs (all groups)
@@ -71,6 +72,9 @@ setClass("Model",          # MATRIX representation of the sem model
         representation="character",  # stub, until we define more classes
         meanstructure="logical",
         categorical="logical",
+        group.w.free="logical",
+        link="character",
+        control="list",
 
         ngroups="integer",
         nmat="integer",
@@ -106,6 +110,7 @@ setClass("Model",          # MATRIX representation of the sem model
 
         nexo="integer",
         fixed.x="logical",
+        parameterization="character",
         ov.x.dummy.ov.idx="list",
         ov.x.dummy.lv.idx="list",
         ov.y.dummy.ov.idx="list",

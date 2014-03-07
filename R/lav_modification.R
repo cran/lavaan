@@ -8,7 +8,7 @@ modificationIndices <- modificationindices <- modindices <- function(object,
     if(power) standardized <- TRUE
 
     # get LIST parameter list
-    LIST <- getUserListFull(object@ParTable)
+    LIST <- lav_partable_full(object@ParTable)
     LIST$free <- 0L; LIST$eq.id <- 0L; LIST$unco <- 0L
     LIST <- as.data.frame(LIST)
 
@@ -83,22 +83,27 @@ modificationIndices <- modificationindices <- modindices <- function(object,
             x.el.idx[[offset]] <- tmp[which(tmp > 0)]
         }
     }
-    Delta <- computeDelta(object@Model, m.el.idx.=m.el.idx, x.el.idx.=x.el.idx)
+    Delta <- computeDelta(lavmodel = object@Model, 
+                          m.el.idx. = m.el.idx, x.el.idx. = x.el.idx)
 
     # compute information matrix
-    E <- computeExpectedInformation(object@Model, 
-                                    samplestats=object@SampleStats,
-                                    estimator=object@Options$estimator,
-                                    Delta=Delta)
+    E <- computeExpectedInformation(lavmodel       = object@Model, 
+                                    lavsamplestats = object@SampleStats,
+                                    estimator      = object@Options$estimator,
+                                    Delta          = Delta)
     Q <- (1/object@SampleStats@ntotal) * E
 
     # list!
-    DX <- computeGradient(object@Model, GLIST=NULL, 
-                          samplestats=object@SampleStats,
-                          type="allofthem", 
-                          estimator=object@Options$estimator,
-                          group.weight=TRUE,
-                          Delta=Delta)
+    DX <- lav_model_gradient(lavmodel       = object@Model, 
+                             GLIST          = NULL, 
+                             lavsamplestats = object@SampleStats,
+                             lavdata        = object@Data,
+                             lavcache       = object@Cache,
+                             type           = "allofthem", 
+                             estimator      = object@Options$estimator,
+                             group.weight   = TRUE,
+                             constraints    = TRUE, #### FIXME???
+                             Delta          = Delta)
 
     # flatten list DX to a vector dx
     dx <- numeric(0)
@@ -125,7 +130,33 @@ modificationIndices <- modificationindices <- modindices <- function(object,
     Q11 <- Q[nonfree.idx, nonfree.idx]
     Q12 <- Q[nonfree.idx,    free.idx]
     Q21 <- Q[free.idx,    nonfree.idx]
-    Q22 <- Q[free.idx,       free.idx]; Q22.inv <- solve(Q22)
+    Q22 <- Q[free.idx,       free.idx]
+
+    # take care of constraints (if any)
+    # handle constraints
+    if(nrow(object@Model@con.jac) > 0L) {
+        H <- object@Model@con.jac
+        inactive.idx <- attr(H, "inactive.idx")
+        lambda <- object@Model@con.lambda # lagrangean coefs
+        if(length(inactive.idx) > 0L) {
+            H <- H[-inactive.idx,,drop=FALSE]
+            lambda <- lambda[-inactive.idx]
+        }
+        if(nrow(H) > 0L) {
+            H0 <- matrix(0,nrow(H),nrow(H))
+            H10 <- matrix(0, ncol(Q22), nrow(H))
+            DL <- 2*diag(lambda, nrow(H), nrow(H))
+            E3 <- rbind( cbind(     Q22,  H10, t(H)),
+                         cbind(t(H10),     DL,  H0),
+                         cbind(     H,     H0,  H0)  )
+            Q22.inv <- MASS::ginv(E3)[1:ncol(Q22), 1:ncol(Q22)]
+            # FIXME: better include inactive + slacks??
+        } else {
+            Q22.inv <- solve(Q22)
+        }
+    } else {
+        Q22.inv <- solve(Q22)
+    }
 
     V <- Q11 - Q12 %*% Q22.inv %*% Q21
     V.diag <- diag(V)

@@ -2,6 +2,9 @@
 setMethod("residuals", "lavaan",
 function(object, type="raw", labels=TRUE) {
 
+    # lowercase type
+    type <- tolower(type)
+
     # catch type="casewise"
     if(type %in% c("casewise","case","obs","observations")) {
         return( lav_residuals_casewise(object, labels = labels) )
@@ -21,8 +24,19 @@ function(object, type="raw", labels=TRUE) {
  
 
     # check type
-    if(!type %in% c("raw", "cor", "normalized", "standardized", "casewise")) {
-        stop("type must be one of \"raw\", \"cor\", \"normalized\" or \"standardized\" or \"casewise\"")
+    if(!type %in% c("raw", "cor",
+        "cor.bollen", "cor.bentler", "cor.eqs",
+        "normalized", "standardized", "casewise")) {
+        stop("type must be one of \"raw\", \"cor\", \"cor.bollen\", \"cor.bentler\", \"normalized\" or \"standardized\" or \"casewise\"")
+    }
+    
+    # if cor, choose 'default'
+    if(type == "cor") {
+        if(object@Options$mimic == "EQS") {
+            type <- "cor.bentler"
+        } else {
+            type <- "cor.bollen"
+        }
     }
 
     # check for 0 parameters if type == standardized
@@ -56,14 +70,16 @@ function(object, type="raw", labels=TRUE) {
             augUser$exo[       idx ] <- 0L
             augUser$free[      idx ] <- max(augUser$free) + 1:length(idx) 
             augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx) 
-            augModel <- Model(partable       = augUser,
-                              start          = object@Fit@est,
-                              representation = object@Options$representation,
-                              debug          = object@Options$debug)
-            VarCov <- estimateVCOV(augModel, samplestats = object@SampleStats,
-                                   data = object@Data,
-                                   partable = object@Partable,
-                                   options = object@Options)
+            augModel <- lav_model(lavpartable    = augUser,
+                                  start          = object@Fit@est,
+                                  representation = object@Options$representation,
+                                  link           = object@Options$link,
+                                  debug          = object@Options$debug)
+            VarCov <- lav_model_vcov(lavmodel       = augModel, 
+                                     lavsamplestats = object@SampleStats,
+                                     lavdata        = object@Data,
+                                     lavpartable    = object@Partable,
+                                     lavoptions     = object@Options)
             # set cov between free and fixed.x elements to zero
             ###
             ### FIXME: should we not do this on the information level,
@@ -74,14 +90,14 @@ function(object, type="raw", labels=TRUE) {
             VarCov[free.idx, fixed.x.idx] <- 0.0
             VarCov[fixed.x.idx, free.idx] <- 0.0
 
-            Delta  <- computeDelta(augModel)
+            Delta  <- computeDelta(lavmodel = augModel)
         } else {
-            VarCov <- estimateVCOV(object@Model, 
-                                   data = object@Data,
-                                   partable = object@Partable,
-                                   samplestats = object@SampleStats,
-                                   options = object@Options)
-            Delta  <- computeDelta(object@Model)
+            VarCov <- lav_model_vcov(lavmodel       = object@Model,
+                                     lavdata        = object@Data,
+                                     lavpartable    = object@Partable,
+                                     lavsamplestats = object@SampleStats,
+                                     lavoptions     = object@Options)
+            Delta  <- computeDelta(lavmodel = object@Model)
         }   
     }
 
@@ -100,13 +116,22 @@ function(object, type="raw", labels=TRUE) {
         }
         nvar <- ncol(S)
 
-        # raw residuals (for this group
-        if(type == "cor") {
+        # residuals (for this group)
+        if(type == "cor.bollen") {
             R[[g]]$cov  <- cov2cor(S) - cov2cor(object@Fit@Sigma.hat[[g]])
+            R[[g]]$mean <- ( M/sqrt(diag(S)) -
+                object@Fit@Mu.hat[[g]]/sqrt(diag(object@Fit@Sigma.hat[[g]])) )
+        } else if(type == "cor.bentler" || type == "cor.eqs") {
+            # Bentler EQS manual: divide by (sqrt of) OBSERVED variances
+            delta <- 1/sqrt(diag(S))
+            DELTA <- diag(delta, nrow=nvar, ncol=nvar)
+            R[[g]]$cov  <- DELTA %*% (S - object@Fit@Sigma.hat[[g]]) %*% DELTA
+            R[[g]]$mean <- (M - object@Fit@Mu.hat[[g]])/sqrt(diag(S))
         } else {
+            # covariance/raw residuals
             R[[g]]$cov  <- S - object@Fit@Sigma.hat[[g]]
+            R[[g]]$mean <- M - object@Fit@Mu.hat[[g]]
         }
-        R[[g]]$mean <- M - object@Fit@Mu.hat[[g]]
         if(labels) {
             rownames(R[[g]]$cov) <- colnames(R[[g]]$cov) <- ov.names[[g]]
         }
@@ -200,10 +225,9 @@ function(object, type="raw", labels=TRUE) {
     }
 
     # replace 'cov' by 'cor' if type == "cor"
-    if(type == "cor") {
+    if(type %in% c("cor","cor.bollen","cor.eqs","cor.bentler")) {
         R <- lapply(R, "names<-", c("cor", "mean") )
     }
-
 
     if(G == 1) {
         R <- R[[1]]

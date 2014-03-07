@@ -3,38 +3,39 @@
 # initial version: YR 25/03/2009
 # major revision: YR 5/11/2011: separate data.obs and sample statistics
 
-lavSampleStatsFromData <- function(Data              = NULL,
-                                   DataX             = NULL,
-                                   DataeXo           = NULL,
-                                   DataOvnames       = NULL,
-                                   DataOvnamesx      = NULL,
-                                   DataOv            = NULL,
-                                   missing           = "listwise",
-                                   rescale           = FALSE,
-                                   missing.h1        = TRUE,
-                                   estimator         = "ML",
-                                   mimic             = "lavaan",
-                                   meanstructure     = FALSE,
-                                   WLS.V             = NULL,
-                                   NACOV             = NULL,
-                                   ridge             = 1e-5,
-                                   zero.add          = c(0.5, 0.0),
-                                   zero.keep.margins = TRUE,
-                                   debug             = FALSE,
-                                   verbose           = FALSE) {
+lav_samplestats_from_data <- function(lavdata           = NULL,
+                                      DataX             = NULL,
+                                      DataeXo           = NULL,
+                                      DataOvnames       = NULL,
+                                      DataOvnamesx      = NULL,
+                                      DataOv            = NULL,
+                                      missing           = "listwise",
+                                      rescale           = FALSE,
+                                      missing.h1        = TRUE,
+                                      estimator         = "ML",
+                                      mimic             = "lavaan",
+                                      meanstructure     = FALSE,
+                                      group.w.free      = FALSE,
+                                      WLS.V             = NULL,
+                                      NACOV             = NULL,
+                                      ridge             = 1e-5,
+                                      zero.add          = c(0.5, 0.0),
+                                      zero.keep.margins = TRUE,
+                                      debug             = FALSE,
+                                      verbose           = FALSE) {
 
     # ridge default
     ridge.eps <- 0.0
 
     # get X and Mp
-    if(!is.null(Data)) {
-        X <- Data@X; Mp <- Data@Mp
-        ngroups <- Data@ngroups
-        nobs <- Data@nobs
-        ov.names <- Data@ov.names
-        ov.names.x <- Data@ov.names.x
-        DataOv <- Data@ov
-        eXo <- Data@eXo
+    if(!is.null(lavdata)) {
+        X <- lavdata@X; Mp <- lavdata@Mp
+        ngroups <- lavdata@ngroups
+        nobs <- lavdata@nobs
+        ov.names <- lavdata@ov.names
+        ov.names.x <- lavdata@ov.names.x
+        DataOv <- lavdata@ov
+        eXo <- lavdata@eXo
     } else if(!is.null(DataX)) {
         stopifnot(is.list(DataX), is.matrix(DataX[[1L]]))
         X <- DataX
@@ -51,7 +52,7 @@ lavSampleStatsFromData <- function(Data              = NULL,
         ov.names   <- DataOvnames
         ov.names.x <- DataOvnamesx
     } else {
-        stop("both Data and DataX argument are NULL")
+        stop("both lavdata and DataX argument are NULL")
     }
 
     # sample statistics per group
@@ -73,6 +74,8 @@ lavSampleStatsFromData <- function(Data              = NULL,
     missing.      <- vector("list", length=ngroups)
     missing.h1.   <- vector("list", length=ngroups)
     missing.flag. <- FALSE
+    # group weights
+    group.w       <- vector("list", length=ngroups)
 
     if(is.null(WLS.V)) {
         WLS.V      <- vector("list", length=ngroups)
@@ -116,6 +119,9 @@ lavSampleStatsFromData <- function(Data              = NULL,
 
     for(g in 1:ngroups) {
 
+        # group weight
+        group.w[[g]] <- nobs[[g]] / sum(unlist(nobs))
+
         # check if we have categorical data in this group
         categorical <- FALSE
         ov.types  <- DataOv$type[ match(ov.names[[g]], DataOv$name) ]
@@ -123,7 +129,7 @@ lavSampleStatsFromData <- function(Data              = NULL,
         CAT <- list()
         if("ordered" %in% ov.types) {
             categorical <- TRUE
-            if(estimator %in% c("ML","PML","FML")) {
+            if(estimator %in% c("ML","PML","FML","MML")) {
                 WLS.W <- FALSE
             } else {
                 WLS.W <- TRUE
@@ -240,6 +246,11 @@ lavSampleStatsFromData <- function(Data              = NULL,
         } else {
             WLS.obs[[g]] <- vech(cov[[g]])
         }
+        if(group.w.free) {
+            #group.w.last <- nobs[[ngroups]] / sum(unlist(nobs))
+            #WLS.obs[[g]] <- c(log(group.w[[g]]/group.w.last), WLS.obs[[g]])
+            WLS.obs[[g]] <- c(group.w[[g]], WLS.obs[[g]])
+        }
 
         # if missing = "fiml", sample statistics per pattern
         if(missing == "ml") {
@@ -337,6 +348,21 @@ lavSampleStatsFromData <- function(Data              = NULL,
             } else if(estimator == "PML" || estimator == "FML") {
                 # no WLS.V here
             }
+
+            # group.w.free
+            if(!is.null(WLS.V[[g]]) && group.w.free) {
+                # unweight!!
+                #a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
+                # always 1!!!
+                ### FIXME: this is consistent with expected information
+                ###        but why not group.w[[g]] * (1 - group.w[[g]])?
+                #a <- 1
+                a <- group.w[[g]] * (1 - group.w[[g]]) * sum(unlist(nobs)) / nobs[[g]]
+                # invert
+                a <- 1/a
+                WLS.V[[g]] <- bdiag( matrix(a, 1, 1), WLS.V[[g]] )
+            }
+
         }
     } # ngroups
 
@@ -355,6 +381,7 @@ lavSampleStatsFromData <- function(Data              = NULL,
                        mean.x       = mean.x,
                        cov.x        = cov.x,
                        bifreq       = bifreq,
+                       group.w      = group.w,
  
                        # convenience
                        nobs         = nobs,
@@ -379,17 +406,18 @@ lavSampleStatsFromData <- function(Data              = NULL,
 }
 
 
-lavSampleStatsFromMoments <- function(sample.cov    = NULL,
-                                      sample.mean   = NULL,
-                                      sample.nobs   = NULL,
-                                      rescale       = FALSE,
-                                      ov.names      = NULL,
-                                      estimator     = "ML",
-                                      mimic         = "lavaan",
-                                      WLS.V         = NULL,
-                                      NACOV         = NULL,
-                                      ridge         = 1e-5,
-                                      meanstructure = FALSE) {
+lav_samplestats_from_moments <- function(sample.cov    = NULL,
+                                         sample.mean   = NULL,
+                                         sample.nobs   = NULL,
+                                         rescale       = FALSE,
+                                         ov.names      = NULL,
+                                         estimator     = "ML",
+                                         mimic         = "lavaan",
+                                         WLS.V         = NULL,
+                                         NACOV         = NULL,
+                                         ridge         = 1e-5,
+                                         meanstructure = FALSE,
+                                         group.w.free  = FALSE) {
 
     # ridge default
     ridge.eps <- 0.0
@@ -427,6 +455,8 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
     missing.      <- vector("list", length=ngroups)
     missing.h1.   <- vector("list", length=ngroups)
     missing.flag. <- FALSE
+    # group weights
+    group.w       <- vector("list", length=ngroups)
 
     if(is.null(WLS.V)) {
         WLS.V      <- vector("list", length=ngroups)
@@ -472,6 +502,9 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
 
 
     for(g in 1:ngroups) {
+
+        # group weight
+        group.w[[g]] <- nobs[[g]] / sum(unlist(nobs))
 
         tmp.cov <- sample.cov[[g]]
 
@@ -557,6 +590,9 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
             WLS.obs[[g]] <- c(mean[[g]], vech(cov[[g]]))
         else
             WLS.obs[[g]] <- vech(cov[[g]])
+        if(group.w.free) {
+            WLS.obs[[g]] <- c(group.w[[g]], WLS.obs[[g]])
+        }
 
         # NACOV
         # NACOV (=GAMMA)
@@ -584,6 +620,13 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
                 if(is.null(WLS.V[[g]]))
                     stop("lavaan ERROR: the (D)WLS estimator is only available with full data or with a user-provided WLS.V")
             }
+
+            # group.w.free
+            if(!is.null(WLS.V[[g]]) && group.w.free) {
+                # FIXME!!!
+                WLS.V[[g]] <- bdiag( matrix(1, 1, 1), WLS.V[[g]] )
+            }
+
         }
 
     } # ngroups
@@ -603,6 +646,7 @@ lavSampleStatsFromMoments <- function(sample.cov    = NULL,
                        mean.x       = mean.x,
                        cov.x        = cov.x,
                        bifreq       = bifreq,
+                       group.w      = group.w,
 
                        # convenience
                        nobs         = nobs,

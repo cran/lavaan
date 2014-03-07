@@ -9,8 +9,8 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
 {
     # checks
     type <- tolower(type)
-    stopifnot(class(h0) == "lavaan", 
-              class(h1) == "lavaan", 
+    stopifnot(inherits(h0, "lavaan"), 
+              inherits(h1, "lavaan"), 
               type %in% c("bollen.stine", "parametric", "yuan"), 
               double.bootstrap %in% c("no", "FDB", "standard"))
   
@@ -53,8 +53,8 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
     data <- h0@Data
   
     #Compute covariance matrix and additional mean vector
-    Sigma.hat <- computeSigmaHat(h0@Model)
-    Mu.hat    <- computeMuHat(h0@Model)
+    Sigma.hat <- computeSigmaHat(lavmodel = h0@Model)
+    Mu.hat    <- computeMuHat(lavmodel = h0@Model)
 
     # can we use the original data, or do we need to transform it first?
     if(type == "bollen.stine" || type == "yuan") {
@@ -163,8 +163,8 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
         if (verbose) cat("  ... bootstrap draw number: ", b, "\n")
 
         #Get sample statistics
-        bootSampleStats <- try(lavSampleStatsFromData(
-                               Data     = NULL, 
+        bootSampleStats <- try(lav_samplestats_from_data(
+                               lavdata  = NULL, 
                                DataX    = dataX,
                                DataOv        = data@ov,
                                DataOvnames   = data@ov.names,
@@ -174,6 +174,7 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
                                estimator     = h0@Options$estimator,
                                mimic         = h0@Options$mimic,
                                meanstructure = h0@Options$meanstructure,
+                               group.w.free  = h0@Options$group.w.free,
                                missing.h1    = TRUE,
                                verbose  = FALSE), silent=TRUE)
         if (inherits(bootSampleStats, "try-error")) {

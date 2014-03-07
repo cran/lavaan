@@ -3,8 +3,19 @@
 
 short.summary <- function(object) {
 
+    # catch FAKE run
+    FAKE <- FALSE
+    if(!is.null(object@Model@control$optim.method)) {
+        if(tolower(object@Model@control$optim.method) == "none") {
+            FAKE <- TRUE
+        }
+    }
+
     # Convergence or not?
-    if(object@Fit@iterations > 0) {
+    if(FAKE) {
+        cat(sprintf("lavaan (%s) -- DRY RUN with 0 iterations\n",
+                    packageDescription("lavaan", fields="Version")))
+    } else if(object@Fit@iterations > 0) {
         if(object@Fit@converged) {
 	    cat(sprintf("lavaan (%s) converged normally after %3i iterations\n",
                     packageDescription("lavaan", fields="Version"),
@@ -114,7 +125,7 @@ short.summary <- function(object) {
     cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
 
     # check if test == "none"
-    if(object@Options$test != "none") {
+    if(object@Options$test != "none" && object@Options$estimator != "MML") {
 
         # 1. chi-square values
         t0.txt <- sprintf("  %-40s", "Minimum Function Test Statistic")  
@@ -234,6 +245,11 @@ short.summary <- function(object) {
             }
         } 
     } # test != none
+
+    if(object@Options$estimator == "MML") {
+        fm <- fitMeasures(object, c("logl", "npar", "aic", "bic", "bic2"))
+        print.fit.measures(fm)
+    }
 
     #cat("\n")
 }
@@ -470,9 +486,9 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
         }
 
         # 4. intercepts/means
-        ord.names <- vnames(object@ParTable, type="ov.ord", group=g)
+        #ord.names <- vnames(object@ParTable, type="ov.ord", group=g)
         int.idx <- which(object@ParTable$op == "~1" & 
-                         !object@ParTable$lhs %in% ord.names &
+                         #!object@ParTable$lhs %in% ord.names &
                          !object@ParTable$exo &
                          object@ParTable$group == g)
         if(length(int.idx) > 0) {
@@ -528,6 +544,20 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
             NAMES[delta.idx] <- makeNames(  object@ParTable$rhs[delta.idx],
                                             object@ParTable$label[delta.idx])
             for(i in delta.idx) {
+                print.estimate(name=NAMES[i], i, z.stat=TRUE)
+            }
+            cat("\n")
+        }
+
+        # 7. group weight
+        group.idx <- which(object@ParTable$lhs == "group" &
+                           object@ParTable$op == "%" &
+                           object@ParTable$group == g)
+        if(length(group.idx) > 0) {
+            cat("Group weight:\n")
+            NAMES[group.idx] <- makeNames(  object@ParTable$rhs[group.idx],
+                                            object@ParTable$label[group.idx])
+            for(i in group.idx) {
                 print.estimate(name=NAMES[i], i, z.stat=TRUE)
             }
             cat("\n")
@@ -733,11 +763,18 @@ parameter.list <- function(object) {
 
 derivatives <- function(object) {
  
-    GLIST <- computeGradient(object@Model, GLIST=NULL, 
-                             samplestats=object@SampleStats, type="allofthem",
-                             estimator=object@Options$estimator, 
-                             verbose=FALSE, forcePD=TRUE,
-                             group.weight=TRUE, constraints=FALSE)
+    GLIST <- lav_model_gradient(lavmodel       = object@Model, 
+                                GLIST          = NULL, 
+                                lavsamplestats = object@SampleStats, 
+                                lavdata        = object@Data,
+                                lavcache       = object@Cache,
+                                type           = "allofthem",
+                                estimator      = object@Options$estimator, 
+                                verbose        = FALSE, 
+                                forcePD        = TRUE,
+                                group.weight   = TRUE, 
+                                constraints    = FALSE,
+                                Delta          = NULL)
     names(GLIST) <- names(object@Model@GLIST)
 
     for(mm in 1:length(GLIST)) {
@@ -772,7 +809,7 @@ function(object, type="free", labels=TRUE) {
     cof <- object@Fit@est[idx]
   
     # labels?
-    if(labels) names(cof) <- getParameterLabels(object@ParTable, type=type)
+    if(labels) names(cof) <- lav_partable_labels(object@ParTable, type=type)
 
     # class
     class(cof) <- c("lavaan.vector", "numeric")
@@ -908,8 +945,8 @@ parameterEstimates <- parameterestimates <-
                 fac <- qnorm(a)
                 boot.x <- colMeans(BOOT)
                 boot.est <- 
-                    getModelParameters(object@Model, 
-                                       GLIST=x2GLIST(object@Model, boot.x), 
+                    lav_model_get_parameters(object@Model, 
+                                       GLIST=lav_model_x2GLIST(object@Model, boot.x), 
                                        type="user", extra=TRUE)
                 bias.est <- (boot.est - LIST$est)
                 ci <- (LIST$est - bias.est) + LIST$se %o% fac
@@ -1060,7 +1097,9 @@ parameterEstimates <- parameterestimates <-
 
 parameterTable <- parametertable <- parTable <- partable <-
         function(object) {
-    inspect(object, "list")            
+    out <- inspect(object, "list")            
+    class(out) <- c("lavaan.data.frame", "data.frame")
+    out
 }
 
 varTable <- vartable <- function(object, ov.names=names(object), 
@@ -1236,6 +1275,14 @@ sampStat <- function(object, labels=TRUE) {
                 class(OUT[[g]]$slopes) <- c("lavaan.matrix", "matrix")
             }
         }
+
+        if(object@Model@group.w.free) {
+            OUT[[g]]$group.w <- object@SampleStats@group.w[[g]]
+            if(labels) {
+                names(OUT[[g]]$group.w) <- "w"
+                class(OUT[[g]]$group.w) <- c("lavaan.vector", "numeric")
+            }
+        }
     }
 
     if(G == 1) {
@@ -1310,16 +1357,18 @@ function(object, labels=TRUE, attributes.=FALSE) {
     if(object@Fit@npar == 0) {
         VarCov <- matrix(0,0,0)
     } else {
-        VarCov <- estimateVCOV(object@Model, samplestats=object@SampleStats, 
-                               options=object@Options, data=object@Data,
-                               partable=object@Partable, cache=object@Cache,
-                               control=list()
-                              )
+        VarCov <- lav_model_vcov(lavmodel       = object@Model, 
+                                 lavsamplestats = object@SampleStats, 
+                                 lavoptions     = object@Options, 
+                                 lavdata        = object@Data,
+                                 lavpartable    = object@Partable, 
+                                 lavcache       = object@Cache
+                                )
     }
 
     if(labels) {
         colnames(VarCov) <- rownames(VarCov) <- 
-            getParameterLabels(object@ParTable, type="free")
+            lav_partable_labels(object@ParTable, type="free")
     }
  
     if(!attributes.) {
@@ -1423,297 +1472,32 @@ function(object, model, ..., evaluate = TRUE) {
 })
 
 
-
-# this is based on the anova function in the lmer package
 setMethod("anova", signature(object = "lavaan"),
 function(object, ...) {
-
-    if(object@Fit@npar > 0L && !object@Fit@converged)
-        stop("lavaan ERROR: model did not converge")
 
     # NOTE: if we add additional arguments, it is not the same generic
     # anova() function anymore, and match.call will be screwed up
 
-    # default arguments
-    SB.classic <- FALSE
-    SB.H0      <- FALSE
+    # NOTE: we need to extract the names of the models from match.call here,
+    #       otherwise, we loose them in the call stack
 
     mcall <- match.call(expand.dots = TRUE)
     dots <- list(...)
-    arg.names <- names(dots)
-    arg.idx <- which(nchar(arg.names) > 0L)
-    if(length(arg.idx) > 0L) {
-        if(!is.null(dots$SB.classic))
-            SB.classic <- dots$SB.classic
-        if(!is.null(dots$SB.H0))
-            SB.H0 <- dots$SB.H0           
-        dots <- dots[-arg.idx]
-    }
-  
     modp <- if(length(dots))
         sapply(dots, is, "lavaan") else logical(0)
-
-    # some general properties (taken from the first model)
-    estimator <- object@Options$estimator
-    likelihood <- object@Options$likelihood
-    ngroups <- object@Data@ngroups
-    nobs <- object@SampleStats@nobs
-    ntotal <- object@SampleStats@ntotal
-
-    # shortcut for single argument (just plain LRT)
-    if(!any(modp)) {
-        aic <- bic <- c(NA, NA)
-        if(estimator == "ML") {
-            aic <- c(NA, AIC(object))
-            bic <- c(NA, BIC(object))
-        }
-
-        val <- data.frame(Df = c(0, object@Fit@test[[1L]]$df),
-                          AIC = aic,
-                          BIC = bic,
-                          Chisq = c(0, object@Fit@test[[1L]]$stat),
-                          "Chisq diff" = c(NA, object@Fit@test[[1L]]$stat),
-                          "Df diff" = c(NA, object@Fit@test[[1L]]$df),
-                          "Pr(>Chisq)" = c(NA, object@Fit@test[[1L]]$pvalue),
-                          row.names = c("Saturated", "Model"),
-                          check.names = FALSE)
-        attr(val, "heading") <- "Chi Square Test Statistic (unscaled)\n"
-        class(val) <- c("anova", class(val))
-        return(val)
-    }
-
-    # list of models
     mods <- c(list(object), dots[modp])
-    names(mods) <- sapply(as.list(mcall)[c(FALSE, TRUE, modp)], deparse)
+    NAMES <- sapply(as.list(mcall)[c(FALSE, TRUE, modp)], deparse)
 
-    ## put them in order (using number of free parameters)
-    #nfreepar <- sapply(mods, function(x) x@Fit@npar)
-    #if(any(duplicated(nfreepar))) { ## FIXME: what to do here?
-    #    # what, same number of free parameters?
-    #    # maybe, we need to count number of constraints
-    #    ncon <- sapply(mods, function(x) { nrow(x@Model@con.jac) })
-    #    nfreepar <- nfreepar - ncon
-    #}
-
-    # put them in order (using degrees of freedom)
-    ndf <- sapply(mods, function(x) x@Fit@test[[1]]$df)    
-    mods <- mods[order(ndf)]
-
-    # here come the checks
-    if(TRUE) {
-        # 1. same data? we check the covariance matrices of the first group
-        ## wow FIXME: we may need to reorder the rows/columns first!!
-        #COVS <- lapply(mods, function(x) slot(slot(x, "Sample"), "cov")[[1]])
-        #if(!all(sapply(COVS, all.equal, COVS[[1]]))) {
-        #    stop("lavaan ERROR: models must be fit to the same data")
-        #}
-        # 2. nested models? *different* npars?
-     
-        # TODO!
-        
-        # 3. all meanstructure?
-    }
-
-    # 
-    mods.scaled <- unlist( lapply(mods, function(x) {
-        any(c("satorra.bentler", "yuan.bentler", 
-              "mean.var.adjusted", "scaled.shifted") %in% 
-            unlist(sapply(slot(slot(x, "Fit"), "test"), "[", "test")) ) }))
-
-    if(all(mods.scaled)) {
-        scaled <- TRUE
-        # which type?
-        TEST <- object@Fit@test[[2]]$test
-    } else if(!all(mods.scaled)) {
-        scaled <- FALSE
-        TEST <- "standard"
-    } else {
-        stop("lavaan ERROR: some models (but not all) have scaled test statistics")
-    }
-
-    # which models have used a MEANSTRUCTURE?
-    mods.meanstructure <- sapply(mods, function(x) { 
-                                 unlist(slot(slot(x, "Model"), 
-                                                     "meanstructure"))})
-    if(all(mods.meanstructure)) {
-        meanstructure <- "ok"
-    } else if(sum(mods.meanstructure) == 0) {
-        meanstructure <- "ok"
-    } else {
-        stop("lavaan ERROR: some models (but not all) have a meanstructure")
-    }
-
-    # collect statistics for each model
-    Df    <- unlist(lapply(mods, function(x) slot(slot(x, "Fit"), 
-                        "test")[[1]]$df))
-    Chisq <- unlist(lapply(mods, function(x) slot(slot(x, "Fit"), 
-                        "test")[[1]]$stat))
-
-    # difference statistics
-    Chisq.delta  <- c(NA, diff(Chisq)) 
-    Df.delta     <- c(NA, diff(Df))
-    
-    # correction for scaled test statistics
-    if(scaled) {
-        if(SB.classic && TEST %in% c("satorra.bentler", "yuan.bentler")) {
-            # use formula from Satorra & Bentler 2001
-            scaling.factor <- unlist(lapply(mods, 
-                function(x) slot(slot(x, "Fit"), "test")[[2]]$scaling.factor))
-            cd1 <- diff(scaling.factor * Df)/diff(Df)
-
-            # check for negative scaling factors
-            if(any(cd1 < 0)) {
-                warning("lavaan WARNING: some scaling factors are negative: [",
-                        paste(round(cd1, 3), collapse=" "),"]; rerun with SB.classic=FALSE")
-                cd1[cd1 < 0] <- NA
-            }
-            cd <- c(NA, cd1)
-            Chisq.delta <- Chisq.delta/cd
-
-            # extract scaled Chisq for each model
-            Chisq <- unlist(lapply(mods, function(x) slot(slot(x, "Fit"),
-                            "test")[[2]]$stat))
-        } else {
-            # see Mplus Web Note 10 (2006)
-            for(m in seq_len(length(mods) - 1L)) {
-
-                if(mods[[m]]@Fit@test[[1]]$df == mods[[m+1]]@Fit@test[[1]]$df) {
-                    warnings("lavaan WARNING: some models have the same number of free parameters")
-                    next
-                }
-
-                if(SB.H0) {
-                    # evaluate under H0
-                    stop("SB.H0 has not been implemented yet. FIXME!")
-                }
-
-                # original M (Satorra)
-                Delta1 <- computeDelta(mods[[m]]@Model)
-                npar <- ncol(Delta1[[1]])
-                WLS.V <- getWLS.V(object)
-                Gamma <- getSampleStatsNACOV(object)
-                
-
-                # weight WLS.V
-                for(g in 1:ngroups) {
-                    WLS.V[[g]] <- nobs[[g]]/ntotal * WLS.V[[g]]
-                }
-
-                # information matrix
-                P1 <- matrix(0, nrow=npar, ncol=npar)
-                for(g in 1:ngroups) {
-                     P1 <- P1 + (t(Delta1[[g]]) %*% WLS.V[[g]] %*% Delta1[[g]])
-                }
-                P1.inv <- solve(P1)
-
-                # compute A for these two nested models
-                p1 <- mods[[m   ]]@ParTable # partable h1
-                p0 <- mods[[m+1L]]@ParTable # partable h0
-                af <- getConstraintsFunction(p1,p0)
-                A <- lavJacobianC(func=af, x=mods[[m   ]]@Fit@x)
-
-                trace.UGamma  <- numeric( ngroups )
-                trace.UGamma2 <- numeric( ngroups )
-                for(g in 1:ngroups) {
-                    U <- WLS.V[[g]]  %*% Delta1[[g]] %*%
-                         (P1.inv %*% t(A) %*% solve(A %*% P1.inv %*% t(A)) %*% A %*% P1.inv) %*% t(Delta1[[g]]) %*% WLS.V[[g]]
-                    UG <- U %*% Gamma[[g]]; tUG <- t(UG)
-                    trace.UGamma[g]  <- ntotal/nobs[[g]] * sum( U * Gamma[[g]] )
-                    trace.UGamma2[g] <- ntotal/nobs[[g]] * sum( UG * tUG )
-                }
-
-                tr.M  <- sum(trace.UGamma)
-                tr2.M <- sum(trace.UGamma2)
-
-                # adjust Df.delta?
-                if(TEST == "mean.var.adjusted") {
-                    # NOT needed for scaled.shifted; see
-                    # see 'Simple Second Order Chi-Square Correction' 2010 paper
-                    # on www.statmodel.com, section 4
-                    # Df.delta[m+1L] <- floor((tr.M1^2 / tr2.M1) + 0.5)
-                    Df.delta[m+1L] <- tr.M^2 / tr2.M
-                } 
-
-                scaling.factor <- tr.M / Df.delta[m+1L]
-                if(scaling.factor < 0) scaling.factor <- as.numeric(NA)
-                Chisq.delta[m+1L] <- Chisq.delta[m+1L]/scaling.factor
-            }
-        } 
-    }
-
-    # Pvalue
-    Pvalue.delta <- pchisq(Chisq.delta, Df.delta, lower.tail = FALSE)
-
-    aic <- bic <- rep(NA, length(mods))
-    if(estimator == "ML") {
-        aic <- sapply(mods, FUN=AIC)
-        bic <- sapply(mods, FUN=BIC)
-    }
-
-    val <- data.frame(Df = Df,
-                      AIC = aic,
-                      BIC = bic,
-                      Chisq = Chisq,
-                      "Chisq diff" = Chisq.delta,
-                      "Df diff" = Df.delta,
-                      "Pr(>Chisq)" = Pvalue.delta,
-                      row.names = names(mods), 
-                      check.names = FALSE)
-
-    if(scaled) {
-        attr(val, "heading") <- 
-            paste("Scaled Chi Square Difference Test (test = ",
-                  TEST, ")\n", sep="")
-    } else {
-        attr(val, "heading") <- "Chi Square Difference Test\n"
-    }
-    class(val) <- c("anova", class(val))
-
-    return(val)
-
+    lavTestLRT(object = object, ..., SB.classic = TRUE, SB.H0 = FALSE,
+               model.names = NAMES)
 })
 
 
 getWLS.est <- function(object, drop.list.single.group=FALSE) {
 
-    # shortcuts
-    samplestats   = object@SampleStats
-    estimator     = object@Options$estimator
-    G             = object@Data@ngroups
-    categorical   = object@Model@categorical
-    meanstructure = object@Model@meanstructure
-    fixed.x       = object@Model@fixed.x
-    num.idx       = object@Model@num.idx
+    G <- object@Data@ngroups
+    OUT <- lav_model_wls_est(object@Model)
 
-    # compute moments for all groups
-    Sigma.hat <- computeSigmaHat(object@Model)
-    if(meanstructure && !categorical) {
-        Mu.hat <- computeMuHat(object@Model)
-    } else if(categorical) {
-        TH <- computeTH(object@Model)
-        if(fixed.x)
-            PI <- computePI(object@Model)
-    }
-
-    WLS.est <- vector("list", length=samplestats@ngroups)
-    for(g in 1:samplestats@ngroups) {
-        if(categorical) {
-            if(fixed.x) {
-                WLS.est[[g]] <- c(TH[[g]],vec(PI[[g]]),
-                                  diag(Sigma.hat[[g]])[num.idx[[g]]],
-                                  vech(Sigma.hat[[g]], diagonal=FALSE))
-            } else {
-                WLS.est[[g]] <- c(TH[[g]],diag(Sigma.hat[[g]])[num.idx[[g]]],
-                                  vech(Sigma.hat[[g]], diagonal=FALSE))
-            }
-        } else if(meanstructure) {
-            WLS.est[[g]] <- c(Mu.hat[[g]], vech(Sigma.hat[[g]]))
-        } else {
-            WLS.est[[g]] <- vech(Sigma.hat[[g]])
-        }
-    }
-
-    OUT <- WLS.est
     if(G == 1 && drop.list.single.group) {
         OUT <- OUT[[1]]
     } else {
@@ -1723,31 +1507,33 @@ getWLS.est <- function(object, drop.list.single.group=FALSE) {
     OUT
 }
 
-getWLS.V <- function(object, Delta=computeDelta(object@Model), 
+getWLS.V <- function(object, Delta=computeDelta(lavmodel = object@Model), 
                      drop.list.single.group=FALSE) {
 
     # shortcuts
-    samplestats = object@SampleStats
+    lavsamplestats = object@SampleStats
     estimator   = object@Options$estimator
     G           = object@Data@ngroups
 
-    WLS.V       <- vector("list", length=samplestats@ngroups)
+    WLS.V       <- vector("list", length=lavsamplestats@ngroups)
     if(estimator == "GLS"  ||
        estimator == "WLS"  ||
        estimator == "DWLS" ||
        estimator == "ULS") {
         # for GLS, the WLS.V22 part is: 0.5 * t(D) %*% [S.inv %x% S.inv] %*% D
         # for WLS, the WLS.V22 part is: Gamma
-        WLS.V <- samplestats@WLS.V
+        WLS.V <- lavsamplestats@WLS.V
     } else if(estimator == "ML") {
-        Sigma.hat <- computeSigmaHat(object@Model)
-        if(object@Model@meanstructure) Mu.hat <- computeMuHat(object@Model)
-        for(g in 1:samplestats@ngroups) {
-            if(samplestats@missing.flag) {
+        Sigma.hat <- computeSigmaHat(lavmodel = object@Model)
+        if(object@Model@meanstructure) {
+            Mu.hat <- computeMuHat(lavmodel = object@Model)
+        }
+        for(g in seq_len(lavsamplestats@ngroups)) {
+            if(lavsamplestats@missing.flag) {
                 WLS.V[[g]] <- compute.Abeta(Sigma.hat=Sigma.hat[[g]],
                                             Mu.hat=Mu.hat[[g]],
-                                            samplestats=samplestats,
-                                            data=object@data, group=g,
+                                            lavsamplestats=lavsamplestats,
+                                            lavdata=object@Data, group=g,
                                             information="expected")
             } else {
                 # WLS.V22 = 0.5*t(D) %*% [Sigma.hat.inv %x% Sigma.hat.inv]%*% D
@@ -1775,23 +1561,23 @@ getSampleStatsNACOV <- function(object) {
         stop("not done yet; FIX THIS!")
 
     # shortcuts
-    samplestats = object@SampleStats
+    lavsamplestats = object@SampleStats
     estimator   = object@Options$estimator
 
-    NACOV       <- vector("list", length=samplestats@ngroups)
+    NACOV       <- vector("list", length=lavsamplestats@ngroups)
 
     if(estimator == "GLS"  ||
        estimator == "WLS"  ||
        estimator == "DWLS" ||
        estimator == "ULS") {
-        NACOV <- samplestats@NACOV
+        NACOV <- lavsamplestats@NACOV
     } else if(estimator == "ML") {
-        for(g in 1:samplestats@ngroups) {
+        for(g in 1:lavsamplestats@ngroups) {
             NACOV[[g]] <- 
                 compute.Gamma(object@Data@X[[g]], 
                               meanstructure=object@Options$meanstructure)
             if(object@Options$mimic == "Mplus") {
-                G11 <- ( samplestats@cov[[g]] * (samplestats@nobs[[g]]-1)/samplestats@nobs[[g]] )
+                G11 <- ( lavsamplestats@cov[[g]] * (lavsamplestats@nobs[[g]]-1)/lavsamplestats@nobs[[g]] )
                 NACOV[[g]][1:nrow(G11), 1:nrow(G11)] <- G11
             }
         }
@@ -1802,23 +1588,23 @@ getSampleStatsNACOV <- function(object) {
 
 getHessian <- function(object) {
     # lazy approach: take -1 the observed information
-    E <- computeObservedInformation(object@Model, 
-                                    samplestats=object@SampleStats,
-                                    X=object@Data@X,
-                                    cache=object@Cache,
-                                    type="free",
-                                    estimator=object@Options$estimator,
-                                    group.weight=TRUE)
+    E <- computeObservedInformation(lavmodel       = object@Model, 
+                                    lavsamplestats = object@SampleStats,
+                                    lavdata        = object@Data,
+                                    lavcache       = object@Cache,
+                                    type           = "free",
+                                    estimator      = object@Options$estimator,
+                                    group.weight   = TRUE)
 
     -E
 }
 
 getVariability <- function(object) {
     # lazy approach: get it from Nvcov.first.order
-    NACOV <- Nvcov.first.order(object@Model,
-                               samplestats=object@SampleStats,
-                               data=object@Data,
-                               estimator=object@Options$estimator)
+    NACOV <- Nvcov.first.order(lavmodel       = object@Model,
+                               lavsamplestats = object@SampleStats,
+                               lavdata        = object@Data,
+                               estimator      = object@Options$estimator)
 
     B0 <- attr(NACOV, "B0")
 
@@ -1838,7 +1624,8 @@ getModelCovLV <- function(object, correlation.metric=FALSE, labels=TRUE) {
     G <- object@Data@ngroups
 
     # compute lv covar
-    OUT <- computeVETA(object@Model, samplestats=object@SampleStats)
+    OUT <- computeVETA(lavmodel       = object@Model, 
+                       lavsamplestats = object@SampleStats)
 
     # correlation?
     if(correlation.metric) {
@@ -1881,7 +1668,8 @@ getModelCov <- function(object, correlation.metric=FALSE, labels=TRUE) {
     G <- object@Data@ngroups
 
     # compute extended model implied covariance matrix (both ov and lv)
-    OUT <- computeCOV(object@Model, samplestats=object@SampleStats)
+    OUT <- computeCOV(lavmodel = object@Model, 
+                      lavsamplestats = object@SampleStats)
 
     # correlation?
     if(correlation.metric) {
@@ -1917,7 +1705,7 @@ getModelTheta <- function(object, correlation.metric=FALSE, labels=TRUE) {
     G <- object@Data@ngroups
 
     # get residual covariances
-    OUT <- computeTHETA(object@Model)
+    OUT <- computeTHETA(lavmodel = object@Model)
 
     # correlation?
     if(correlation.metric) {

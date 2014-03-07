@@ -122,7 +122,7 @@ estimator.PML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
                           th.idx    = NULL,    # threshold idx per variable
                           num.idx   = NULL,    # which variables are numeric
                           X         = NULL,    # raw data
-                          cache     = NULL) {  # housekeeping stuff
+                          lavcache     = NULL) {  # housekeeping stuff
 
     # YR 3 okt 2012
     # the idea is to compute for each pair of variables, the model-based 
@@ -165,12 +165,12 @@ estimator.PML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
                                index.var.of.thres = th.idx, 
                                rho.xixj           = cors)
         # get expected probability per table, per pair
-        PI <- pairwiseExpProbVec(ind.vec = cache$LONG, th.rho.vec=LONG2)
+        PI <- pairwiseExpProbVec(ind.vec = lavcache$LONG, th.rho.vec=LONG2)
         # get frequency per table, per pair
-        #LogLik <- sum(cache$bifreq * log(PI))
+        #LogLik <- sum(lavcache$bifreq * log(PI))
     
         # more convenient fit function
-        prop <- cache$bifreq / cache$nobs
+        prop <- lavcache$bifreq / lavcache$nobs
         # remove zero props # FIXME!!! or add 0.5???
         zero.idx <- which(prop == 0.0)
         if(length(zero.idx) > 0L) {
@@ -234,7 +234,7 @@ estimator.FML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
                           th.idx    = NULL,    # threshold idx per variable
                           num.idx   = NULL,    # which variables are numeric
                           X         = NULL,    # raw data
-                          cache     = NULL) {  # patterns
+                          lavcache  = NULL) {  # patterns
 
     # YR 27 aug 2013
     # just for fun, and to compare with PML for small models
@@ -255,7 +255,7 @@ estimator.FML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
 
     # shortcut for all ordered - per pattern
     if(all(ov.types == "ordered")) {
-        PAT <- cache$pat; npatterns <- nrow(PAT)
+        PAT <- lavcache$pat; npatterns <- nrow(PAT)
         freq <- as.numeric( rownames(PAT) )
         PI <- numeric(npatterns)
         TH.VAR <- lapply(1:nvar, function(x) c(-Inf, TH[th.idx==x], +Inf))
@@ -265,7 +265,11 @@ estimator.FML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
             # compute probability for each pattern
             lower <- sapply(1:nvar, function(x) TH.VAR[[x]][ PAT[r,x]      ])
             upper <- sapply(1:nvar, function(x) TH.VAR[[x]][ PAT[r,x] + 1L ])
-            PI[r] <- sadmvn(lower, upper, mean=MEAN, varcov=Sigma.hat)
+
+
+            # how accurate must we be here???
+            PI[r] <- sadmvn(lower, upper, mean=MEAN, varcov=Sigma.hat,
+                            maxpts=10000*nvar, abseps = 1e-07)
         }
         # sum (log)likelihood over all patterns
         #LogLik <- sum(log(PI) * freq)
@@ -298,71 +302,25 @@ estimator.FML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
     fx
 }
 
-estimator.MML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
-                          TH        = NULL,    # model-based thresholds + means
-                          th.idx    = NULL,    # threshold idx per variable
-                          num.idx   = NULL,    # which variables are numeric
-                          X         = NULL,    # raw data
-                          cache     = NULL) {  # patterns
+estimator.MML <- function(lavmodel    = NULL,
+                          THETA       = NULL,
+                          TH          = NULL,
+                          GLIST       = NULL,
+                          group       = 1L,
+                          lavdata     = NULL,
+                          sample.mean = NULL,
+                          lavcache    = NULL) {
 
-    # YR 1 okt 2013
-    # marginal maximum likelihood
+    # compute case-wise likelihoods 
+    lik <- lav_model_lik_mml(lavmodel = lavmodel, THETA = THETA, TH = TH,
+               GLIST = GLIST, group = group, lavdata = lavdata, 
+               sample.mean = sample.mean, lavcache = lavcache)
 
-    # first of all: check if all correlations are within [-1,1]
-    # if not, return Inf; (at least with nlminb, this works well)
-    cors <- Sigma.hat[lower.tri(Sigma.hat)]
-
-    if(any(abs(cors) > 1)) {
-        return(+Inf) 
-    }
-
-    nvar <- nrow(Sigma.hat)
-    pstar <- nvar*(nvar-1)/2
-    ov.types <- rep("ordered", nvar)
-    if(length(num.idx) > 0L) ov.types[num.idx] <- "numeric"
-    MEAN <- rep(0, nvar)
-
-    # shortcut for all ordered - per pattern
-    if(all(ov.types == "ordered")) {
-        PAT <- cache$pat; npatterns <- nrow(PAT)
-        freq <- as.numeric( rownames(PAT) )
-        PI <- numeric(npatterns)
-        TH.VAR <- lapply(1:nvar, function(x) c(-Inf, TH[th.idx==x], +Inf))
-        # FIXME!!! ok to set diagonal to 1.0?
-        diag(Sigma.hat) <- 1.0
-        for(r in 1:npatterns) {
-            # compute probability for each pattern
-            lower <- sapply(1:nvar, function(x) TH.VAR[[x]][ PAT[r,x]      ])
-            upper <- sapply(1:nvar, function(x) TH.VAR[[x]][ PAT[r,x] + 1L ])
-            PI[r] <- sadmvn(lower, upper, mean=MEAN, varcov=Sigma.hat)
-        }
-        # sum (log)likelihood over all patterns
-        #LogLik <- sum(log(PI) * freq)
-
-        # more convenient fit function
-        prop <- freq/sum(freq)
-        # remove zero props # FIXME!!! or add 0.5???
-        zero.idx <- which(prop == 0.0)
-        if(length(zero.idx) > 0L) {
-            prop <- prop[-zero.idx]
-            PI   <- PI[-zero.idx]
-        }
-        Fmin <- sum( prop*log(prop/PI) )
-
-    } else { # case-wise
-        PI <- numeric(nobs)
-        for(i in 1:nobs) {
-            # compute probability for each case
-            PI[i] <- stop("not implemented")
-        }
-        # sum (log)likelihood over all observations
-        LogLik <- sum(log(PI))
-        stop("not implemented")
-    }
+    # log + sum over observations
+    logl <- sum( log(lik) )
 
     # function value as returned to the minimizer
-    #fx <- -1 * LogLik
-    fx <- Fmin
+    fx <- -logl
 
     fx
 }

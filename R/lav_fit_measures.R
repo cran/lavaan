@@ -1,4 +1,5 @@
-fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
+fitMeasures <- fitmeasures <- function(object, fit.measures="all", 
+                                       baseline.model = NULL) {
 
     # has the model converged?
     if(object@Fit@npar > 0L && !object@Fit@converged) {
@@ -15,8 +16,6 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
     } else {
        class.flag <- FALSE
     }
-
-    # reference: Muthen technical Appendix 5
 
     # collect info from the lavaan slots
     GLIST <- object@Model@GLIST
@@ -55,7 +54,7 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
 
     # fit stat and df are NA (perhaps test="none"?), try again:
     if(is.na(df)) {
-        df <- getDF(object@ParTable)
+        df <- lav_partable_df(object@ParTable)
         if(nrow(object@Model@con.jac) > 0L) {
             df <- ( df + length(attr(object@Model@con.jac, "ceq.idx")) )
         }
@@ -110,8 +109,12 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
     }
     
     # likelihood based measures
-    fit.logl <- c("logl", "unrestricted.logl", "npar", "aic", "bic",
-                  "ntotal", "bic2")
+    if(estimator == "MML") {
+        fit.logl <- c("logl", "npar", "aic", "bic", "ntotal", "bic2")
+    } else {
+        fit.logl <- c("logl", "unrestricted.logl", "npar", "aic", "bic",
+                      "ntotal", "bic2")
+    }
     if(scaled && object@Options$test == "yuan.bentler") {
         fit.logl <- c(fit.logl, "scaling.factor.h1", "scaling.factor.h0")
     }
@@ -129,19 +132,23 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
         fit.srmr2 <- c("wrmr")
     } else {
         fit.srmr <- c("srmr")
-        fit.srmr2 <- c("rmr", "rmr_nomean", "srmr", "srmr_nomean")
+        fit.srmr2 <- c("rmr", "rmr_nomean", 
+                       "srmr", # the default
+                       "srmr_bentler", "srmr_bentler_nomean",
+                       "srmr_bollen", "srmr_bollen_nomean",
+                       "srmr_mplus", "srmr_mplus_nomean")
     }
 
     # table
-    if(categorical) {
-        # FIXME: Cp: no exo, all ordinal!
-        fit.table <- c("c_p", "c_p.df", "c_p.p.value",
-                       "c_f", "c_f.df", "c_f.p.value",
-                       "rpat.observed", "rpat.total", "rpat.empty",
-                       "c_m", "c_m.df", "c_m.p.value")
-    } else {
+    #if(categorical) {
+    #    # FIXME: Cp: no exo, all ordinal!
+    #    fit.table <- c("c_p", "c_p.df", "c_p.p.value",
+    #                   "c_f", "c_f.df", "c_f.p.value",
+    #                   "rpat.observed", "rpat.total", "rpat.empty",
+    #                   "c_m", "c_m.df", "c_m.p.value")
+    #} else {
         fit.table <- character(0L)
-    }
+    #}
 
     # various
     fit.other <- c("cn_05","cn_01","gfi","agfi","pgfi","mfi")
@@ -160,9 +167,14 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
                 fit.measures <- c(fit.chisq, fit.baseline, 
                                   fit.cfi.tli, fit.logl, 
                                   fit.rmsea, fit.srmr)
+            } else if(estimator == "MML") {
+                fit.measures <- c(fit.logl)
             } else {
                 fit.measures <- c(fit.chisq, fit.baseline, fit.cfi.tli, 
                                   fit.rmsea, fit.srmr, fit.table)
+                if(object@Options$mimic == "Mplus") {
+                    fit.measures <- c(fit.measures, "wrmr")
+                }
             }
         } else if(fit.measures == "all") {
             if(estimator == "ML") {
@@ -243,7 +255,11 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
         #fit.indep <- do.call("lavaan", args=CALL, envir=object@call$env)
         #fit.indep <- do.call("lavaan", args=CALL)
 
-        fit.indep <- independence.model.fit(object)
+        if (!is.null(baseline.model) & is(baseline.model, "lavaan")) {
+            fit.indep <- baseline.model
+        } else {
+            fit.indep <- independence.model.fit(object)
+        }
                             
         X2.null <- fit.indep@Fit@test[[1]]$stat
         df.null <- fit.indep@Fit@test[[1]]$df
@@ -451,7 +467,7 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
         }
     }
 
-    if(estimator == "ML") {
+    if(estimator == "ML" || estimator == "MML") {
         if("logl" %in% fit.measures ||
            "unrestricted.logl" %in% fit.measures ||
            "npar" %in% fit.measures ||
@@ -460,28 +476,32 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
 
             # logl H1 -- unrestricted (aka saturated) model
             logl.H1.group <- numeric(G)
-            for(g in 1:G) {
-                nvar <- ncol(object@SampleStats@cov[[g]])
-                if(!object@SampleStats@missing.flag) {
-                    Ng <- object@SampleStats@nobs[[g]]
-                    c <- Ng*nvar/2 * log(2 * pi)
-                    logl.H1.group[g] <- ( -c -(Ng/2) *
+            if(all(object@Data@ov$type == "numeric")) {
+                for(g in 1:G) {
+                    nvar <- ncol(object@SampleStats@cov[[g]])
+                    if(!object@SampleStats@missing.flag) {
+                        Ng <- object@SampleStats@nobs[[g]]
+                        c <- Ng*nvar/2 * log(2 * pi)
+                        logl.H1.group[g] <- ( -c -(Ng/2) *
                                           object@SampleStats@cov.log.det[[g]]
                                           - (Ng/2)*nvar )
-                } else { # missing patterns case
-                    pat <- object@Data@Mp[[g]]$pat
-                    Ng <- object@Data@nobs[[g]]
-                    ni <- as.numeric(apply(pat, 1, sum) %*% 
-                                     as.integer(rownames(pat)))
-                    fx.full <- object@SampleStats@missing.h1[[g]]$h1
-                    logl.H1.group[g] <- - (ni/2 * log(2 * pi)) - 
-                                              (Ng/2 * fx.full)
+                    } else { # missing patterns case
+                        pat <- object@Data@Mp[[g]]$pat
+                        Ng <- object@Data@nobs[[g]]
+                        ni <- as.numeric(apply(pat, 1, sum) %*% 
+                                          as.integer(rownames(pat)))
+                        fx.full <- object@SampleStats@missing.h1[[g]]$h1
+                        logl.H1.group[g] <- - (ni/2 * log(2 * pi)) - 
+                                                  (Ng/2 * fx.full)
+                    }
                 }
-            }
-            if(G > 1) {
-                logl.H1 <- sum(logl.H1.group)
+                if(G > 1) {
+                    logl.H1 <- sum(logl.H1.group)
+                } else {
+                    logl.H1 <- logl.H1.group[1]
+                }
             } else {
-                logl.H1 <- logl.H1.group[1]
+                logl.H1.group <- as.numeric(NA)
             }
 
             if("unrestricted.logl" %in% fit.measures) {
@@ -490,15 +510,20 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
 
             # logl H0
             logl.H0.group <- numeric(G)
-            for(g in 1:G) {
-                Ng <- object@SampleStats@nobs[[g]]
-                logl.H0.group[g] <- -Ng * (fx.group[g] - logl.H1.group[g]/Ng)
-            }
-            if(G > 1) {
-                logl.H0 <- sum(logl.H0.group)
-            } else {
-                logl.H0 <- logl.H0.group[1]
-            }
+            if(all(object@Data@ov$type == "numeric")) {
+                for(g in 1:G) {
+                    Ng <- object@SampleStats@nobs[[g]]
+                    logl.H0.group[g] <- -Ng * (fx.group[g] - 
+                                               logl.H1.group[g]/Ng)
+                }
+                if(G > 1) {
+                    logl.H0 <- sum(logl.H0.group)
+                } else {
+                    logl.H0 <- logl.H0.group[1]
+                }
+            } else if(object@Options$estimator == "MML") {
+                logl.H0 <- -1 * fx
+            }             
            
             if("logl" %in% fit.measures) {
                 indices["logl"] <- logl.H0
@@ -726,8 +751,12 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
         # RMR and SRMR
         rmr.group <- numeric(G)
         rmr_nomean.group <- numeric(G)
-        srmr.group <- numeric(G)
-        srmr_nomean.group <- numeric(G)
+        srmr_bentler.group <- numeric(G)
+        srmr_bentler_nomean.group <- numeric(G)
+        srmr_bollen.group <- numeric(G)
+        srmr_bollen_nomean.group <- numeric(G)
+        srmr_mplus.group <- numeric(G)
+        srmr_mplus_nomean.group <- numeric(G)
         for(g in 1:G) {
             # observed
             if(!object@SampleStats@missing.flag) {
@@ -744,57 +773,110 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
             Sigma.hat <- object@Fit@Sigma.hat[[g]]
             Mu.hat    <- object@Fit@Mu.hat[[g]]
 
+            # unstandardized residuals
+            RR <- (S - Sigma.hat)
+
             # standardized residual covariance matrix
             # this is the Hu and Bentler definition, not the Bollen one!
+            # this one is used by EQS 
+            # and Mplus, but only if information=expected (god knows why)
             sqrt.d <- 1/sqrt(diag(S))
             D <- diag(sqrt.d, ncol=length(sqrt.d))
             R <- D %*% (S - Sigma.hat) %*% D
-            RR <- (S - Sigma.hat) # not standardized
 
-            # this is what the Mplus documentation suggest, 
-            # but is not what is used!
-            #sqrt.d2 <- 1/sqrt(diag(Sigma.hat))
-            #D2 <- diag(sqrt.d2, ncol=length(sqrt.d2))
-            #R <- D %*% S %*% D   - D2 %*% Sigma.hat %*% D2
+            # Bollen approach: simply using cov2cor ('residual correlations')
+            S.cor <- cov2cor(S)
+            Sigma.cor <- cov2cor(Sigma.hat)
+            R.cor <- (S.cor - Sigma.cor)
 
             if(meanstructure) {
                 # standardized residual mean vector
-                R.mean <- D %*% (M - Mu.hat)
+                R.mean <- D %*% (M - Mu.hat) # EQS approach!
                 RR.mean <- (M - Mu.hat) # not standardized
-                #R.mean <-  D %*% M - D2 %*% Mu.hat
+                R.cor.mean <- M/sqrt(diag(S)) - Mu.hat/sqrt(diag(Sigma.hat))
+
                 e <- nvar*(nvar+1)/2 + nvar
-                srmr.group[g] <- sqrt( (sum(R[lower.tri(R, diag=TRUE)]^2) +
-                                        sum(R.mean^2))/ e )
+                srmr_bentler.group[g] <- 
+                    sqrt( (sum(R[lower.tri(R, diag=TRUE)]^2) +
+                           sum(R.mean^2))/ e )
                 rmr.group[g] <- sqrt( (sum(RR[lower.tri(RR, diag=TRUE)]^2) +
                                        sum(RR.mean^2))/ e )
+                srmr_bollen.group[g] <- 
+                    sqrt( (sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2)  +
+                           sum(R.cor.mean^2)) / e )
+                # see http://www.statmodel.com/download/SRMR.pdf
+                srmr_mplus.group[g] <-
+                    sqrt( (sum(R.cor[lower.tri(R.cor, diag=FALSE)]^2)  +
+                           sum(R.cor.mean^2) +
+                           sum(((diag(S) - diag(Sigma.hat))/diag(S))^2)) / e )
+
                 e <- nvar*(nvar+1)/2
-                srmr_nomean.group[g] <- sqrt( sum(R[lower.tri(R, diag=TRUE)]^2) / e )
-                rmr_nomean.group[g] <- sqrt( sum(RR[lower.tri(RR, diag=TRUE)]^2) / e )
+                srmr_bentler_nomean.group[g] <- 
+                    sqrt(  sum( R[lower.tri( R, diag=TRUE)]^2) / e )
+                rmr_nomean.group[g] <- 
+                    sqrt(  sum(RR[lower.tri(RR, diag=TRUE)]^2) / e )
+                srmr_bollen_nomean.group[g] <- 
+                    sqrt(  sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2) / e )
+                srmr_mplus_nomean.group[g] <-
+                    sqrt( (sum(R.cor[lower.tri(R.cor, diag=FALSE)]^2)  +
+                           sum(((diag(S) - diag(Sigma.hat))/diag(S))^2)) / e )
             } else {
                 e <- nvar*(nvar+1)/2
-                srmr_nomean.group[g] <- srmr.group[g] <- sqrt( sum(R[lower.tri(R, diag=TRUE)]^2) / e )
-                rmr_nomean.group[g] <- rmr.group[g] <- sqrt( sum(RR[lower.tri(RR, diag=TRUE)]^2) / e )
-                
+                srmr_bentler_nomean.group[g] <- srmr_bentler.group[g] <- 
+                    sqrt( sum(R[lower.tri(R, diag=TRUE)]^2) / e )
+                rmr_nomean.group[g] <- rmr.group[g] <- 
+                    sqrt( sum(RR[lower.tri(RR, diag=TRUE)]^2) / e )
+                srmr_bollen_nomean.group[g] <- srmr_bollen.group[g] <-
+                    sqrt(  sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2) / e )
+                srmr_mplus_nomean.group[g] <- srmr_mplus.group[g] <-
+                    sqrt( (sum(R.cor[lower.tri(R.cor, diag=FALSE)]^2)  +
+                           sum(((diag(S) - diag(Sigma.hat))/diag(S))^2)) / e )
             }
         }
         
         if(G > 1) {
             ## FIXME: get the scaling right
-            SRMR <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr.group) / object@SampleStats@ntotal )
-            SRMR_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_nomean.group) / object@SampleStats@ntotal )
+            SRMR_BENTLER <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bentler.group) / object@SampleStats@ntotal )
+            SRMR_BENTLER_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bentler_nomean.group) / object@SampleStats@ntotal )
+            SRMR_BOLLEN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bollen.group) / object@SampleStats@ntotal )
+            SRMR_BOLLEN_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bollen_nomean.group) / object@SampleStats@ntotal )
+            SRMR_MPLUS <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_mplus.group) / object@SampleStats@ntotal )
+            SRMR_MPLUS_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_mplus_nomean.group) / object@SampleStats@ntotal )
             RMR <- as.numeric( (unlist(object@SampleStats@nobs) %*% rmr.group) / object@SampleStats@ntotal )
             RMR_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% rmr_nomean.group) / object@SampleStats@ntotal )
         } else {
-            SRMR <- srmr.group[1]
-            SRMR_NOMEAN <- srmr_nomean.group[1]
+            SRMR_BENTLER <- srmr_bentler.group[1]
+            SRMR_BENTLER_NOMEAN <- srmr_bentler_nomean.group[1]
+            SRMR_BOLLEN <- srmr_bollen.group[1]
+            SRMR_BOLLEN_NOMEAN <- srmr_bollen_nomean.group[1]
+            SRMR_MPLUS <- srmr_mplus.group[1]
+            SRMR_MPLUS_NOMEAN <- srmr_mplus_nomean.group[1]
             RMR <- rmr.group[1]
             RMR_NOMEAN <- rmr_nomean.group[1]
         }
 
-        indices["srmr"] <- SRMR
-        indices["srmr_nomean"] <- SRMR_NOMEAN
-        indices["rmr"] <- RMR
-        indices["rmr_nomean"] <- RMR_NOMEAN
+        # the default!
+        if(object@Options$mimic == "lavaan") {
+            indices["srmr"] <- SRMR_BENTLER
+        } else if(object@Options$mimic == "EQS") {
+            indices["srmr"] <- SRMR_BENTLER
+        } else if(object@Options$mimic == "Mplus") {
+            if(object@Options$information == "expected") {
+                indices["srmr"] <- SRMR_BENTLER
+            } else {
+                indices["srmr"] <- SRMR_MPLUS
+            }
+        }
+
+        # the others
+        indices["srmr_bentler"]        <- SRMR_BENTLER
+        indices["srmr_bentler_nomean"] <- SRMR_BENTLER_NOMEAN
+        indices["srmr_bollen"]         <- SRMR_BOLLEN
+        indices["srmr_bollen_nomean"]  <- SRMR_BOLLEN_NOMEAN
+        indices["srmr_mplus"]          <- SRMR_MPLUS
+        indices["srmr_mplus_nomean"]   <- SRMR_MPLUS_NOMEAN
+        indices["rmr"]                 <- RMR
+        indices["rmr_nomean"]          <- RMR_NOMEAN
     }
 
     if(any(c("cn_05", "cn_01") %in% fit.measures)) {
@@ -805,33 +887,9 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all") {
     }
 
     if("wrmr" %in% fit.measures) {
-        # RMR and SRMR
-        wrmr.group <- numeric(G)
-        for(g in 1:G) {
-            # observed sample statistics
-            obs <- object@SampleStats@WLS.obs[[g]]
-
-            # estimated FFFFFFIXME!!!!
-            est <- obs
-
-            # diag of W
-            dw <- diag(object@SampleStats@WLS.V[[g]])
-
-            # e = number of elements
-            e <- length(obs)
-
-            #wrmr.group[g] <- sqrt( sum( (obs-est)/dw ) / e )
-            wrmr.group[g] <- as.numeric(NA)
-        }
-
-        
-        if(G > 1) {
-            ## FIXME: get the scaling right
-            WRMR <- as.numeric( (unlist(object@SampleStats@nobs) %*% wrmr.group) / object@SampleStats@ntotal )
-        } else {
-            WRMR <- wrmr.group[1]
-        }
-
+        # we use the definition: wrmr = sqrt ( 2*N*F / e )
+        e <- length(object@SampleStats@WLS.obs[[1]]) ### only first group???
+        WRMR <- sqrt( X2 / e )
         indices["wrmr"] <- WRMR
     }
 
@@ -1121,18 +1179,20 @@ print.fit.measures <- function(x) {
            cat("    for the MLR correction\n")
        }
 
-       t0.txt <- sprintf("  %-40s", "Loglikelihood unrestricted model (H1)")
-       t1.txt <- sprintf("  %10.3f", x["unrestricted.logl"])
-       t2.txt <- ifelse(scaled,
-                 sprintf("  %10.3f", x["unrestricted.logl"]), "")
-       cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-       #cat(t0.txt, t1.txt, "\n", sep="")
-       if(!is.na(x["scaling.factor.h1"])) {
-           t0.txt <- sprintf("  %-40s", "Scaling correction factor")
-           t1.txt <- sprintf("  %10s", "")
-           t2.txt <- sprintf("  %10.3f", x["scaling.factor.h1"])
+       if("unrestricted.logl" %in% names.x) {
+           t0.txt <- sprintf("  %-40s", "Loglikelihood unrestricted model (H1)")
+           t1.txt <- sprintf("  %10.3f", x["unrestricted.logl"])
+           t2.txt <- ifelse(scaled,
+                     sprintf("  %10.3f", x["unrestricted.logl"]), "")
            cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-           cat("    for the MLR correction\n")
+           #cat(t0.txt, t1.txt, "\n", sep="")
+           if(!is.na(x["scaling.factor.h1"])) {
+               t0.txt <- sprintf("  %-40s", "Scaling correction factor")
+               t1.txt <- sprintf("  %10s", "")
+               t2.txt <- sprintf("  %10.3f", x["scaling.factor.h1"])
+               cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
+              cat("    for the MLR correction\n")
+           }
        }
 
        cat("\n")
@@ -1215,6 +1275,18 @@ print.fit.measures <- function(x) {
             t0.txt <- sprintf("  %-40s", "SRMR (No Mean)")
             t1.txt <- sprintf("  %10.3f", x["srmr_nomean"])
             t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["srmr_nomean"]), "")
+            cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
+        }
+    }
+
+    # WRMR
+    if("wrmr" %in% names.x) {
+        cat("\nWeighted Root Mean Square Residual:\n\n")
+
+        if("wrmr" %in% names.x) {
+            t0.txt <- sprintf("  %-40s", "WRMR")
+            t1.txt <- sprintf("  %10.3f", x["wrmr"])
+            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["wrmr"]), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
         }
     }
