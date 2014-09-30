@@ -1,6 +1,7 @@
 testStatisticSatorraBentler <- function(lavsamplestats=lavsamplestats, 
                                         E.inv, Delta, WLS.V,
-                                        x.idx=list(integer(0))) {
+                                        x.idx=list(integer(0)),
+                                        test.UGamma.eigvals = TRUE) {
 
     # UG = Gamma %*% [V - V %*% Delta %*% E.inv %*% tDelta %*% V]
     #    = Gamma %*% V  - Gamma %*% V %*% Delta %*% E.inv %*% tDelta %*% V
@@ -23,33 +24,45 @@ testStatisticSatorraBentler <- function(lavsamplestats=lavsamplestats,
     for(g in 1:ngroups) {
         fg  <-  lavsamplestats@nobs[[g]]   /lavsamplestats@ntotal
         fg1 <- (lavsamplestats@nobs[[g]]-1)/lavsamplestats@ntotal
-        WLS.Vg  <- WLS.V[[g]] * fg
         Gamma.g <- Gamma[[g]] / fg  ## ?? check this
         Delta.g <- Delta[[g]]
 
         # just for testing: regular UG:
-        UG1 <- Gamma.g %*% (WLS.Vg - WLS.Vg %*% Delta[[g]] %*% E.inv %*% t(Delta[[g]]) %*% WLS.Vg)
+        # WLS.Vg  <- WLS.V[[g]] * fg
+        # UG1 <- Gamma.g %*% (WLS.Vg - WLS.Vg %*% Delta[[g]] %*% E.inv %*% t(Delta[[g]]) %*% WLS.Vg)
 
-        A1      <- WLS.V[[g]] * fg
-        B1 <- A1 %*% Gamma.g %*% A1
+        # diagonal WLS.V? we check for this since 0.5-17
+        diagonal <- FALSE
+        if(is.matrix(WLS.V[[g]])) {
+            A1 <- WLS.V[[g]] * fg
+            B1 <- A1 %*% Gamma.g %*% A1
+        } else {
+            diagonal <- TRUE
+            a1 <- WLS.V[[g]] * fg # numeric vector!
+            B1 <- Gamma.g * tcrossprod(a1)
+        }
         # mask independent 'fixed-x' variables
         # note: this only affects the saturated H1 model
         if(length(x.idx[[g]]) > 0L) {
             nvar <- ncol(lavsamplestats@cov[[g]])
             idx <- eliminate.pstar.idx(nvar=nvar, el.idx=x.idx[[g]],
                                        meanstructure=TRUE, type="all")
-            A1      <- A1[idx,idx]
+            if(diagonal) {
+                a1 <- a1[idx]
+            } else {
+                A1 <- A1[idx,idx]
+            }
             B1      <- B1[idx,idx]
             Delta.g <- Delta.g[idx,]
         } 
-        A1.inv <- solve(A1)
 
-        #B0 <- t(Delta[[g]]) %*% B1 %*% Delta[[g]]
-        #trace.h1     <- sum( B1 * t(A1.inv) )
-        #trace.h0     <- sum( B0 * t(E.inv)  ) 
-        #trace.UGamma[g] <- (trace.h1-trace.h0)
 
-        tmp <- (B1 %*% A1.inv) - (B1 %*% Delta.g %*% E.inv %*% t(Delta.g))
+        if(diagonal) {
+            tmp <- t((1/a1) * B1) - (B1 %*% Delta.g %*% tcrossprod(E.inv, Delta.g))
+        } else {
+            A1.inv <- solve(A1)
+            tmp <- (B1 %*% A1.inv) - (B1 %*% Delta.g %*% tcrossprod(E.inv, Delta.g))
+        }
         # sanity check 1: sum(diag(UG1)) - sum(diag(tmp))
         # sanity check 2: sum(diag(UG1 %*% UG1)) - sum(diag(tmp %*% tmp))
         trace.UGamma2[g] <- sum(tmp * t(tmp))
@@ -84,11 +97,17 @@ testStatisticSatorraBentler <- function(lavsamplestats=lavsamplestats,
     attr(trace.UGamma, "trace.UGamma4") <- trace.UGamma4
 
     # testing only -- alternative interpretation of tr UG^2
-    tUG <- t(UG); trace.UGamma3 <- sum(UG * tUG) # seems wrong?
-    attr(trace.UGamma, "trace.UGamma3") <- trace.UGamma3
+    # tUG <- t(UG); trace.UGamma3 <- sum(UG * tUG) # seems wrong?
+    # attr(trace.UGamma, "trace.UGamma3") <- trace.UGamma3
 
     # eigen values
-    attr(trace.UGamma, "eigenvalues") <-  Re(eigen(UG, only.values=TRUE)$values)
+    # this is for the lavaan.survey pval.pFsum() function
+    # but for large problems, this can take a loooong time; perhaps
+    # we should make this optional?
+    if(test.UGamma.eigvals) {
+        attr(trace.UGamma, "eigenvalues") <-  
+            Re(eigen(UG, only.values=TRUE)$values)
+    }
 
     trace.UGamma
 }
@@ -200,7 +219,8 @@ lav_model_test <- function(lavmodel       = NULL,
                            x              = NULL, 
                            VCOV           = NULL, 
                            lavcache       = NULL,
-                           lavdata        = NULL, 
+                           lavdata        = NULL,
+                           test.UGamma.eigvals = TRUE,
                            control        = list()) {
 
 
@@ -264,8 +284,24 @@ lav_model_test <- function(lavmodel       = NULL,
         pvalue <- as.numeric(NA)
     } else {
         refdistr <- "chisq"
+
         # pvalue  ### FIXME: what if df=0? NA? or 1? or 0?
-        pvalue <- 1 - pchisq(chisq, df)
+        # this is not trivial, since
+        # 1 - pchisq(0, df=0) = 1
+        # but
+        # 1 - pchisq(0.00000000001, df=0) = 0
+        # and
+        # 1 - pchisq(0, df=0, ncp=0) = 0
+        #
+        # This is due to different definitions of limits (from the left,
+        # or from the right)
+        #
+        # From 0.5-17 onwards, we will use NA if df=0, to be consistent
+        if(df == 0) {
+            pvalue <- as.numeric(NA)
+        } else {
+            pvalue <- 1 - pchisq(chisq, df)
+        }
     }
 
     TEST[[1]] <- list(test="standard",
@@ -366,9 +402,13 @@ lav_model_test <- function(lavmodel       = NULL,
                                         WLS.V       = WLS.V, 
                                         x.idx       = x.idx)
         trace.UGamma2 <- attr(trace.UGamma, "trace.UGamma2")
-        trace.UGamma3 <- attr(trace.UGamma, "trace.UGamma3")
+        # trace.UGamma3 <- attr(trace.UGamma, "trace.UGamma3")
         trace.UGamma4 <- attr(trace.UGamma, "trace.UGamma4")
-        UGamma.eigenvalues <- attr(trace.UGamma, "eigenvalues")
+        if(test.UGamma.eigvals) {
+            UGamma.eigenvalues <- attr(trace.UGamma, "eigenvalues")
+        } else {
+            UGamma.eigenvalues <- numeric(0L)
+        }
         attributes(trace.UGamma) <- NULL
 
         # adjust df?
@@ -412,17 +452,17 @@ lav_model_test <- function(lavmodel       = NULL,
             shift.parameter <- as.numeric(NA)
         }
 
-        TEST[[2]] <- list(test=test,
-                          stat=chisq.scaled,
-                          stat.group=stat.group,
-                          df=df,
-                          pvalue=pvalue.scaled,
-                          scaling.factor=scaling.factor,
-                          shift.parameter=shift.parameter,
-                          trace.UGamma=trace.UGamma,
-                          trace.UGamma4=trace.UGamma4,
-                          trace.UGamma2=trace.UGamma2,
-                          UGamma.eigenvalues=UGamma.eigenvalues)
+        TEST[[2]] <- list(test               = test,
+                          stat               = chisq.scaled,
+                          stat.group         = stat.group,
+                          df                 = df,
+                          pvalue             = pvalue.scaled,
+                          scaling.factor     = scaling.factor,
+                          shift.parameter    = shift.parameter,
+                          trace.UGamma       = trace.UGamma,
+                          trace.UGamma4      = trace.UGamma4,
+                          trace.UGamma2      = trace.UGamma2,
+                          UGamma.eigenvalues = UGamma.eigenvalues)
 
     } else if(test == "yuan.bentler" && df > 0) {
         # try to extract attr from VCOV (if present)

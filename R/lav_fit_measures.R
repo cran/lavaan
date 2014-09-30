@@ -77,6 +77,7 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
     }
 
     # define 'sets' of fit measures:
+    fit.always <- c("npar")
 
     # basic chi-square test
     fit.chisq <- c("fmin", "chisq", "df", "pvalue")
@@ -110,9 +111,9 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
     
     # likelihood based measures
     if(estimator == "MML") {
-        fit.logl <- c("logl", "npar", "aic", "bic", "ntotal", "bic2")
+        fit.logl <- c("logl", "aic", "bic", "ntotal", "bic2")
     } else {
-        fit.logl <- c("logl", "unrestricted.logl", "npar", "aic", "bic",
+        fit.logl <- c("logl", "unrestricted.logl", "aic", "bic",
                       "ntotal", "bic2")
     }
     if(scaled && object@Options$test == "yuan.bentler") {
@@ -164,13 +165,14 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
     if(length(fit.measures) == 1L) {
         if(fit.measures == "default") {
             if(estimator == "ML") {
-                fit.measures <- c(fit.chisq, fit.baseline, 
+                fit.measures <- c(fit.always, fit.chisq, fit.baseline, 
                                   fit.cfi.tli, fit.logl, 
                                   fit.rmsea, fit.srmr)
             } else if(estimator == "MML") {
-                fit.measures <- c(fit.logl)
+                fit.measures <- c(fit.always, fit.logl)
             } else {
-                fit.measures <- c(fit.chisq, fit.baseline, fit.cfi.tli, 
+                fit.measures <- c(fit.always, 
+                                  fit.chisq, fit.baseline, fit.cfi.tli, 
                                   fit.rmsea, fit.srmr, fit.table)
                 if(object@Options$mimic == "Mplus") {
                     fit.measures <- c(fit.measures, "wrmr")
@@ -178,10 +180,12 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
             }
         } else if(fit.measures == "all") {
             if(estimator == "ML") {
-                fit.measures <- c(fit.chisq, fit.baseline, fit.incremental, 
+                fit.measures <- c(fit.always,
+                                  fit.chisq, fit.baseline, fit.incremental, 
                                   fit.logl, fit.rmsea, fit.srmr2, fit.other)
             } else {
-                fit.measures <- c(fit.chisq, fit.baseline, fit.incremental,
+                fit.measures <- c(fit.always,
+                                  fit.chisq, fit.baseline, fit.incremental,
                                   fit.rmsea, fit.srmr2, fit.other, fit.table)
             }
         }
@@ -189,6 +193,10 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
 
     # main container
     indices <- list()
+
+    if("npar" %in% fit.measures) {
+        indices["npar"] <- npar
+    }
 
     # Chi-square value estimated model (H0)
     if(any(c("fmin", "chisq", "chisq.scaled", 
@@ -467,12 +475,12 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
         }
     }
 
-    if(estimator == "ML" || estimator == "MML") {
-        if("logl" %in% fit.measures ||
-           "unrestricted.logl" %in% fit.measures ||
-           "npar" %in% fit.measures ||
-           "aic" %in% fit.measures ||
-           "bic" %in% fit.measures) {
+    if("logl" %in% fit.measures ||
+       "unrestricted.logl" %in% fit.measures ||
+       "aic" %in% fit.measures ||
+       "bic" %in% fit.measures) {
+
+        if(estimator == "ML" || estimator == "MML") {
 
             # logl H1 -- unrestricted (aka saturated) model
             logl.H1.group <- numeric(G)
@@ -502,6 +510,7 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
                 }
             } else {
                 logl.H1.group <- as.numeric(NA)
+                logl.H1 <- as.numeric(NA)
             }
 
             if("unrestricted.logl" %in% fit.measures) {
@@ -523,15 +532,12 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
                 }
             } else if(object@Options$estimator == "MML") {
                 logl.H0 <- -1 * fx
+            } else {
+                logl.H0 <- as.numeric(NA)
             }             
            
             if("logl" %in% fit.measures) {
                 indices["logl"] <- logl.H0
-            }
-
-            # Number of free parameters
-            if("npar" %in% fit.measures) {
-                indices["npar"] <- npar
             }
 
             # AIC
@@ -558,6 +564,20 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
                     object@Fit@test[[2]]$scaling.factor.h1
                 indices["scaling.factor.h0"] <- 
                     object@Fit@test[[2]]$scaling.factor.h0
+            }
+        } # ML
+        else { # no ML!
+            if("logl" %in% fit.measures) {
+                indices["logl"] <- as.numeric(NA)
+            }
+            if("unrestricted.logl" %in% fit.measures) {
+                indices["unrestricted.logl"] <- as.numeric(NA)
+            }
+            if("aic" %in% fit.measures) {
+                indices["aic"] <- as.numeric(NA)
+            }
+            if("bic" %in% fit.measures) {
+                indices["bic"] <- as.numeric(NA)
             }
         }
     }
@@ -896,8 +916,11 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
     if(any(c("gfi","agfi","pgfi") %in% fit.measures)) {
         gfi.group <- numeric(G)
         WLS.obs <- object@SampleStats@WLS.obs
-        WLS.V   <- getWLS.V(object)
-        WLS.est <- getWLS.est(object)
+        WLS.V   <- lav_model_wls_v(lavmodel       = object@Model,
+                                   lavsamplestats = object@SampleStats,
+                                   estimator      = object@Options$estimator,
+                                   lavdata        = object@Data)
+        WLS.est <- lav_object_inspect_wls_est(object)
         for(g in 1:G) {
             wls.obs <- WLS.obs[[g]]
             wls.est <- WLS.est[[g]]
@@ -907,8 +930,15 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
                 gfi.group[g] <- as.numeric(NA)
             } else {
                 wls.diff <- wls.obs - wls.est
-                t1 <- crossprod(wls.diff, wls.v) %*% wls.diff
-                t2 <- crossprod(wls.obs, wls.v) %*% wls.obs
+                if(is.matrix(wls.v)) {
+                    # full weight matrix
+                    t1 <- crossprod(wls.diff, wls.v) %*% wls.diff
+                    t2 <- crossprod(wls.obs, wls.v) %*% wls.obs
+                } else {
+                    # diagonal weight matrix
+                    t1 <- as.numeric(crossprod(wls.diff^2, wls.v))
+                    t2 <- as.numeric(crossprod(wls.obs^2, wls.v))
+                }
                 gfi.group[g] <- 1 - t1/t2
             }
         }

@@ -19,8 +19,8 @@ estimate.moments.EM <- function (X = NULL, M = NULL, verbose = FALSE,
     N <- nrow(X)
 
     # starting values as used by Mplus
-    mu0  <- apply(X, 2, mean, na.rm = TRUE); names(mu0) <- NULL
-    var0 <- apply(X, 2,  var, na.rm = TRUE); names(var0) <- NULL
+    mu0  <- apply(X, 2, base::mean, na.rm = TRUE); names(mu0) <- NULL
+    var0 <- apply(X, 2,  stats::var, na.rm = TRUE); names(var0) <- NULL
     sigma0 <- diag(x=var0, nrow=length(var0))
     mu <- mu0; sigma <- sigma0
 
@@ -150,8 +150,8 @@ getMissingPatterns <- function(X) {
     # identify and remove empty row
     empty.idx <- which(id == "empty")
     if(length(empty.idx) > 0) {
-        MISSING <- MISSING[-empty.idx,]
-              X <-       X[-empty.idx,]
+        MISSING <- MISSING[-empty.idx,,drop=FALSE]
+              X <-       X[-empty.idx,,drop=FALSE]
              id <-      id[-empty.idx]
         # adjust ntotal
         ntotal <- ntotal - length(empty.idx)
@@ -219,7 +219,8 @@ estimate.moments.fiml <- function (X = NULL, M = NULL, verbose = FALSE) {
 
     # starting values
     start.cov <- cov(X, use = "p"); dimnames(start.cov) <- NULL
-    start.mean <- apply(X, 2, mean, na.rm = TRUE); names(start.mean) <- NULL
+    start.mean <- apply(X, 2, base::mean, na.rm = TRUE)
+    names(start.mean) <- NULL
 
     # x2param
     lower.idx <- which(lower.tri(start.cov, diag = TRUE))

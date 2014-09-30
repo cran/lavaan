@@ -1,5 +1,2 @@
-# generic methods
-#
-# initial version: YR 25/03/2009
-
+# for simsem: uses 'inspect' in exportMethods in NAMESPACE
 setGeneric("inspect", function(object, ...) standardGeneric("inspect"))

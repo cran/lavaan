@@ -2,9 +2,14 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
                        ov.names.x=character(0L), eXo=NULL, verbose=FALSE,
                        missing="listwise",
                        WLS.W=TRUE, # do we need asymptotic variance of stats?
+                       optim.method = "nlminb",
                        zero.add = c(0.5, 0.0),
                        zero.keep.margins = TRUE,
+                       zero.cell.warn = TRUE,
                        group=1L) { # group only for error messages
+
+    # override optim.method
+    # optim.method = "BFGS"
 
     # internal function lav_crossprod2
     if(missing == "listwise") {
@@ -190,8 +195,12 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
             } else if(ov.types[i] == "ordered" && ov.types[j] == "ordered") {
                 # polychoric correlation
                 out <- pc_cor_TS(fit.y1=FIT[[i]], fit.y2=FIT[[j]],
+                                 method = optim.method,
                                  zero.add = zero.add, 
-                                 zero.keep.margins = zero.keep.margins)
+                                 zero.keep.margins = zero.keep.margins,
+                                 zero.cell.warn = zero.cell.warn,
+                                 Y1.name = ov.names[i],
+                                 Y2.name = ov.names[j])
                 COR[i,j] <- COR[j,i] <- out
             }
             # check for near 1.0 correlations
@@ -390,9 +399,15 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
 
     B <- rbind( cbind(A11,A12),
                 cbind(A21,A22) )
-    # B.inv <- solve(B)
-    B.inv <- MASS::ginv(B)
+
+    # invert!
     ## FIXME: we need to invert B as a partioned matrix
+    B.inv <- try(solve(B), silent = TRUE)
+    if(inherits(B.inv, "try-error")) {
+        # brute force
+        B.inv <- MASS::ginv(B) 
+        warning("lavaan WARNING: trouble inverting W matrix; used generalized inverse")
+    }
 
     #  weight matrix (correlation metric)
     WLS.W <- B.inv %*% INNER %*% t(B.inv)
@@ -418,9 +433,14 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
     # reverse sign numeric TH (because we provide -mu in WLS.obs)
     # (WOW, it took me a LOOONGGG time to realize this!)
     # YR 16 July 2012
+
+    # NOTE: prior to 0.5-17, we used num.idx (instead of NUM.idx)
+    # which is WRONG if we have more than one threshold per variable
+    # (thanks to Sacha Epskamp for spotting this!)
     if(length(num.idx) > 0L) {
-        WLS.W[num.idx,] <- -WLS.W[num.idx,]
-        WLS.W[,num.idx] <- -WLS.W[,num.idx]
+        NUM.idx <- which(unlist(TH.IDX) == 0L)
+        WLS.W[NUM.idx,] <- -WLS.W[NUM.idx,]
+        WLS.W[,NUM.idx] <- -WLS.W[,NUM.idx]
     }
     
     out <- list(TH=TH, SLOPES=SLOPES, VAR=VAR, COR=COR, COV=COV,

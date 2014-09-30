@@ -1,9 +1,40 @@
 # YR - 26 Nov 2013: generate partable for the unrestricted model
-lav_partable_unrestricted <- function(ov.names=NULL, ov=NULL, 
+lav_partable_unrestricted <- function(lavobject = NULL,
+                              ov.names=NULL, ov=NULL, 
                               ov.names.x=NULL, sample.cov=NULL,
                               meanstructure=FALSE, sample.mean=NULL,
                               sample.th=NULL,
                               fixed.x=TRUE) {
+
+    # grab everything from lavaan lavobject
+    if(!is.null(lavobject)) {
+        stopifnot(inherits(lavobject, "lavaan"))
+
+        OV.X <- lapply(as.list(1:lavobject@Data@ngroups),
+                       function(x) vnames(lavobject@ParTable, type="ov.x", x))
+        # what with fixed.x?
+        if(lavobject@Options$mimic %in% c("lavaan", "Mplus")) {
+            FIXED.X = lavobject@Model@fixed.x
+        } else if(lavobject@Options$mimic == "EQS") {
+            # always ignore fixed.x
+            OV.X = NULL
+            FIXED.X = FALSE
+        } else if(lavobject@Options$mimic == "LISREL") {
+            # always ignore fixed.x??? CHECKME!!
+            OV.X = NULL
+            FIXED.X = FALSE
+        }
+
+        ov.names      = lavobject@Data@ov.names
+        ov            = lavobject@Data@ov
+        ov.names.x    = OV.X
+        sample.cov    = lavobject@SampleStats@cov
+        meanstructure = lavobject@Model@meanstructure
+        sample.mean   = lavobject@SampleStats@mean
+        sample.th     = lavobject@SampleStats@th
+        parameterization = lavobject@Options$parameterization
+        fixed.x       = FIXED.X
+    }
 
     ngroups <- length(ov.names)
     ov.names.nox <- lapply(as.list(1:ngroups), function(g) 
@@ -42,13 +73,15 @@ lav_partable_unrestricted <- function(ov.names=NULL, ov=NULL,
 
         # COVARIANCES!
         pstar <- nvar*(nvar-1)/2
-        tmp <- utils::combn(OV[[g]], 2)
-        lhs <- c(lhs, tmp[1,]) # to fill upper.tri
-         op <- c(op,   rep("~~", pstar))
-        rhs <- c(rhs, tmp[2,])
-        group <- c(group, rep(g,  pstar))
-        free  <- c(free,  rep(1L, pstar))
-        exo   <- c(exo,   rep(0L, pstar))
+        if(pstar > 0L) { # only if more than 1 variable
+            tmp <- utils::combn(OV[[g]], 2)
+            lhs <- c(lhs, tmp[1,]) # to fill upper.tri
+             op <- c(op,   rep("~~", pstar))
+            rhs <- c(rhs, tmp[2,])
+            group <- c(group, rep(g,  pstar))
+            free  <- c(free,  rep(1L, pstar))
+            exo   <- c(exo,   rep(0L, pstar))
+        }
 
         # starting values -- variances
         if(!is.null(sample.cov)) {
@@ -117,6 +150,24 @@ lav_partable_unrestricted <- function(ov.names=NULL, ov=NULL,
                 ustart <- c(ustart, rep(as.numeric(NA), length(ov.int)))
             }
         }
+
+        # categorical? insert means as fixed-to-zero parameters
+        # since 0.5-17
+        if(categorical) {
+            ov.int <- OV[[g]]
+            idx <- which(ov.int %in% ord.names)
+            ov.int <- ov.int[idx]
+
+            nel <- length(ov.int)
+            lhs   <- c(lhs, ov.int)
+             op   <- c(op, rep("~1", nel))
+            rhs   <- c(rhs, rep("", nel))
+            group <- c(group, rep(g,  nel))
+            free  <- c(free,  rep(0L, nel))
+            exo   <- c(exo,   rep(0L, nel))
+           ustart <- c(ustart, rep(0L, nel))
+        }
+ 
 
         # fixed.x exogenous variables?
         if(categorical && (nx <- length(ov.names.x[[g]])) > 0L) {

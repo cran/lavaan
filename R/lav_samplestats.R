@@ -19,8 +19,10 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                       WLS.V             = NULL,
                                       NACOV             = NULL,
                                       ridge             = 1e-5,
+                                      optim.method      = "nlminb",
                                       zero.add          = c(0.5, 0.0),
                                       zero.keep.margins = TRUE,
+                                      zero.cell.warn    = TRUE,
                                       debug             = FALSE,
                                       verbose           = FALSE) {
 
@@ -77,6 +79,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     # group weights
     group.w       <- vector("list", length=ngroups)
 
+    WLS.VD <- vector("list", length=ngroups)
     if(is.null(WLS.V)) {
         WLS.V      <- vector("list", length=ngroups)
         WLS.V.user <- FALSE   
@@ -97,9 +100,16 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         # FIXME: check dimension of WLS.V!!
     }
 
+    NACOV.compute <- TRUE
     if(is.null(NACOV)) {
         NACOV      <- vector("list", length=ngroups)
         NACOV.user <- FALSE
+    } else if(is.logical(NACOV)) {
+        if(!NACOV) {
+            NACOV.compute <- FALSE
+        }
+        NACOV.user <- FALSE
+        NACOV      <- vector("list", length=ngroups)
     } else {
         if(!is.list(NACOV)) {
             if(ngroups == 1L) {
@@ -129,7 +139,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         CAT <- list()
         if("ordered" %in% ov.types) {
             categorical <- TRUE
-            if(estimator %in% c("ML","PML","FML","MML")) {
+            if(estimator %in% c("ML","PML","FML","MML","none")) {
                 WLS.W <- FALSE
             } else {
                 WLS.W <- TRUE
@@ -146,8 +156,10 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                               group = g, # for error messages only
                               missing = missing, # listwise or pairwise?
                               WLS.W = WLS.W,
+                              optim.method = optim.method,
                               zero.add = zero.add,
                               zero.keep.margins = zero.keep.margins,
+                              zero.cell.warn = zero.cell.warn,
                               verbose=debug)
             if(verbose) cat("done\n")
             # if (and only if) all variables are ordinal, store pairwise
@@ -175,7 +187,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         if(categorical) {
             var[[g]]  <- CAT$VAR
             cov[[g]]  <- unname(CAT$COV)
-            mean[[g]] <- apply(X[[g]], 2, mean, na.rm=TRUE)
+            mean[[g]] <- apply(X[[g]], 2, base::mean, na.rm=TRUE)
             notnum.idx <- which(ov.types != "numeric")
             mean[[g]][notnum.idx] <- 0.0
 
@@ -195,7 +207,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 # to a sample cov divided by 'n'
                 cov[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov[[g]]
             }
-            mean[[g]] <- apply(X[[g]], 2, mean, na.rm=TRUE)
+            mean[[g]] <- apply(X[[g]], 2, base::mean, na.rm=TRUE)
         
             # icov and cov.log.det (but not if missing)
             if(missing != "ml") {
@@ -236,7 +248,13 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             # 3. variances (if any)
             # 4. covariance matrix (no diagonal!)
             TH <- th[[g]]
-            TH[ov.types == "numeric"] <- -1*TH[ov.types == "numeric"]
+
+            # NOTE: prior to 0.5-17, we had this:
+            # TH[ov.types == "numeric"] <- -1*TH[ov.types == "numeric"]
+            # which is WRONG if we have more than one threshold per variable
+            # (thanks to Sacha Epskamp for spotting this!)
+            TH[ th.idx[[g]] == 0 ] <- -1*TH[ th.idx[[g]] == 0 ]
+
             WLS.obs[[g]] <- c(TH,
                               vec(CAT$SLOPES), # FIXME
                               unlist(CAT$VAR[ov.types == "numeric"]),
@@ -272,7 +290,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
         # NACOV (=GAMMA)
         if(!NACOV.user) {
-            if(estimator == "ML") {
+            if(estimator == "ML" && !missing.flag. && NACOV.compute) {
                 NACOV[[g]] <- compute.Gamma(X[[g]], meanstructure=meanstructure)
             } else if(estimator %in% c("WLS","DWLS","ULS")) {
                 if(!categorical) {
@@ -281,7 +299,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     if(meanstructure) pstar <- pstar + nvar
                     if(nrow(X[[g]]) < pstar) {
                         if(ngroups > 1L) {
-                            txt <- cat(" in group: ", g, "\n", sep="")
+                            txt <- paste(" in group: ", g, "\n", sep="")
                         } else {
                             txt <- "\n"
                         }
@@ -328,21 +346,27 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                         WLS.V[[g]] <- inv.chol(NACOV[[g]])
                     } else if(estimator == "DWLS") {
                         dacov <- diag(NACOV[[g]])
+                        if(!all(is.finite(dacov))) {
+                            stop("lavaan ERROR: diagonal of Gamma (NACOV) contains non finite values")
+                        }
                         WLS.V[[g]] <- diag(1/dacov, nrow=NROW(NACOV[[g]]), 
                                                     ncol=NCOL(NACOV[[g]]))
+                        WLS.VD[[g]] <- 1/dacov
                     } else if(estimator == "ULS") {
-                        WLS.V[[g]] <- diag(length(WLS.obs[[g]]))
+                        #WLS.V[[g]] <- diag(length(WLS.obs[[g]]))
+                        WLS.VD[[g]] <- rep(1, length(WLS.obs[[g]]))
                     }
                 } else {
                     if(estimator == "WLS") {
                         WLS.V[[g]] <- inv.chol(CAT$WLS.W * nobs[[g]])
                     } else if(estimator == "DWLS") {
                         dacov <- diag(CAT$WLS.W * nobs[[g]])
-                        WLS.V[[g]] <- diag(1/dacov, nrow=NROW(CAT$WLS.W),
-                                                    ncol=NCOL(CAT$WLS.W))
+                        #WLS.V[[g]] <- diag(1/dacov, nrow=NROW(CAT$WLS.W),
+                        #                            ncol=NCOL(CAT$WLS.W))
+                        WLS.VD[[g]] <- 1/dacov
                     } else if(estimator == "ULS") {
-                        DWLS <- diag(NROW(CAT$WLS.W))
-                        WLS.V[[g]] <- DWLS
+                        #WLS.V[[g]] <- diag(length(WLS.obs[[g]]))
+                        WLS.VD[[g]] <- rep(1, length(WLS.obs[[g]]))
                     }
                 }
             } else if(estimator == "PML" || estimator == "FML") {
@@ -365,6 +389,11 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
         }
     } # ngroups
+
+    # remove 'CAT', unless debug -- this is to save memory
+    if(!debug) {
+        CAT <- list()
+    }
 
     # construct SampleStats object
     lavSampleStats <- new("lavSampleStats",
@@ -393,7 +422,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                        cov.log.det  = cov.log.det,
                        ridge        = ridge.eps,
                        WLS.obs      = WLS.obs,
-                       WLS.V        = WLS.V,                     
+                       WLS.V        = WLS.V,
+                       WLS.VD       = WLS.VD,
                        NACOV        = NACOV,
 
                        # missingness
@@ -458,6 +488,7 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
     # group weights
     group.w       <- vector("list", length=ngroups)
 
+    WLS.VD <- vector("list", length=ngroups)
     if(is.null(WLS.V)) {
         WLS.V      <- vector("list", length=ngroups)
         WLS.V.user <- FALSE
@@ -532,7 +563,7 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                  "  found: ", paste(cov.names, collapse=" "), "\n",
                  "  expected: ", paste(ov.names[[g]], collapse=" "), "\n")
         } else {
-            tmp.cov <- tmp.cov[idx,idx]
+            tmp.cov <- tmp.cov[idx,idx,drop=FALSE]
         }
 
         # strip dimnames
@@ -616,6 +647,7 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                 }
             } else if(estimator == "ULS") {
                 WLS.V[[g]] <- diag(length(WLS.obs[[g]]))
+                WLS.VD[[g]] <- rep(1, length(WLS.obs[[g]]))
             } else if(estimator == "WLS" || estimator == "DWLS") {
                 if(is.null(WLS.V[[g]]))
                     stop("lavaan ERROR: the (D)WLS estimator is only available with full data or with a user-provided WLS.V")
@@ -659,6 +691,7 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                        ridge        = ridge.eps,
                        WLS.obs      = WLS.obs,
                        WLS.V        = WLS.V,
+                       WLS.VD       = WLS.VD,
                        NACOV        = NACOV,
 
                        # missingness

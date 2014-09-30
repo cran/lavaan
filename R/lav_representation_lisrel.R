@@ -414,16 +414,18 @@ computeTH.LISREL <- function(MLIST=NULL, th.idx=NULL) {
     TAU    <- MLIST$tau; nth <- nrow(TAU)
 
     # missing alpha
-    if(is.null(MLIST$alpha))
+    if(is.null(MLIST$alpha)) {
         ALPHA <- matrix(0, nfac, 1L)
-    else
+    } else {
         ALPHA  <- MLIST$alpha
+    }
 
     # missing nu
-    if(is.null(MLIST$nu))
+    if(is.null(MLIST$nu)) {
         NU <- matrix(0, nvar, 1L)
-    else
+    } else {
         NU <- MLIST$nu
+    }
 
     if(is.null(th.idx)) {
         th.idx <- 1:nth
@@ -508,19 +510,13 @@ computeLAMBDA.LISREL <- function(MLIST = NULL,
 
     # fix LAMBDA
     LAMBDA <- MLIST$lambda
-    if(length(lv.dummy.idx) > 0L) {
-        LAMBDA <- LAMBDA[, -lv.dummy.idx, drop=FALSE]
-        nfac <- ncol(LAMBDA)
-        LAMBDA[ov.y.dummy.ov.idx,] <-
-            MLIST$beta[ov.y.dummy.lv.idx,
-                       1:nfac, drop=FALSE]
+    if(length(ov.y.dummy.ov.idx) > 0L) {
+        LAMBDA[ov.y.dummy.ov.idx,] <- MLIST$beta[ov.y.dummy.lv.idx,]
     }
 
     # remove dummy lv?
-    if(remove.dummy.lv) {
-        if(length(lv.dummy.idx) > 0L) {
-            LAMBDA <- LAMBDA[,-lv.dummy.idx,drop=FALSE]
-        }
+    if(remove.dummy.lv && length(lv.dummy.idx) > 0L) {
+        LAMBDA <- LAMBDA[,-lv.dummy.idx,drop=FALSE]
     }
 
     LAMBDA
@@ -615,6 +611,12 @@ computeVETAx.LISREL <- function(MLIST=NULL, lv.dummy.idx=NULL) {
 }
 
 # only if ALPHA=NULL but we need it anyway
+# we 'reconstruct' ALPHA here (including dummy entries), no fixing
+#
+# without any dummy variables, this is just the zero vector
+# but if we have dummy variables, we need to fill in their values
+# 
+#
 .internal_get_ALPHA <- function(MLIST = NULL, sample.mean = NULL,
                                 ov.y.dummy.ov.idx = NULL,
                                 ov.x.dummy.ov.idx = NULL,
@@ -651,44 +653,38 @@ computeVETAx.LISREL <- function(MLIST=NULL, lv.dummy.idx=NULL) {
 }
 
 # only if NU=NULL but we need it anyway
+#
+# since we have no meanstructure, we can assume NU is unrestricted
+# and contains either:
+#     1) the sample means (if not eXo)
+#     2) the intercepts, if we have exogenous covariates
+#        since sample.mean = NU + LAMBDA %*% E(eta)
+#        we have NU = sample.mean - LAMBDA %*% E(eta)
 .internal_get_NU <- function(MLIST = NULL, sample.mean = NULL,
                                 ov.y.dummy.ov.idx = NULL,
                                 ov.x.dummy.ov.idx = NULL,
                                 ov.y.dummy.lv.idx = NULL,
                                 ov.x.dummy.lv.idx = NULL) {
 
-    ov.dummy.idx = c(ov.y.dummy.ov.idx, ov.x.dummy.ov.idx)
-    lv.dummy.idx = c(ov.y.dummy.lv.idx, ov.x.dummy.lv.idx)
+    if(!is.null(MLIST$nu)) return(MLIST$nu)
 
-    NU <- MLIST$nu
-    if(!is.null(NU)) {
-        if(length(lv.dummy.idx) > 0L) {
-            NU[ov.dummy.idx, 1L] <- MLIST$alpha[lv.dummy.idx, 1L]
-        }
+    # if nexo > 0, substract lambda %*% EETA
+    if( length(ov.x.dummy.ov.idx) > 0L ) {
+        EETA <- computeEETA.LISREL(MLIST, mean.x=NULL,
+            sample.mean=sample.mean,
+            ov.y.dummy.ov.idx=ov.y.dummy.ov.idx,
+            ov.x.dummy.ov.idx=ov.x.dummy.ov.idx,
+            ov.y.dummy.lv.idx=ov.y.dummy.lv.idx,
+            ov.x.dummy.lv.idx=ov.x.dummy.lv.idx)
+
+        # 'regress' NU on X
+        NU <- sample.mean - MLIST$lambda %*% EETA
+
+        # just to make sure we have exact zeroes for all dummies
+        NU[c(ov.y.dummy.ov.idx,ov.x.dummy.ov.idx)] <- 0
     } else {
-        # if nexo == 0L, fill in unrestricted mean
+        # unrestricted mean
         NU <- sample.mean
-
-        # if nexo > 0, substract lambda %*% EETA
-        if( length(ov.x.dummy.ov.idx) > 0L ) {
-            EETA <- computeEETA.LISREL(MLIST, mean.x=NULL,
-                sample.mean=sample.mean,
-                ov.y.dummy.ov.idx=ov.y.dummy.ov.idx,
-                ov.x.dummy.ov.idx=ov.x.dummy.ov.idx,
-                ov.y.dummy.lv.idx=ov.y.dummy.lv.idx,
-                ov.x.dummy.lv.idx=ov.x.dummy.lv.idx)
-
-            # fix LAMBDA
-            LAMBDA.X <- MLIST$lambda
-            if(length(ov.y.dummy.ov.idx) > 0L) {
-                LAMBDA.X[ov.y.dummy.ov.idx,] <-
-                    MLIST$beta[ov.y.dummy.lv.idx, ,drop=FALSE]
-            }
-
-            # 'regress' NU on X
-            NU <- NU - LAMBDA.X %*% EETA
-            NU[ov.x.dummy.ov.idx] <- sample.mean[ov.x.dummy.ov.idx]
-        }
     }
 
     NU
@@ -698,10 +694,17 @@ computeVETAx.LISREL <- function(MLIST=NULL, lv.dummy.idx=NULL) {
                                 ov.y.dummy.ov.idx = NULL,
                                 ov.x.dummy.ov.idx = NULL,
                                 ov.y.dummy.lv.idx = NULL,
-                                ov.x.dummy.lv.idx = NULL) {
+                                ov.x.dummy.lv.idx = NULL,
+                                nexo = NULL) {
 
     nvar <- nrow(MLIST$lambda)
-    nexo <- ncol(MLIST$gamma)
+    if(!is.null(MLIST$gamma)) {
+        nexo <- ncol(MLIST$gamma)
+    } else if(!is.null(nexo)) {
+        nexo <- nexo
+    } else {
+        stop("nexo not known")
+    }
 
     # create KAPPA
     KAPPA <- matrix(0, nvar, nexo)
@@ -732,7 +735,7 @@ computeEETA.LISREL <- function(MLIST=NULL, mean.x=NULL,
 
     LAMBDA <- MLIST$lambda; BETA <- MLIST$beta; GAMMA <- MLIST$gamma
 
-    # ALPHA?
+    # ALPHA? (reconstruct, but no 'fix')
     ALPHA <- .internal_get_ALPHA(MLIST = MLIST, sample.mean = sample.mean,
                                  ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
                                  ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
@@ -742,20 +745,21 @@ computeEETA.LISREL <- function(MLIST=NULL, mean.x=NULL,
     # BETA?
     if(!is.null(BETA)) {
         IB.inv <- .internal_get_IB.inv(MLIST = MLIST)
-        eeta <- as.numeric(IB.inv %*% ALPHA)
-    } else {
-        eeta <- ALPHA   
-    }
-
-    # GAMMA?
-    if(!is.null(GAMMA)) {
-        if(!is.null(BETA)) {
-            eeta <- ALPHA + as.numeric( IB.inv %*% GAMMA %*% mean.x )
+        # GAMMA?
+        if(!is.null(GAMMA)) {
+            eeta <- as.numeric(IB.inv %*% ALPHA + IB.inv %*% GAMMA %*% mean.x)
         } else {
-            eeta <- ALPHA + as.numeric( GAMMA %*% mean.x )
+            eeta <- as.numeric(IB.inv %*% ALPHA)
+        }
+    } else {
+        # GAMMA?
+        if(!is.null(GAMMA)) {
+            eeta <- as.numeric(ALPHA + GAMMA %*% mean.x)
+        } else {
+            eeta <- as.numeric(ALPHA)
         }
     }
-        
+
     eeta
 }
 
@@ -888,6 +892,7 @@ computeYHATetax.LISREL <- function(MLIST=NULL, eXo=NULL, ETA=NULL,
 
     LAMBDA <- MLIST$lambda; nvar <- nrow(LAMBDA); nfac <- ncol(LAMBDA)
     lv.dummy.idx <- c(ov.y.dummy.lv.idx, ov.x.dummy.lv.idx)
+    ov.dummy.idx <- c(ov.y.dummy.ov.idx, ov.x.dummy.ov.idx)
 
     # exogenous variables?
     if(is.null(eXo)) {
@@ -900,12 +905,17 @@ computeYHATetax.LISREL <- function(MLIST=NULL, eXo=NULL, ETA=NULL,
         }
     }
 
-    # fix NU
+    # get NU
     NU <- .internal_get_NU(MLIST = MLIST, sample.mean = sample.mean,
                            ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
                            ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
                            ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
                            ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
+
+    # fix NU
+    if(length(lv.dummy.idx) > 0L) {
+        NU[ov.dummy.idx, 1L] <- MLIST$alpha[lv.dummy.idx, 1L]
+    }
 
     # fix LAMBDA (remove dummies) ## FIXME -- needed?
     LAMBDA <- MLIST$lambda
@@ -927,7 +937,8 @@ computeYHATetax.LISREL <- function(MLIST=NULL, eXo=NULL, ETA=NULL,
                                      ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
                                      ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
                                      ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
-                                     ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
+                                     ov.x.dummy.lv.idx = ov.x.dummy.lv.idx,
+                                     nexo = nexo)
 
         # expand YHAT if ETA only has 1 row
         if(nrow(YHAT) == 1L) {
@@ -976,6 +987,7 @@ computeYHATx.LISREL <- function(MLIST=NULL, eXo=NULL,
 
     LAMBDA <- MLIST$lambda; nvar <- nrow(LAMBDA); nfac <- ncol(LAMBDA)
     lv.dummy.idx <- c(ov.y.dummy.lv.idx, ov.x.dummy.lv.idx)
+    ov.dummy.idx <- c(ov.y.dummy.ov.idx, ov.x.dummy.ov.idx)
 
     # exogenous variables?
     if(is.null(eXo)) {
@@ -984,12 +996,18 @@ computeYHATx.LISREL <- function(MLIST=NULL, eXo=NULL,
         nexo <- ncol(eXo)
     }
 
-    # fix NU
+    # get NU
     NU <- .internal_get_NU(MLIST = MLIST, sample.mean = sample.mean,
                            ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
                            ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
                            ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
                            ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
+
+    # fix NU
+    if(length(lv.dummy.idx) > 0L) {
+        NU[ov.dummy.idx, 1L] <- MLIST$alpha[lv.dummy.idx, 1L]
+    }
+
 
     # fix LAMBDA (remove dummies) ## FIXME -- needed?
     LAMBDA <- MLIST$lambda
@@ -1019,7 +1037,8 @@ computeYHATx.LISREL <- function(MLIST=NULL, eXo=NULL,
                                      ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
                                      ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
                                      ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
-                                     ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
+                                     ov.x.dummy.lv.idx = ov.x.dummy.lv.idx,
+                                     nexo = nexo)
 
         # expand YHAT if ETA only has 1 row
         if(nrow(YHAT) == 1L) {
@@ -1186,53 +1205,47 @@ computeYHATx.LISREL.OLD <- function(MLIST=NULL, eXo=NULL, ETA=NULL,
 }
 
 # compute E(Y): expected value of observed
-# E(Y) = NU + LAMBDA E(eta) + KAPPA mean.x
+# E(Y) = NU + LAMBDA %*% E(eta) 
+#      = NU + LAMBDA %*% (IB.inv %*% ALPHA) # no exo, no GAMMA
+#      = NU + LAMBDA %*% (IB.inv %*% ALPHA + IB.inv %*% GAMMA %*% mean.x) # eXo
 # if DELTA -> E(Y) = delta * E(Y)
+#
+# this is similar to computeMuHat but:
+# - we ALWAYS compute NU+ALPHA, even if meanstructure=FALSE
+# - never used if GAMMA, since we then have categorical variables, and the
+#   'part 1' structure contains the (thresholds +) intercepts, not
+#   the means
 computeEY.LISREL <- function(MLIST=NULL, mean.x = NULL, sample.mean = NULL,
                              ov.y.dummy.ov.idx=NULL,
                              ov.x.dummy.ov.idx=NULL,
                              ov.y.dummy.lv.idx=NULL,
                              ov.x.dummy.lv.idx=NULL) {
 
-    lv.dummy.idx <- c(ov.y.dummy.lv.idx, ov.x.dummy.lv.idx)
+    LAMBDA <- MLIST$lambda
 
-    # fix NU
+    # get NU, but do not 'fix'
     NU <- .internal_get_NU(MLIST = MLIST, sample.mean = sample.mean,
                            ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
                            ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
                            ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
                            ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
 
-    # fix LAMBDA (remove dummies) ## FIXME -- needed?
-    LAMBDA <- MLIST$lambda
-    if(length(lv.dummy.idx) > 0L) {
-        LAMBDA <- LAMBDA[, -lv.dummy.idx, drop=FALSE]
-        nfac <- ncol(LAMBDA)
-        LAMBDA[ov.y.dummy.ov.idx,] <-
-            MLIST$beta[ov.y.dummy.lv.idx, 1:nfac, drop=FALSE]
-    }
+    ALPHA <- .internal_get_ALPHA(MLIST = MLIST, sample.mean = sample.mean,
+                           ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
+                           ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
+                           ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
+                           ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
 
     # compute E(ETA)
-    EETA <- computeEETA.LISREL(MLIST = MLIST, mean.x = mean.x)
+    EETA <- computeEETA.LISREL(MLIST = MLIST, sample.mean = sample.mean,
+                               mean.x = mean.x,
+                               ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
+                               ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
+                               ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
+                               ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
 
     # EY
     EY <- as.numeric(NU) + as.numeric(LAMBDA %*% EETA)
-
-    # KAPPA?
-    if(!is.null(MLIST$gamma)) { # only if x in eXo, and no dummies...)
-        KAPPA <- .internal_get_KAPPA(MLIST = MLIST,
-                                     ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
-                                     ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
-                                     ov.y.dummy.lv.idx = ov.y.dummy.lv.idx,
-                                     ov.x.dummy.lv.idx = ov.x.dummy.lv.idx)
-
-        EY <- EY + as.numeric(KAPPA %*% mean.x)   
-
-        # put back sample.mean eXo ## FIXME: needed?
-        if(length(ov.x.dummy.ov.idx) > 0L) {
-            EY[ov.x.dummy.ov.idx] <- sample.mean[ov.x.dummy.ov.idx]
-        }
-    }
 
     # if delta, scale
     if(!is.null(MLIST$delta)) {
@@ -1378,7 +1391,7 @@ setResidualElements.LISREL <- function(MLIST=NULL,
         diag(MLIST$theta) <- 0.0
     }
     if(length(ov.y.dummy.ov.idx) > 0L) {
-        MLIST$psi[ov.y.dummy.lv.idx, ov.y.dummy.lv.idx] <- 0.0
+        MLIST$psi[ cbind(ov.y.dummy.lv.idx, ov.y.dummy.lv.idx) ] <- 0.0
     }
 
     # special case: PSI=0, and lambda=I (eg ex3.12)
@@ -1408,11 +1421,11 @@ setResidualElements.LISREL <- function(MLIST=NULL,
         diag(MLIST$theta) <- RESIDUAL
     }
 
-    # move ov.y.dummy elements from THETA to PSI
+    # move ov.y.dummy 'RESIDUAL' elements from THETA to PSI
     if(length(ov.y.dummy.ov.idx) > 0L) {
-        MLIST$psi[ov.y.dummy.lv.idx, ov.y.dummy.lv.idx] <- 
-            MLIST$theta[ov.y.dummy.ov.idx, ov.y.dummy.ov.idx]
-        MLIST$theta[ov.y.dummy.ov.idx, ov.y.dummy.ov.idx] <- 0.0
+        MLIST$psi[cbind(ov.y.dummy.lv.idx, ov.y.dummy.lv.idx)] <- 
+            MLIST$theta[cbind(ov.y.dummy.ov.idx, ov.y.dummy.ov.idx)]
+        MLIST$theta[cbind(ov.y.dummy.ov.idx, ov.y.dummy.ov.idx)] <- 0.0
     }
 
     MLIST
@@ -1616,6 +1629,8 @@ derivative.sigma.LISREL <- function(m="lambda",
     if(delta && !is.null(MLIST$delta)) {
         DELTA <- MLIST$delta
         delta.flag <- TRUE
+    } else if(m == "delta") { # modindices?
+        return( matrix(0.0, nrow=pstar, ncol=length(idx)) )
     }
 
     # beta?
@@ -2070,7 +2085,7 @@ derivative.alpha.LISREL <- function(m="alpha",
 
 # MLIST = NULL; meanstructure=TRUE; th=TRUE; delta=TRUE; pi=TRUE; gw=FALSE
 # vech.idx <- lavaan:::vech.idx; vechru.idx <- lavaan:::vechru.idx
-# vec <- lavaan:::vec; lavJacobianC <- lavaan:::lavJacobianC
+# vec <- lavaan:::vec; lav_func_jacobian_complex <- lavaan:::lav_func_jacobian_complex
 # computeSigmaHat.LISREL <- lavaan:::computeSigmaHat.LISREL
 # setDeltaElements.LISREL <- lavaan:::setDeltaElements.LISREL
 TESTING_derivatives.LISREL <- function(MLIST = NULL,
@@ -2220,7 +2235,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL,
         }
 
         # 1. sigma
-        DX1 <- lavJacobianC(func=compute.sigma, x=x, mm=mm, MLIST=MLIST)
+        DX1 <- lav_func_jacobian_complex(func=compute.sigma, x=x, mm=mm, MLIST=MLIST)
         DX2 <- derivative.sigma.LISREL(m=mm, idx=1:length(MLIST[[mm]]),
                                        MLIST=MLIST, delta = !theta)
         if(mm %in% c("psi","theta")) {
@@ -2248,7 +2263,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL,
             sprintf("%12.9f", max(DX1-DX2)), "\n")
 
         # 2. mu
-        DX1 <- lavJacobianC(func=compute.mu, x=x, mm=mm, MLIST=MLIST)
+        DX1 <- lav_func_jacobian_complex(func=compute.mu, x=x, mm=mm, MLIST=MLIST)
         DX2 <- derivative.mu.LISREL(m=mm, idx=1:length(MLIST[[mm]]),
                                        MLIST=MLIST)
         if(mm %in% c("psi","theta")) {
@@ -2268,7 +2283,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL,
 
         # 3. th
         if(th) {
-            DX1 <- lavJacobianC(func=compute.th2, x=x, mm=mm, MLIST=MLIST, 
+            DX1 <- lav_func_jacobian_complex(func=compute.th2, x=x, mm=mm, MLIST=MLIST, 
                                 th.idx=th.idx)
             DX2 <- derivative.th.LISREL(m=mm, idx=1:length(MLIST[[mm]]),
                                         MLIST=MLIST, th.idx=th.idx,
@@ -2315,7 +2330,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL,
 
         # 4. pi
         if(pi) {
-            DX1 <- lavJacobianC(func=compute.pi, x=x, mm=mm, MLIST=MLIST)
+            DX1 <- lav_func_jacobian_complex(func=compute.pi, x=x, mm=mm, MLIST=MLIST)
             DX2 <- derivative.pi.LISREL(m=mm, idx=1:length(MLIST[[mm]]),
                                         MLIST=MLIST)
             if(mm %in% c("psi","theta")) {
@@ -2366,7 +2381,7 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL,
 
         # 5. gw
         if(gw) {
-            DX1 <- lavJacobianC(func=compute.gw, x=x, mm=mm, MLIST=MLIST)
+            DX1 <- lav_func_jacobian_complex(func=compute.gw, x=x, mm=mm, MLIST=MLIST)
             DX2 <- derivative.gw.LISREL(m=mm, idx=1:length(MLIST[[mm]]),
                                     MLIST=MLIST)
             if(mm %in% c("psi","theta")) {

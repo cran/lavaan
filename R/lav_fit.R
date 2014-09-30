@@ -46,10 +46,10 @@ lav_model_fit <- function(lavpartable = NULL,
                 def.cov <- cov(BOOT.def )
             } else {
                 # regular delta method
-                JAC <- try(lavJacobianC(func = lavmodel@def.function, x = x),
+                JAC <- try(lav_func_jacobian_complex(func = lavmodel@def.function, x = x),
                            silent=TRUE)
                 if(inherits(JAC, "try-error")) { # eg. pnorm()
-                    JAC <- lavJacobianD(func = lavmodel@def.function, x = x)
+                    JAC <- lav_func_jacobian_simple(func = lavmodel@def.function, x = x)
                 }
                 def.cov <- JAC %*% VCOV %*% t(JAC)
             }
@@ -70,7 +70,7 @@ lav_model_fit <- function(lavpartable = NULL,
     if(lavmodel@categorical) {
         TH <- computeTH(lavmodel = lavmodel)
     } else {
-        TH <- list()
+        TH <- vector("list", length = lavmodel@ngroups)
     }
 
 
@@ -79,9 +79,17 @@ lav_model_fit <- function(lavpartable = NULL,
         attr(est, "BOOT.COEF") <- attr(VCOV, "BOOT.COEF")
     }
 
+    # partrace?
+    if(!is.null(attr(x, "partrace"))) {
+        PARTRACE <- attr(x, "partrace")
+    } else {
+        PARTRACE <- matrix(0, 0L, 0L)
+    }
+
     new("Fit",
         npar       = max(lavpartable$free),
         x          = x.copy,
+        partrace   = PARTRACE,
         # start      = lavpartable$start, # not yet, break semTools
         start      = start,
         est        = est,

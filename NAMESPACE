@@ -37,6 +37,8 @@ export("lavaan", "cfa", "sem", "growth",
        "lavParTable",       "lavaanify",
        "lavNames",          "lavaanNames",
        "lavParseModelString", # "parseModelString",
+       "lavInspect",        "inspect",
+       "lavTech",
        # utilities
        "getCov", "char2num", "cor2cov",
        "vech", "vech.reverse", "vechru", "vechru.reverse", "lower2full",
@@ -62,7 +64,21 @@ export("lavaan", "cfa", "sem", "growth",
        #"prelav",
        #"lavData",
        #"lavPredict",
-       "lavCor"
+       "lavCor",
+
+       # API functions
+
+       lav_partable_independence,   # used by semTools!
+       lav_partable_unrestricted,
+       lav_partable_npar,
+       lav_partable_ndat,
+       lav_partable_df,
+       
+
+       lav_func_gradient_complex,
+       lav_func_gradient_simple,
+       lav_func_jacobian_complex,
+       lav_func_jacobian_simple     # used by semTools!
       )
 
 # export Classes
@@ -81,8 +97,8 @@ exportMethods(
               "vcov", 
               "logLik",
               "fitted.values", "fitted",
-              "summary",
-              "inspect"
+              "inspect",
+              "summary"
              )
 
 S3method(print, lavaan.data.frame)

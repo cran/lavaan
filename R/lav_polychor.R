@@ -2,6 +2,8 @@
 
 # two-way frequency table
 pc_freq <- function(Y1, Y2) {
+    # FIXME: for 2x2, we could use
+    # array(tabulate((Y1-1) + (Y2-1)*2 + 1, nbins = 4L), dim=c(2L ,2L))
     max.y1 <- max(Y1, na.rm=TRUE); max.y2 <- max(Y2, na.rm=TRUE)
     bin <- Y1 - 1L; bin <- bin + max.y1 * (Y2 - 1L); bin <- bin[!is.na(bin)]
     if (length(bin)) bin <- bin + 1L
@@ -220,8 +222,10 @@ pc_logl_x <- function(x, Y1, Y2, eXo=NULL, nth.y1, nth.y2, freq=NULL) {
 # zero.keep.margins is only used for 2x2 tables
 pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
                       method="nlminb", zero.add = c(0.5, 0.0), control=list(),
-                      zero.keep.margins = TRUE,
-                      verbose=FALSE) {
+                      zero.keep.margins = TRUE, zero.cell.warn = TRUE,
+                      verbose=FALSE, Y1.name=NULL, Y2.name=NULL) {
+
+    # cat("DEBUG: method = ", method, "\n")
 
     if(is.null(fit.y1)) fit.y1 <- lavProbit(y=Y1, X=eXo)
     if(is.null(fit.y2)) fit.y2 <- lavProbit(y=Y2, X=eXo)
@@ -230,7 +234,7 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
     if(missing(eXo) && length(fit.y1$slope.idx) > 0L) eXo <- fit.y1$X
 
     stopifnot(min(Y1, na.rm=TRUE) == 1L, min(Y2, na.rm=TRUE) == 1L,
-              method %in% c("nlminb", "nlminb.hessian"))
+              method %in% c("nlminb", "BFGS", "nlminb.hessian", "optimize"))
 
     # exo or not?
     exo <- ifelse(length(fit.y1$slope.idx) > 0L, TRUE, FALSE)
@@ -245,6 +249,14 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
         nr <- nrow(freq); nc <- ncol(freq)
 
         # check for empty cells -- FIXME: make this an option!
+        if(zero.cell.warn && any(freq == 0L)) {
+            if(!is.null(Y1.name) && !is.null(Y2.name)) {
+                warning("lavaan WARNING: empty cell(s) in bivariate table of ",
+                        Y1.name, " x ", Y2.name)
+            } else {
+                warning("lavaan WARNING: empty cell(s) in bivariate table")
+            }
+        }
 
         # treat 2x2 tables 
         if(nr == 2L && nc == 2L) {
@@ -386,6 +398,29 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
                       gradient=gradientFunction,
                       scale=10,
                       control=control)
+        if(out$convergence != 0L) warning("no convergence")
+        rho <- tanh(out$par)
+    } else if(method == "BFGS") {
+        # NOTE: known to fail if rho.init is too far from final value
+        # seems to be better with parscale = 0.1??
+        out <- optim(par = atanh(rho.init), fn = objectiveFunction, 
+                     gr = gradientFunction,
+                     control = list(parscale = 0.1, reltol = 1e-10,
+                                    trace = ifelse(verbose, 1L, 0L),
+                                    REPORT = 1L,
+                                    abstol=(.Machine$double.eps * 10)),
+                     method = "BFGS")
+        if(out$convergence != 0L) warning("no convergence")
+        rho <- tanh(out$par)
+    } else if(method == "optimize") {
+        # not atanh/tanh transform
+        objectiveFunction2 <- function(x) {
+            logl <- pc_logl(rho=x[1L], fit.y1=fit.y1, fit.y2=fit.y2,
+                            freq=freq)
+            -logl # to minimize!
+        }
+        out <- optimize(f = objectiveFunction2, interval = c(-0.9999,0.9999))
+        rho <- out$minimum
     } else if(method == "nlminb.hessian") {
         stopifnot(!exo)
         out <- nlminb(start=atanh(rho.init), objective=objectiveFunction,
@@ -393,9 +428,9 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
                       hessian=hessianFunction,
                       scale=100, # not needed?
                       control=control)
+        if(out$convergence != 0L) warning("no convergence")
+        rho <- tanh(out$par)
     }
-    if(out$convergence != 0L) warning("no convergence")
-    rho <- tanh(out$par)
 
     rho
 }

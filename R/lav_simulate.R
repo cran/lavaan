@@ -137,7 +137,8 @@ simulateData <- function(
         lav2$ustart[c(ov.var.idx,lv.var.idx)] <- 0.0
         fit <- lavaan(model=lav2, sample.nobs=sample.nobs,  ...)
         Sigma.hat <- computeSigmaHat(lavmodel = fit@Model)
-        ETA <- computeVETA(lavmodel = fit@Model, lavsamplestats = NULL)
+        ETA <- computeVETA(lavmodel = fit@Model, 
+                           lavsamplestats = fit@SampleStats)
 
         if(debug) {
             cat("Sigma.hat:\n"); print(Sigma.hat)
@@ -232,8 +233,18 @@ simulateData <- function(
                                   kurtosis = kurtosis,
                                   debug    = debug)
             # rescale
-            X[[g]] <- scale(Z, center = -Mu.hat[[g]],
-                               scale  = 1/sqrt(diag(COV)))
+            # Note: 'scale()' will first center, and then scale
+            # but we need to first scale, and then center...
+            # this was reported by Jordan Brace (9 may 2014)
+            #X[[g]] <- scale(Z, center = -Mu.hat[[g]],
+            #                   scale  = 1/sqrt(diag(COV)))
+            
+            # first, we scale 
+            TMP <- scale(Z, center = FALSE, 
+                         scale = 1/sqrt(diag(COV)))[,,drop=FALSE]
+
+            # then, we center
+            X[[g]] <- sweep(TMP, MARGIN=2, STATS=Mu.hat[[g]], FUN="+")
         }
 
         # any categorical variables?

@@ -1,9 +1,21 @@
 # contributed by Ed Merkle (17 Jan 2013)
+
 # small changes by YR (12 Feb 2013) to match the results
 # of lav_model_gradient in the multiple group case
+
+# YR 30 May 2014: handle 1-variable case (fixing apply in lines 56, 62, 108)
+
 estfun.lavaan <- lavScores <- function(object, scaling=FALSE) {
 
-    stopifnot(inherits(object, "lavaan"))
+  stopifnot(inherits(object, "lavaan"))
+
+  # what if estimator != ML? 
+  # avoid hard error (using stop); throw a warning, and return an empty matrix
+  if(object@Options$estimator != "ML") {
+      warning("lavaan WARNING: scores only availalbe if estimator is ML")
+      return(matrix(0,0,0))
+  }
+
 
   # shortcuts
   lavdata        <- object@Data
@@ -13,7 +25,10 @@ estfun.lavaan <- lavScores <- function(object, scaling=FALSE) {
 
   ## number variables/sample size
   ntab <- unlist(lavsamplestats@nobs)
-  ntot <- lavsamplestats@ntotal
+  ## change in 0.5-17: we keep the 'empty cases'
+  ##                   and 'fill' in the scores at their 'case.idx'
+  ##                   later, we remove the 'empty rows'
+  ntot <- max( object@Data@case.idx[[ object@Data@ngroups ]] )
 
   Score.mat <- matrix(NA, ntot, length(coef(object)))
   
@@ -49,14 +64,14 @@ estfun.lavaan <- lavScores <- function(object, scaling=FALSE) {
 
             dx.Mu <- -1 * mean.diff %*% Sigma.inv
 
-            dx.Sigma <- t(apply(mean.diff, 1L,
-               function(x) vech(- J2 * (Sigma.inv %*% (tcrossprod(x)*N1 - Sigma.hat) %*% Sigma.inv))))
+            dx.Sigma <- t(matrix(apply(mean.diff, 1L,
+               function(x) vech(- J2 * (Sigma.inv %*% (tcrossprod(x)*N1 - Sigma.hat) %*% Sigma.inv))), ncol=nrow(mean.diff)))
 
             scores.H1 <- cbind(dx.Mu, dx.Sigma)
         } else {
             mean.diff <- t(t(X) - lavsamplestats@mean[[g]] %*% J)
-            dx.Sigma <- t(apply(mean.diff, 1L,
-               function(x) vech(- J2 * (Sigma.inv %*% (tcrossprod(x)*N1 - Sigma.hat) %*% Sigma.inv))))
+            dx.Sigma <- t(matrix(apply(mean.diff, 1L,
+               function(x) vech(- J2 * (Sigma.inv %*% (tcrossprod(x)*N1 - Sigma.hat) %*% Sigma.inv))), ncol=nrow(mean.diff)))
             scores.H1 <- dx.Sigma
         }
         ## FIXME? Seems like we would need group.w even in the
@@ -92,17 +107,17 @@ estfun.lavaan <- lavScores <- function(object, scaling=FALSE) {
         Sigma.idx <- which(var.idx.mat[lower.tri(var.idx.mat, diag=T)]==1)
       
         J <- matrix(1, 1L, nobs) #[var.idx]
-        J2 <- matrix(1, nvar, nvar)[var.idx, var.idx]
+        J2 <- matrix(1, nvar, nvar)[var.idx, var.idx, drop = FALSE]
         diag(J2) <- 0.5
-        Sigma.inv <- inv.chol(Sigma.hat[var.idx, var.idx],
+        Sigma.inv <- inv.chol(Sigma.hat[var.idx, var.idx, drop = FALSE],
                                        logdet=FALSE)
         Mu <- Mu.hat[var.idx]
         mean.diff <- t(t(X) - Mu %*% J)
 
         ## Scores for missing pattern p within group g
         score.mu[pat.idx==p,var.idx] <- -1 * mean.diff %*% Sigma.inv
-        score.sigma[pat.idx==p,Sigma.idx] <- t(apply(mean.diff, 1L,
-          function(x) vech(- J2 * (Sigma.inv %*% (tcrossprod(x) - Sigma.hat[var.idx,var.idx]) %*% Sigma.inv)) ) )
+        score.sigma[pat.idx==p,Sigma.idx] <- t(matrix(apply(mean.diff, 1L,
+          function(x) vech(- J2 * (Sigma.inv %*% (tcrossprod(x) - Sigma.hat[var.idx,var.idx,drop = FALSE]) %*% Sigma.inv)) ), ncol=nrow(mean.diff)) )
 
       }
 
@@ -119,6 +134,13 @@ estfun.lavaan <- lavScores <- function(object, scaling=FALSE) {
       Score.mat[wi,] <- (-1/ntot) * Score.mat[wi,]
     }
   } # g
+
+  # handle empty rows
+  empty.idx <- which( apply(Score.mat, 1L, 
+                          function(x) sum(is.na(x))) == ncol(Score.mat) )
+  if(length(empty.idx) > 0L) {
+      Score.mat <- Score.mat[-empty.idx,,drop=FALSE]
+  }
   
   # provide column names
   colnames(Score.mat) <- names(coef(object))

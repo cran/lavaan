@@ -71,6 +71,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                    # zero values
                    zero.add           = "default",
                    zero.keep.margins  = "default",
+                   zero.cell.warn     = TRUE,
 
                    # starting values
                    start              = "default",
@@ -118,6 +119,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     # 0c categorical variables? -- needed for lavoptions
     if(any(FLAT$op == "|")) {
         categorical <- TRUE
+        # just in case, add lhs variables names to "ordered"
+        ordered <- unique(c(ordered, lavNames(FLAT, "ov.ord")))
     } else if(!is.null(data) && length(ordered) > 0L) {
         categorical <- TRUE
     } else if(is.data.frame(data) && 
@@ -153,6 +156,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             information = information, se = se, test = test, 
             bootstrap = bootstrap, mimic = mimic,
             zero.add = zero.add, zero.keep.margins = zero.keep.margins,
+            zero.cell.warn = zero.cell.warn,
             representation = representation, do.fit = do.fit, verbose = verbose,
             warn = warn, debug = debug)
         lavoptions <- lav_options_set(opt)
@@ -313,6 +317,12 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     }
     if(debug) print(as.data.frame(lavpartable))
 
+    # at this point, we should check if the partable is complete
+    # or not; this is especially relevant if the lavaan() function
+    # was used, but the user has forgotten some variances/intercepts...
+    check <- lav_partable_check(lavpartable)
+    
+
     # 2b. change meanstructure flag?
     if(any(lavpartable$op == "~1")) lavoptions$meanstructure <- TRUE
 
@@ -338,8 +348,12 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                        WLS.V             = WLS.V,
                        NACOV             = NACOV,
                        ridge             = ridge,
+                       optim.method      = 
+                           ifelse(!is.null(control$cor.optim.method), 
+                                           control$cor.optim.method, "nlminb"),
                        zero.add          = lavoptions$zero.add,
                        zero.keep.margins = lavoptions$zero.keep.margins,
+                       zero.cell.warn    = lavoptions$zero.cell.warn,
                        debug             = lavoptions$debug,
                        verbose           = lavoptions$verbose)
                                                  
@@ -377,7 +391,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if(!is.null(slotModel)) {
         lavmodel <- slotModel
         lavaanStart <- lav_model_get_parameters(lavmodel, type="user")
-        lavpartable$start <- lavaanStart
+        #lavpartable$start <- lavaanStart
         timing$Start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
         timing$Model <- (proc.time()[3] - start.time)
@@ -393,7 +407,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         timing$Start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
 
-        #lavpartable$start <- lavaanStart # not yet, break semTools
+        #lavpartable$start <- lavaanStart # not yet, breaks semTools
         #print(as.data.frame(lavpartable))
 
         # 5. construct internal model (S4) representation
@@ -479,6 +493,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
            #FALSE && # to debug
            sum(nchar(FLAT$fixed)) == 0 && # no fixed values in parTable
                                           # this includes intercepts!!
+           # next one checks if we have exogenous variances/intercepts
+           # in model syntax
+           (length(vnames(lavpartable, "eqs.x")) == 
+            length(vnames(lavpartable, "ov.x"))) &&
            !categorical &&
            !lavmodel@eq.constraints &&
            length(lavdata@X) > 0L &&
@@ -490,6 +508,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                               lavdata@ov.names[[1L]])
             ov.x.idx <- match(vnames(lavpartable, "ov.x"), 
                               lavdata@ov.names[[1L]])
+            if(length(ov.x.idx) == 0L) {
+                stop("lavaan ERROR: no exogenous variables; remove all variances, covariances and intercepts of exogenous variables from the model syntax, or use fixed.x = FALSE\n")
+            }
             YX <- lavdata@X[[1L]]
             #print(head(YX))
             # constraints?
@@ -551,10 +572,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
                 A.ceq <- A.cin <- matrix(0, lavmodel@nx.free, 0)
                 if(!is.null(body(lavmodel@ceq.function)))
-                    A.ceq <- t(lavJacobianC(func=lavmodel@ceq.function, 
+                    A.ceq <- t(lav_func_jacobian_complex(func=lavmodel@ceq.function, 
                                             x=rep(0,lavmodel@nx.free)))
                 if(!is.null(body(lavmodel@cin.function)))
-                    A.cin <- t(lavJacobianC(func=lavmodel@cin.function, 
+                    A.cin <- t(lav_func_jacobian_complex(func=lavmodel@cin.function, 
                                             x=rep(0,lavmodel@nx.free)))
                 A <- cbind(A.ceq, A.cin)
                 con.jac <- t(A)
@@ -649,6 +670,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             lavmodel <- lav_model_set_parameters(lavmodel, x = x,
                 estimator = lavoptions$estimator)
         }
+
         if(!is.null(attr(x, "con.jac"))) 
             lavmodel@con.jac <- attr(x, "con.jac")
         if(!is.null(attr(x, "con.lambda")))
@@ -665,6 +687,13 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             lav_model_objective(lavmodel = lavmodel, 
                 lavsamplestats = lavsamplestats, lavdata = lavdata, 
                 lavcache = lavcache, estimator = lavoptions$estimator)
+    }
+
+    # should we fake/force convergence? (eg. to enforce the
+    # computation of a test statistic
+    if(!is.null(control$optim.force.converged) &&
+       control$optim.force.converged) {
+        attr(x, "converged") <- TRUE
     }
     timing$Estimate <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
@@ -689,14 +718,21 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     TEST <- NULL
     if(lavoptions$test != "none" && attr(x, "converged")) {
         if(verbose) cat("Computing TEST for test =", lavoptions$test, "...")
-        TEST <- lav_model_test(lavmodel       = lavmodel,
-                               lavpartable    = lavpartable,
-                               lavsamplestats = lavsamplestats,
-                               lavoptions     = lavoptions,
-                               x              = x,
-                               VCOV           = VCOV,
-                               lavdata        = lavdata,
-                               lavcache       = lavcache)
+        test.UGamma.eigvals <- TRUE # for now
+        if(!is.null(control$test.UGamma.eigvals)) {
+            if(is.logical(control$test.UGamma.eigvals)) {
+                 test.UGamma.eigvals <- control$test.UGamma.eigvals
+            }
+        }
+        TEST <- lav_model_test(lavmodel            = lavmodel,
+                               lavpartable         = lavpartable,
+                               lavsamplestats      = lavsamplestats,
+                               lavoptions          = lavoptions,
+                               x                   = x,
+                               VCOV                = VCOV,
+                               lavdata             = lavdata,
+                               lavcache            = lavcache,
+                               test.UGamma.eigvals = test.UGamma.eigvals)
         if(verbose) cat(" done.\n")
     } else {
         TEST <- list(list(test="none", stat=NA, 
@@ -719,7 +755,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if(attr(x, "converged")) { # only if estimation was successful
         # 1. check for Heywood cases, negative (residual) variances, ...
         var.idx <- which(lavpartable$op == "~~" &
-                         !lavpartable$lhs %in% unlist(lavpta$vnames$ov.ord) &
+                         #!lavpartable$lhs %in% unlist(lavpta$vnames$ov.ord) &
                          lavpartable$lhs == lavpartable$rhs)
         if(length(var.idx) > 0L && any(lavfit@est[var.idx] < 0.0))
             warning("lavaan WARNING: some estimated variances are negative")
@@ -748,7 +784,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                      symmetric=TRUE,
                                      only.values=TRUE)$values
                     if(any(eigvals < -1 * .Machine$double.eps^(3/4))) {
-                        warning("lavaan WARNING: residual covariance matrix is not positive definite;", txt.group, " use inspect(fit,\"cov.ov\") to investigate.")
+                        warning("lavaan WARNING: observed variable error term matrix (theta) is not positive definite;", txt.group, " use inspect(fit,\"theta\") to investigate.")
                     }
                 }
         }
@@ -786,7 +822,8 @@ cfa <- sem <- function(model = NULL, data = NULL,
     information = "default", se = "default", test = "default",
     bootstrap = 1000L, mimic = "default", representation = "default",
     do.fit = TRUE, control = list(), WLS.V = NULL, NACOV = NULL,
-    zero.add = "default", zero.keep.margins = "default", start = "default",
+    zero.add = "default", zero.keep.margins = "default", 
+    zero.cell.warn = TRUE, start = "default",
     verbose = FALSE, warn = TRUE, debug = FALSE) {
 
     mc <- match.call()
@@ -822,7 +859,8 @@ growth <- function(model = NULL, data = NULL,
     information = "default", se = "default", test = "default",
     bootstrap = 1000L, mimic = "default", representation = "default",
     do.fit = TRUE, control = list(), WLS.V = NULL, NACOV = NULL,
-    zero.add = "default", zero.keep.margins = "default", start = "default",
+    zero.add = "default", zero.keep.margins = "default", 
+    zero.cell.warn = TRUE, start = "default",
     verbose = FALSE, warn = TRUE, debug = FALSE) {
 
     mc <- match.call()

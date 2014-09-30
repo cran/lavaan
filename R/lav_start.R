@@ -160,7 +160,8 @@ lav_start <- function(start.method = "default",
                 # standardized?
                 var.f.idx <- which(lavpartable$lhs == f & lavpartable$op == "~~" &
                                    lavpartable$rhs == f)
-                if(lavpartable$free[var.f.idx] == 0 &&
+                if(length(var.f.idx) > 0L && 
+                   lavpartable$free[var.f.idx] == 0 &&
                    lavpartable$ustart[var.f.idx] == 1) {
                    # make sure factor loadings are between -0.7 and 0.7
                     x <- start[user.idx]
@@ -283,13 +284,26 @@ lav_start <- function(start.method = "default",
     # override if a user list with starting values is provided 
     # we only look at the 'est' column for now
     if(!is.null(start.user)) {
+
+        if(is.null(lavpartable$group)) {
+            lavpartable$group <- rep(1L, length(lavpartable$lhs))
+        }
+        if(is.null(start.user$group)) {
+            start.user$group <- rep(1L, length(start.user$lhs))
+        }
+
         # FIXME: avoid for loop!!!
         for(i in 1:length(lavpartable$lhs)) {
             # find corresponding parameters
-            lhs <- lavpartable$lhs[i]; op <- lavpartable$op[i]; rhs <- lavpartable$rhs[i]
+            lhs <- lavpartable$lhs[i]
+             op <- lavpartable$op[i] 
+            rhs <- lavpartable$rhs[i]
+            grp <- lavpartable$group[i]
+
             start.user.idx <- which(start.user$lhs == lhs &
                                     start.user$op  ==  op &
-                                    start.user$rhs == rhs)
+                                    start.user$rhs == rhs &
+                                    start.user$group == grp)
             if(length(start.user.idx) == 1L && 
                is.finite(start.user$est[start.user.idx])) {
                 start[i] <- start.user$est[start.user.idx]

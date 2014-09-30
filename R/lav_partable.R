@@ -343,7 +343,12 @@ lavaanify <- lavParTable <- function(
     }
 
     # data.frame?
-    if(as.data.frame.) LIST <- as.data.frame(LIST, stringsAsFactors = FALSE)
+    if(as.data.frame.) {
+        LIST <- as.data.frame(LIST, stringsAsFactors = FALSE)
+
+        # order? first by 'op', then by 'user'
+        #LIST[with(LIST, order(op, -user)),]
+    }
 
     LIST
 }
@@ -765,7 +770,8 @@ lav_partable_flat <- function(FLAT = NULL,
 
     # extract `names' of various types of variables:
     lv.names     <- lav_partable_vnames(FLAT, type="lv")     # latent variables
-    lv.names.r   <- lav_partable_vnames(FLAT, type="lv.regular") # regular latent variables
+    #lv.names.r   <- lav_partable_vnames(FLAT, type="lv.regular") # regular latent variables
+    lv.names.f   <- lav_partable_vnames(FLAT, type="lv.formative") # formative latent variables
     ov.names     <- lav_partable_vnames(FLAT, type="ov")     # observed variables
     ov.names.x   <- lav_partable_vnames(FLAT, type="ov.x")   # exogenous x covariates 
     ov.names.nox <- lav_partable_vnames(FLAT, type="ov.nox")
@@ -798,6 +804,19 @@ lav_partable_flat <- function(FLAT = NULL,
     #### FIXME!!!!! ORDER!
     ov.names.ord <- unique(c(ov.names.ord1, ov.names.ord2))
 
+    # if we have the "|" in the model syntax, check the number of thresholds
+    if(!is.null(varTable) && length(ov.names.ord1) > 0L) {
+        for(o in ov.names.ord1) {
+            nth <- varTable$nlev[ varTable$name == o ] - 1L
+            nth.in.partable <- sum(FLAT$op == "|" & FLAT$lhs == o)
+            if(nth != nth.in.partable) {
+                stop("lavaan ERROR: expected ", nth, 
+                     " threshold(s) for variable ",
+                     sQuote(o), "; syntax contains ", nth.in.partable, "\n")
+            }
+        }
+    }
+
     if(length(ov.names.ord) > 0L)
         categorical <- TRUE
 
@@ -817,15 +836,17 @@ lav_partable_flat <- function(FLAT = NULL,
 
     # 2. default (residual) variances and covariances
 
-    # a) (residual) VARIANCES (all ov's except exo, and regular lv's)
-    if(auto.var) {
+    # a) (residual) VARIANCES (all ov's except exo, and all lv's)
+    # NOTE: change since 0.5-17: we ALWAYS include the vars in the 
+    #       parameter table; but only if auto.var = TRUE, we set them free
+    #if(auto.var) {
         ov.var <- ov.names.nox
         # auto-remove ordinal variables
         #idx <- match(ov.names.ord, ov.var)
         #if(length(idx)) ov.var <- ov.var[-idx]
-        lhs <- c(lhs, ov.var, lv.names.r)
-        rhs <- c(rhs, ov.var, lv.names.r)
-    }
+        lhs <- c(lhs, ov.var, lv.names)
+        rhs <- c(rhs, ov.var, lv.names)
+    #}
 
     # b) `independent` latent variable COVARIANCES (lv.names.x)
     if(auto.cov.lv.x && length(lv.names.x) > 1L) {
@@ -868,8 +889,8 @@ lav_partable_flat <- function(FLAT = NULL,
             ov.int <- ov.names
         }
         # auto-remove ordinal variables
-        idx <- which(ov.int %in% ov.names.ord)
-        if(length(idx)) ov.int <- ov.int[-idx]
+        #idx <- which(ov.int %in% ov.names.ord)
+        #if(length(idx)) ov.int <- ov.int[-idx]
 
         int.lhs <- c(ov.int, lv.names)
         lhs <- c(lhs, int.lhs)
@@ -928,6 +949,14 @@ lav_partable_flat <- function(FLAT = NULL,
     USER <- data.frame(lhs=lhs, op=op, rhs=rhs, mod.idx=mod.idx,
                        stringsAsFactors=FALSE)
 
+    # check for duplicated elements in USER
+    TMP <- USER[,1:3]
+    idx <- which(duplicated(TMP))
+    if(length(idx) > 0L) {
+        warning("duplicated elements in model syntax have been ignored: ", TMP[idx,])
+        USER <- USER[-idx,]
+    }
+
     # check for duplicated elements in DEFAULT
     # - FIXME: can we not avoid this somehow??
     # - for example, if the user model includes 'x1 ~~ x1'
@@ -962,6 +991,23 @@ lav_partable_flat <- function(FLAT = NULL,
     #label   <- paste(lhs, op, rhs, sep="")
     label   <- rep(character(1), length(lhs))
     exo     <- rep(0L, length(lhs))
+
+    # 0. if auto.var = FALSE, set the unspecified variances to zero
+    if(!auto.var) {
+        var.idx <- which(op == "~~" &
+                         lhs == rhs &
+                         user == 0L)
+        ustart[var.idx] <- 0.0
+          free[var.idx] <- 0L
+    } else {
+        # 'formative' (residual) variances are set to zero by default
+        var.idx <- which(op == "~~" &
+                         lhs == rhs &
+                         lhs %in% lv.names.f &
+                         user == 0L)
+        ustart[var.idx] <- 0.0
+          free[var.idx] <- 0L
+    }
 
     # 1. fix metric of regular latent variables
     if(std.lv) {

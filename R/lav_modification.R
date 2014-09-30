@@ -2,8 +2,9 @@ modificationIndices <- modificationindices <- modindices <- function(object,
     standardized=TRUE, power=FALSE, delta=0.1, alpha=0.05, high.power=0.75) {
 
     # check if model has converged
-    if(object@Fit@npar > 0L && !object@Fit@converged)
+    if(object@Fit@npar > 0L && !object@Fit@converged) {
         stop("lavaan ERROR: model did not converge")
+    }
 
     if(power) standardized <- TRUE
 
@@ -51,6 +52,31 @@ modificationIndices <- modificationindices <- modindices <- function(object,
     # eg - first indicator of factors
     #    - regressions that are already free covariances
     # TODO
+    #if(object@Model@categorical) {
+    #    for(g in 1:object@Model@ngroups) {
+    #        if(object@Model@parameterization == "delta") {
+    #            # if parameterization == "delta", remove all residual variances
+    #            # of the observed indicators (they are always a function of 
+    #            # other model parameters)
+    #            ov.names.ord <- object@pta$vnames$ov.ord[[g]]
+    #            var.idx <- which(LIST$op == "~~" &
+    #                             LIST$group == g &
+    #                             LIST$lhs == LIST$rhs &
+    #                             LIST$lhs %in% ov.names.ord)
+    #            if(length(var.idx) > 0L) {
+    #                LIST <- LIST[-var.idx,]
+    #            }
+    #        } else if(object@Model@parameterization == "theta") {
+    #            # if parameterization == "theta", remove all scaling elements
+    #            # in DELTA (they are a function of other model parameters)
+    #            scale.idx <- which(LIST$op == "~*~" &
+    #                               LIST$group == g)
+    #            if(length(scale.idx) > 0L) {
+    #                LIST <- LIST[-scale.idx,]
+    #            }
+    #        }
+    #    }
+    #}
  
 
     # master index: *all* elements that we will feed to computeDelta
@@ -141,6 +167,12 @@ modificationIndices <- modificationindices <- modindices <- function(object,
         if(length(inactive.idx) > 0L) {
             H <- H[-inactive.idx,,drop=FALSE]
             lambda <- lambda[-inactive.idx]
+        }
+        # if length(eq.idx) > 0L, remove them from the columns of H
+        if(length(eq.idx) > 0L) {
+            free.again.idx <- LIST$id[LIST$free > 0L & !duplicated(LIST$free)]
+            idx <- LIST$free[ free.again.idx[ free.again.idx %in% eq.idx ] ]
+            H <- H[,-idx]
         }
         if(nrow(H) > 0L) {
             H0 <- matrix(0,nrow(H),nrow(H))
@@ -280,10 +312,10 @@ modificationIndices <- modificationindices <- modindices <- function(object,
     # remove some columns
     LIST$free <- LIST$eq.id <- LIST$unco <- NULL
     LIST$mat <- LIST$row <- LIST$col <- LIST$id <- NULL
-    if(power) {
-        LIST$epc <- NULL
-        LIST$sepc.lv <- NULL
-    }
+    #if(power) {
+    #    LIST$epc <- NULL
+    #    LIST$sepc.lv <- NULL
+    #}
     if(ngroups == 1) LIST$group <- NULL
 
     class(LIST) <- c("lavaan.data.frame", "data.frame")

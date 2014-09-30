@@ -195,8 +195,8 @@ lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
                 # original M (Satorra)
                 Delta1 <- computeDelta(lavmodel = mods[[m]]@Model)
                 npar <- ncol(Delta1[[1]])
-                WLS.V <- getWLS.V(object)
-                Gamma <- getSampleStatsNACOV(object)
+                WLS.V <- lav_object_inspect_wls_v( mods[[m]] )  ## always H1
+                Gamma <- lav_object_inspect_sampstat_nacov( mods[[m]] ) 
                 
 
                 # weight WLS.V
@@ -215,7 +215,7 @@ lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
                 p1 <- mods[[m   ]]@ParTable # partable h1
                 p0 <- mods[[m+1L]]@ParTable # partable h0
                 af <- lav_partable_constraints_function(p1,p0)
-                A <- lavJacobianC(func=af, x=mods[[m   ]]@Fit@x)
+                A <- lav_func_jacobian_complex(func=af, x=mods[[m   ]]@Fit@x)
 
                 trace.UGamma  <- numeric( ngroups )
                 trace.UGamma2 <- numeric( ngroups )
