@@ -1,5 +1,4 @@
 lav_model_fit <- function(lavpartable = NULL,
-                          start       = NULL,
                           lavmodel    = NULL, 
                           x           = NULL, 
                           VCOV        = NULL, 
@@ -12,6 +11,13 @@ lav_model_fit <- function(lavpartable = NULL,
     converged  = attr(x, "converged")
     fx         = attr(x, "fx")
     fx.group   = attr(fx, "fx.group")
+    if(!is.null(attr(fx, "logl.group"))) {
+        logl.group = attr(fx, "logl.group")
+        logl       = sum(logl.group)
+    } else {
+        logl.group = as.numeric(NA)
+        logl = as.numeric(NA)
+    }
     #print(fx.group)
     control    = attr(x, "control")
     attributes(fx) <- NULL
@@ -30,7 +36,7 @@ lav_model_fit <- function(lavpartable = NULL,
         se <- lav_model_get_parameters(lavmodel = lavmodel, GLIST = GLIST, 
                                        type = "user", extra = FALSE) # no def/cin/ceq entries!
         # fixed parameters -> se = 0.0
-        se[ which(lavpartable$unco == 0L) ] <- 0.0
+        se[ which(lavpartable$free == 0L) ] <- 0.0
 
         # defined parameters: 
         def.idx <- which(lavpartable$op == ":=")
@@ -53,7 +59,10 @@ lav_model_fit <- function(lavpartable = NULL,
                 }
                 def.cov <- JAC %*% VCOV %*% t(JAC)
             }
-            se[def.idx] <- sqrt(diag(def.cov))
+            # check for negative se's
+            diag.def.cov <- diag(def.cov)
+            diag.def.cov[ diag.def.cov < 0 ] <- as.numeric(NA)
+            se[def.idx] <- sqrt(diag.def.cov)
         }
     }
 
@@ -90,12 +99,13 @@ lav_model_fit <- function(lavpartable = NULL,
         npar       = max(lavpartable$free),
         x          = x.copy,
         partrace   = PARTRACE,
-        # start      = lavpartable$start, # not yet, break semTools
-        start      = start,
+        start      = lavpartable$start, # needed?
         est        = est,
         se         = se,
         fx         = fx,
         fx.group   = fx.group,
+        logl       = logl,
+        logl.group = logl.group,
         iterations = iterations,
         converged  = converged,
         control    = control,

@@ -596,7 +596,7 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
     # 7. constraints
     cin.idx <- which((object@ParTable$op == "<" | 
                       object@ParTable$op == ">"))
-    ceq.idx <- which(object@ParTable$op == "==")
+    ceq.idx <- which(object@ParTable$op == "==" & object@ParTable$user == 1L)
     if(length(cin.idx) > 0L || length(ceq.idx) > 0L) {
         # set small negative values to zero, to avoid printing " -0.000"
         slack <- ifelse(abs(est) < 1e-5, 0, est)
@@ -673,11 +673,11 @@ function(object, type="free", labels=TRUE) {
         idx <- 1:length( object@ParTable$lhs )
     } else if(type == "free") {
         idx <- which(object@ParTable$free > 0L & !duplicated(object@ParTable$free))
-    } else if(type == "unco") {
-        idx <- which(object@ParTable$unco > 0L & 
-                     !duplicated(object@ParTable$unco))
+    #} else if(type == "unco") {
+    #    idx <- which(object@ParTable$unco > 0L & 
+    #                 !duplicated(object@ParTable$unco))
     } else {
-        stop("argument `type' must be one of free, unco, or user")
+        stop("argument `type' must be one of free or user")
     }
     cof <- object@Fit@est[idx]
   
@@ -690,12 +690,17 @@ function(object, type="free", labels=TRUE) {
     cof
 })
 
-standardizedSolution <- standardizedsolution <- function(object, type="std.all") {
+standardizedSolution <- standardizedsolution <- function(object,
+                                                         type = "std.all",
+                                                         se = TRUE,
+                                                         remove.eq = TRUE,
+                                                         remove.ineq = TRUE,
+                                                         remove.def = FALSE) {
 
     stopifnot(type %in% c("std.all", "std.lv", "std.nox"))
 
     LIST <- inspect(object, "list")
-    unco.idx <- which(LIST$unco > 0L)
+    free.idx <- which(LIST$free > 0L)
     LIST <- LIST[,c("lhs", "op", "rhs", "group")]
 
     # add std and std.all columns
@@ -707,47 +712,78 @@ standardizedSolution <- standardizedsolution <- function(object, type="std.all")
         LIST$est.std <- standardize.est.all.nox(object)
     }
 
-    if(object@Options$se != "none") {
+    if(object@Options$se != "none" && se) {
         # add 'se' for standardized parameters
-        # TODO!!
-        if(type == "std.lv") {
-            JAC <- lav_func_jacobian_simple(func=standardize.est.lv.x, x=object@Fit@est,
-                                object=object)
-        } else if(type == "std.all") {
-            JAC <- lav_func_jacobian_simple(func=standardize.est.all.x, x=object@Fit@est,
-                                object=object)
-        } else if(type == "std.nox") {
-            JAC <- lav_func_jacobian_simple(func=standardize.est.all.nox.x, x=object@Fit@est,
-                                object=object)
+        VCOV <- try(lav_object_inspect_vcov(object, standardized = TRUE,
+                                            type = type, free.only = FALSE,
+                                            add.labels = FALSE, 
+                                            add.class = FALSE))
+        if(inherits(VCOV, "try-error")) {
+            LIST$se <- rep(NA, length(LIST$lhs))
+            LIST$z  <- rep(NA, length(LIST$lhs))
+            LIST$pvalue <- rep(NA, length(LIST$lhs))
+        } else {
+            tmp <- diag(VCOV)
+            # catch negative values
+            min.idx <- which(tmp < 0)
+            if(length(min.idx) > 0L) {
+                tmp[min.idx] <- as.numeric(NA)
+            }
+            # now, we can safely take the square root
+            tmp <- sqrt(tmp)
+            # catch near-zero SEs
+            zero.idx <- which(tmp < sqrt(.Machine$double.eps))
+            if(length(zero.idx) > 0L) {
+                tmp[zero.idx] <- 0.0
+            }
+            LIST$se <- tmp
+ 
+            # add 'z' column
+            tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
+            LIST$z <- LIST$est.std / tmp.se
+            LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
         }
-        JAC <- JAC[unco.idx,unco.idx]
-        VCOV <- as.matrix(vcov(object, labels=FALSE))
-        # handle eq constraints in fit@Model@eq.constraints.K
-        if(object@Model@eq.constraints) {
-            JAC <- JAC %*% object@Model@eq.constraints.K       
-        }
-        COV <- JAC %*% VCOV %*% t(JAC)
-        LIST$se <- rep(NA, length(LIST$lhs))
-        LIST$se[unco.idx] <- sqrt(diag(COV))
-
-        # add 'z' column
-        tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
-        LIST$z <- LIST$est.std / tmp.se
-        LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
     }
 
     # if single group, remove group column
     if(object@Data@ngroups == 1L) LIST$group <- NULL
 
+    # remove == rows?
+    if(remove.eq) {
+        eq.idx <- which(LIST$op == "==")
+        if(length(eq.idx) > 0L) {
+            LIST <- LIST[-eq.idx,]
+        }
+    }
+    # remove <> rows?
+    if(remove.ineq) {
+        ineq.idx <- which(LIST$op == "<" || LIST$op == ">")
+        if(length(ineq.idx) > 0L) {
+            LIST <- LIST[-ineq.idx,]
+        }
+    }
+    # remove := rows?
+    if(remove.def) {
+        def.idx <- which(LIST$op == ":=")
+        if(length(def.idx) > 0L) {
+            LIST <- LIST[-def.idx,]
+        }
+    }
+
+    # always add attributes (for now)
     class(LIST) <- c("lavaan.data.frame", "data.frame")
     LIST
 }
 
-parameterEstimates <- parameterestimates <- 
-    function(object, 
-             ci = TRUE, level = 0.95, boot.ci.type = "perc",
-             standardized = FALSE, 
-             fmi = "default") {
+parameterEstimates <- parameterestimates <- function(object, 
+                                                     ci = TRUE, 
+                                                     level = 0.95, 
+                                                     boot.ci.type = "perc",
+                                                     standardized = FALSE, 
+                                                     fmi = "default",
+                                                     remove.eq = TRUE,
+                                                     remove.ineq = TRUE,
+                                                     remove.def = FALSE) {
 
     # fmi or not
     FMI <- fmi
@@ -765,7 +801,7 @@ parameterEstimates <- parameterestimates <-
         FMI <- FALSE
     }
 
-    LIST <- inspect(object, "list")
+    LIST <- as.data.frame(object@ParTable, stringsAsFactors = FALSE)
     LIST <- LIST[,c("lhs", "op", "rhs", "group", "label")]
     # add est and se column
     est <- object@Fit@est
@@ -954,7 +990,7 @@ parameterEstimates <- parameterestimates <-
                         sample.mean  = MEAN,
                         sample.nobs  = object@Data@nobs)
         SE.step2 <- ifelse(step2@Fit@se == 0.0, as.numeric(NA), step2@Fit@se)
-        LIST$fmi <- 1-(SE.step2^2/SE.orig^2)
+        LIST$fmi <- 1-(SE.step2*SE.step2/(SE.orig*SE.orig))
     }
 
     # if single group, remove group column
@@ -963,6 +999,27 @@ parameterEstimates <- parameterestimates <-
     # if no user-defined labels, remove label column
     if(sum(nchar(object@ParTable$label)) == 0L) LIST$label <- NULL
 
+    # remove == rows?
+    if(remove.eq) {
+        eq.idx <- which(LIST$op == "==")
+        if(length(eq.idx) > 0L) {
+            LIST <- LIST[-eq.idx,]
+        }
+    }
+    # remove <> rows?
+    if(remove.ineq) {
+        ineq.idx <- which(LIST$op == "<" || LIST$op == ">")
+        if(length(ineq.idx) > 0L) {
+            LIST <- LIST[-ineq.idx,]
+        }
+    }
+    # remove := rows?
+    if(remove.def) {
+        def.idx <- which(LIST$op == ":=")
+        if(length(def.idx) > 0L) {
+            LIST <- LIST[-def.idx,]
+        }
+    }
 
     class(LIST) <- c("lavaan.data.frame", "data.frame")
     LIST
@@ -970,7 +1027,40 @@ parameterEstimates <- parameterestimates <-
 
 parameterTable <- parametertable <- parTable <- partable <-
         function(object) {
+
+    # convert to data.frame
     out <- as.data.frame(object@ParTable, stringsAsFactors = FALSE)
+
+    # only to trick semTools
+    SYS <- as.character(sys.calls())
+    if(any(grepl("singleParamTest", SYS))) {
+        remove.auto.eq = TRUE
+        fake.eq.free = TRUE
+    } else {
+        remove.auto.eq <- FALSE
+        fake.eq.free <- FALSE
+    }
+    
+    # remove 'auto' equality constraints
+    # only as a temporary measure (for semTools)
+    if(remove.auto.eq) {
+        auto.eq <- which(out$user == 2L & out$op == "==")
+        if(length(auto.eq) > 0L) {
+            out <- out[-auto.eq,]    
+        }
+    }
+
+    # create the illusion that free column reflects simple equality
+    # constraints; only as a temporary measure (for semTools)
+    if(fake.eq.free) {
+        dup.label.idx <- which(nchar(out$label) > 0L & duplicated(out$label))
+        if(length(dup.label.idx) > 0L) {
+            out$free[ dup.label.idx ] <- 0L
+            non.zero.idx <- which(out$free > 0L)
+            out$free[non.zero.idx] <- seq_along(non.zero.idx)
+        }
+    }
+    
     class(out) <- c("lavaan.data.frame", "data.frame")
     out
 }
@@ -1004,7 +1094,15 @@ varTable <- vartable <- function(object, ov.names=names(object),
 
 
 setMethod("fitted.values", "lavaan",
-function(object, labels=TRUE) {
+function(object, type = "moments", labels=TRUE) {
+
+    # lowercase type
+    type <- tolower(type)
+
+    # catch type="casewise"
+    if(type %in% c("casewise","case","obs","observations","ov")) {
+        return( lavPredict(object, type = "ov", label = labels) )
+    }
 
     G <- object@Data@ngroups
     ov.names <- object@Data@ov.names
@@ -1046,8 +1144,8 @@ function(object, labels=TRUE) {
 
 
 setMethod("fitted", "lavaan",
-function(object, labels=TRUE) {
-     fitted.values(object, labels=labels)
+function(object, type = "moments", labels=TRUE) {
+     fitted.values(object, type = type, labels = labels)
 })
 
 
@@ -1062,37 +1160,9 @@ function(object, labels=TRUE, attributes.=FALSE) {
         stop("lavaan ERROR: vcov not available if se=\"none\"")
     }
 
-    if(object@Fit@npar == 0) {
-        VarCov <- matrix(0,0,0)
-    } else {
-        VarCov <- lav_model_vcov(lavmodel       = object@Model, 
-                                 lavsamplestats = object@SampleStats, 
-                                 lavoptions     = object@Options, 
-                                 lavdata        = object@Data,
-                                 lavpartable    = object@Partable, 
-                                 lavcache       = object@Cache
-                                )
-    }
-
-    if(!is.null(VarCov) && labels) {
-        colnames(VarCov) <- rownames(VarCov) <- 
-            lav_partable_labels(object@ParTable, type="free")
-    }
- 
-    if(!attributes.) {
-        attr(VarCov, "E.inv") <- NULL
-        attr(VarCov, "B0") <- NULL
-        attr(VarCov, "B0.group") <- NULL
-        attr(VarCov, "Delta") <- NULL
-        attr(VarCov, "WLS.V") <- NULL
-        attr(VarCov, "BOOT.COEF") <- NULL
-        attr(VarCov, "BOOT.TEST") <- NULL
-    }
-
-    if(!is.null(VarCov)) {
-        class(VarCov) <- c("lavaan.matrix.symmetric", "matrix")
-    }
-
+    VarCov <- lav_object_inspect_vcov(lavobject = object,
+                                      add.labels = labels,
+                                      add.class = TRUE)
     VarCov
 })
 

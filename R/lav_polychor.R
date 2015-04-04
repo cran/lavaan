@@ -83,8 +83,8 @@ pc_gnorm <- function(rho, th.y1, th.y2) {
 
     # note: Olsson 1979 A2 contains an error!!
     guv <- function(u, v, rho) {
-        R <- (1-rho^2)
-        ( u*v*R - rho*(u^2 - 2*rho*u*v + v^2) + rho*R ) / R^2
+        R <- (1 - rho*rho)
+        ( u*v*R - rho*((u*u) - 2*rho*u*v + (v*v)) + rho*R ) / (R*R)
     }
 
     TH.Y1 <- c(-Inf, th.y1, Inf); TH.Y2 <- c(-Inf, th.y2, Inf)
@@ -298,6 +298,7 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
         # catch special cases for 2x2 tables
         if(nr == 2L && nc == 2L) {
             # 1. a*d == c*d
+            storage.mode(freq) <- "numeric" # to avoid integer overflow
             if(freq[1,1]*freq[2,2] == freq[1,2]*freq[2,1]) {
                 return(0.0)
             }
@@ -329,7 +330,7 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
                     dbinorm(fit.y1$z2, fit.y2$z2, rho) ) / lik
             dx.rho <- sum(dx, na.rm = TRUE)
         }
-        -dx.rho * 1/cosh(x)^2 # dF/drho * drho/dx, dtanh = 1/cosh(x)^2
+        -dx.rho * 1/(cosh(x)*cosh(x)) # dF/drho * drho/dx, dtanh = 1/cosh(x)^2
     }
 
     #hessianFunction2 <- function(x) {
@@ -342,16 +343,17 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
         PI  <- pc_PI(rho, th.y1, th.y2)
         phi <- pc_PHI(rho, th.y1, th.y2)
         gnorm <- pc_gnorm(rho, th.y1, th.y2)
-        H <-  sum(freq/PI * gnorm) - sum(freq/PI^2 * phi^2)
+        H <-  sum(freq/PI * gnorm) - sum(freq/(PI*PI) * (phi*phi))
 
         # to compensate for tanh
         # u=f(x), d^2y/dx^2 = d^2y/du^2 * (du/dx)^2 + dy/du * d^2u/dx^2
         # dtanh = 1/cosh(x)^2
         # dtanh_2 = 8*exp(2*x)*(1-exp(2*x))/(exp(2*x)+1)^3
         grad <- sum(freq/PI * phi)
-        u1 <- 1/cosh(x)^2
-        u2 <- 8*exp(2*x)*(1-exp(2*x))/(exp(2*x)+1)^3
-        H <- H * u1^2 + grad * u2
+        u1 <- 1/(cosh(x)*cosh(x))
+        tmp3 <- (exp(2*x)+1) * (exp(2*x)+1) * (exp(2*x)+1)
+        u2 <- 8*exp(2*x)*(1-exp(2*x))/tmp3
+        H <- H * (u1*u1) + grad * u2
         dim(H) <- c(1L,1L) # for nlminb
         -H
     }
@@ -438,7 +440,7 @@ pc_cor_TS <- function(Y1, Y2, eXo=NULL, fit.y1=NULL, fit.y2=NULL, freq=NULL,
 pc_cor_gradient_noexo <- function(Y1, Y2, rho, th.y1=NULL, th.y2=NULL, 
                                   freq=NULL) {
 
-    R <- sqrt(1-rho^2)
+    R <- sqrt(1- rho*rho)
     TH.Y1 <- c(-Inf, th.y1, Inf); TH.Y2 <- c(-Inf, th.y2, Inf)
     dth.y1 <- dnorm(th.y1); dth.y2 <- dnorm(th.y2)
     if(is.null(freq)) freq <- pc_freq(Y1, Y2)
@@ -462,11 +464,12 @@ pc_cor_gradient_noexo <- function(Y1, Y2, rho, th.y1=NULL, th.y2=NULL,
 
 pc_cor_scores <- function(Y1, Y2, eXo=NULL, rho, fit.y1=NULL, fit.y2=NULL,
                           th.y1=NULL, th.y2=NULL,
-                          sl.y1=NULL, sl.y2=NULL) {
+                          sl.y1=NULL, sl.y2=NULL,
+                          na.zero=FALSE) {
 
     # check if rho > 
 
-    R <- sqrt(1-rho^2)
+    R <- sqrt(1 - rho*rho)
     if(is.null(fit.y1)) fit.y1 <- lavProbit(y=Y1, X=eXo)
     if(is.null(fit.y2)) fit.y2 <- lavProbit(y=Y2, X=eXo)
     y1.update <- y2.update <- FALSE
@@ -506,6 +509,9 @@ pc_cor_scores <- function(Y1, Y2, eXo=NULL, rho, fit.y1=NULL, fit.y2=NULL,
                    dnorm(fit.y1$z2) * pnorm( (fit.y2$z2-rho*fit.y1$z2)/R) )
     }
     dx.th.y1 <- (fit.y1$Y1*y1.Z1 - fit.y1$Y2*y1.Z2) / lik
+    if(na.zero) {
+        dx.th.y1[is.na(dx.th.y1)] <- 0
+    }
 
     # th.y2
     if(identical(R, 0.0)) {
@@ -518,13 +524,22 @@ pc_cor_scores <- function(Y1, Y2, eXo=NULL, rho, fit.y1=NULL, fit.y2=NULL,
                     dnorm(fit.y2$z2) * pnorm( (fit.y1$z2-rho*fit.y2$z2)/R) )
     }
     dx.th.y2 <- (fit.y2$Y1*y2.Z1 - fit.y2$Y2*y2.Z2) / lik
+    if(na.zero) {
+        dx.th.y2[is.na(dx.th.y2)] <- 0
+    }
 
     dx.sl.y1 <- dx.sl.y2 <- NULL
     if(length(fit.y1$slope.idx) > 0L) {
         # sl.y1
         dx.sl.y1 <- (y1.Z2 - y1.Z1) * eXo / lik
+        if(na.zero) {
+            dx.sl.y1[is.na(dx.sl.y1)] <- 0
+        }
         # sl.y2
         dx.sl.y2 <- (y2.Z2 - y2.Z1) * eXo / lik
+        if(na.zero) {
+            dx.sl.y2[is.na(dx.sl.y2)] <- 0
+        }
     }
 
     # rho
@@ -540,6 +555,9 @@ pc_cor_scores <- function(Y1, Y2, eXo=NULL, rho, fit.y1=NULL, fit.y2=NULL,
                 dbinorm(fit.y1$z2, fit.y2$z2, rho) )
     }
     dx.rho <- dx / lik
+    if(na.zero) {
+        dx.rho[is.na(dx.rho)] <- 0
+    }
 
     list(dx.th.y1=dx.th.y1, dx.th.y2=dx.th.y2, 
          dx.sl.y1=dx.sl.y1, dx.sl.y2=dx.sl.y2, dx.rho=dx.rho)

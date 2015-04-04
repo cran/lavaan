@@ -3,7 +3,27 @@
 ##
 ## initial verions Y.R. -- july 2010
 ##
-## -- added EM algorithm: Y.R. aug 2011
+## - added EM algorithm: Y.R. aug 2011
+
+
+force.pd <- function(S, eps.ev = 0.0001) {
+
+    ev <- eigen(S, symmetric=TRUE)
+    lambda <- ev$values
+    n <- length(lambda)
+    Eps <-  eps.ev * abs(lambda[1])
+    if(lambda[n] < Eps) {
+        lambda[lambda < Eps] <- Eps
+        Q <- ev$vectors
+        o.diag <- diag(S)
+        S <- Q %*% (lambda * t(Q))
+        D <- sqrt(pmax(Eps, o.diag)/diag(S))
+        S[] <- D * S * rep(D, each = n)
+    }
+    S
+}
+
+
 
 # mle using EM
 estimate.moments.EM <- function (X = NULL, M = NULL, verbose = FALSE,
@@ -58,7 +78,10 @@ estimate.moments.EM <- function (X = NULL, M = NULL, verbose = FALSE,
             Sigma_12 <- sigma[!var.idx,  var.idx, drop=FALSE]
             Sigma_21 <- sigma[ var.idx, !var.idx, drop=FALSE]
             Sigma_22 <- sigma[ var.idx,  var.idx, drop=FALSE]
-            Sigma_22.inv <- inv.chol(Sigma_22, logdet=FALSE)
+            Sigma_22.inv <- try(inv.chol(Sigma_22, logdet=FALSE), silent = TRUE)
+            if(inherits(Sigma_22.inv, "try-error")) {
+                stop("lavaan ERROR: Sigma_22.inv cannot be inverted")
+            }
             #Sigma_22.inv <- solve(Sigma_22)
 
             # estimate missing values in this pattern
@@ -89,8 +112,21 @@ estimate.moments.EM <- function (X = NULL, M = NULL, verbose = FALSE,
         mu    <- T1/N
         sigma <- T2/N - tcrossprod(mu)
 
+        # check if sigma is near-pd (+ poor fix)
+        ev <- eigen(sigma, symmetric = TRUE, only.values = TRUE)
+        tol <- 1e-6 # FIXME!
+        if(any(ev$values < tol)) {
+            #too.small <- which( ev$values < tol )
+            #ev$values[too.small] <- tol 
+            #ev$values <- ev$values + tol
+            #sigma <- ev$vectors %*% diag(ev$values) %*% t(ev$vectors)
+
+            # ridge
+            diag(sigma) <- diag(sigma) + max(diag(sigma))*1e-08
+        }
+
         # max absolute difference in parameter values
-        DELTA <- max(abs(c(mu,vech(sigma)) - c(mu0,vech(sigma0))))
+        DELTA <- max(abs(c(mu, lav_matrix_vech(sigma)) - c(mu0, lav_matrix_vech(sigma0))))
 
         # report fx
         if(verbose) {
@@ -256,7 +292,7 @@ estimate.moments.fiml <- function (X = NULL, M = NULL, verbose = FALSE) {
     first.derivative.param <- function(x, verbose = FALSE) {
         out <- x2param(x)
         dx.out <- derivative.FIML(Sigma.hat=out$sigma, Mu.hat=out$mu, M=M)
-        dx <- c(dx.out$dx.mu, vech(dx.out$dx.Sigma))
+        dx <- c(dx.out$dx.mu, lav_matrix_vech(dx.out$dx.Sigma))
         dx
     }
 
@@ -278,7 +314,7 @@ estimate.moments.fiml <- function (X = NULL, M = NULL, verbose = FALSE) {
     }
 
     # get staring values
-    start.x <- c(start.mean, vech(start.cov))
+    start.x <- c(start.mean, lav_matrix_vech(start.cov))
 
     # start iterations
     iter.max <- 500

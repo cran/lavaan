@@ -6,7 +6,7 @@ function(object, type="raw", labels=TRUE) {
     type <- tolower(type)
 
     # catch type="casewise"
-    if(type %in% c("casewise","case","obs","observations")) {
+    if(type %in% c("casewise","case","obs","observations","ov")) {
         return( lav_residuals_casewise(object, labels = labels) )
     }
  
@@ -69,7 +69,7 @@ function(object, type="raw", labels=TRUE) {
             idx <- which(augUser$exo > 0L)
             augUser$exo[       idx ] <- 0L
             augUser$free[      idx ] <- max(augUser$free) + 1:length(idx) 
-            augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx) 
+            #augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx) 
             augModel <- lav_model(lavpartable    = augUser,
                                   start          = object@Fit@est,
                                   representation = object@Options$representation,
@@ -103,6 +103,10 @@ function(object, type="raw", labels=TRUE) {
 
     R <- vector("list", length=G)
     for(g in 1:G) {
+
+        # add type
+        R[[g]]$type <- type
+
         # sample moments
         if(!object@SampleStats@missing.flag) {
             S <- object@SampleStats@cov[[g]]
@@ -155,7 +159,7 @@ function(object, type="raw", labels=TRUE) {
                object@Options$se == "none") {
                 dS <- diag(S)
                 Var.mean <- Var.sample.mean <- dS / N 
-                Var.cov  <- Var.sample.cov  <- (tcrossprod(dS) + S^2) / N
+                Var.cov  <- Var.sample.cov  <- (tcrossprod(dS) + S*S) / N
                 # this is identical to solve(A1)/N for complete data!!
             } else if(object@Options$se == "robust.huber.white" ||
                       object@Options$se == "robust.sem") {
@@ -168,14 +172,14 @@ function(object, type="raw", labels=TRUE) {
                                         meanstructure = meanstructure)
                 Info <- (solve(A1) %*% B1 %*% solve(A1)) / N
                 Var.mean <- Var.sample.mean <- diag(Info)[idx.mean]
-                Var.cov  <- Var.sample.cov  <- vech.reverse(diag(Info)[-idx.mean])
+                Var.cov  <- Var.sample.cov  <- lav_matrix_vech_reverse(diag(Info)[-idx.mean])
             } else if(object@Options$se == "first.order") {
                 B1 <- compute.B1.sample(lavsamplestats = object@SampleStats, 
                                         lavdata = object@Data, group=g,
                                         meanstructure=meanstructure)
                 Info <- solve(B1) / N
                 Var.mean <- Var.sample.mean <- diag(Info)[idx.mean]
-                Var.cov  <- Var.sample.cov  <- vech.reverse(diag(Info)[-idx.mean])
+                Var.cov  <- Var.sample.cov  <- lav_matrix_vech_reverse(diag(Info)[-idx.mean])
             }
         }
 
@@ -185,10 +189,10 @@ function(object, type="raw", labels=TRUE) {
  
             if(meanstructure) {
                 Var.model.mean <- Var.model[idx.mean]
-                Var.model.cov  <- vech.reverse(Var.model[-idx.mean])
+                Var.model.cov  <- lav_matrix_vech_reverse(Var.model[-idx.mean])
             } else {
                 Var.model.mean <- rep(0, nvar)
-                Var.model.cov  <- vech.reverse(Var.model)
+                Var.model.cov  <- lav_matrix_vech_reverse(Var.model)
             }
 
             Var.mean <- (Var.sample.mean - Var.model.mean)
@@ -227,8 +231,11 @@ function(object, type="raw", labels=TRUE) {
 
     # replace 'cov' by 'cor' if type == "cor"
     if(type %in% c("cor","cor.bollen","cor.eqs","cor.bentler")) {
-        # only works for non-categorical case; otherwise, th becomes NA
-        R <- lapply(R, "names<-", c("cor", "mean") )
+        if("th" %in% names(R[[1]])) {
+            R <- lapply(R, "names<-", c("type", "cor", "mean", "th") )
+        } else {
+            R <- lapply(R, "names<-", c("type", "cor", "mean") )
+        }
     }
 
     if(G == 1) {

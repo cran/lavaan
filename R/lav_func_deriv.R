@@ -1,5 +1,6 @@
 # numerical derivatives using complex numbers
 # see Squire & Trapp 1998, siam rev 40(1) 110-112
+# or Ridout, MS (2009), the american statistician 63(1) 66-74
 
 # it would seem that you can choose h to be fairly small, without
 # sacrifycing accuracy due to rounding errors
@@ -25,6 +26,10 @@ lav_func_gradient_complex <- function(func, x,
 
     # determine 'h' per element of x
     h <- pmax(h, abs(h*x))
+
+    # get exact h, per x
+    tmp <- x + h
+    h <- (tmp - x)
 
     # simple 'forward' method
     dx <- rep(as.numeric(NA), nvar)
@@ -115,17 +120,60 @@ lav_func_jacobian_simple <- function(func, x,
     dx
 }
 
+# this is based on the Ridout (2009) paper, and the code snippet for 'h4'
+lav_func_hessian_complex <- function(func, x, 
+                                     h = .Machine$double.eps, ... , 
+                                     check = TRUE) {
+
+    # check current point, see if it is a scalar function
+    if(check) {
+        f0 <- try(func(x*(0+1i), ...), silent = TRUE)
+        if(inherits(f0, "try-error")) {
+            stop("function does not support non-numeric (complex) argument")
+        }
+        if(length(f0) != 1L) {
+            stop("function is not scalar and returns more than one element")
+        }
+    }
+
+    nvar <- length(x)
+
+    # determine 'h' per element of x
+    #delta1 <- pmax(h^(1/3), abs(h^(1/3)*x))
+    #delta2 <- pmax(h^(1/5), abs(h^(1/5)*x))
+    delta1 <- h^(1/3)
+    delta2 <- h^(1/5)
+
+    H <- matrix(as.numeric(NA), nvar, nvar)
+    for(i in seq_len(nvar)) {
+        for(j in 1:i) {
+            if(i == j) {
+                delta <- delta2
+            } else {
+                delta <- delta1
+            }
+            H[i,j] <- H[j,i] <-
+                Im(func(x + delta*1i*(seq.int(nvar) == i)*x + 
+                            delta*(seq.int(nvar) == j)*x, ...) -
+                   func(x + delta*1i*(seq.int(nvar) == i)*x - 
+                            delta*(seq.int(nvar) == j)*x, ...)) / 
+                   (2*delta*delta*x[i]*x[j])
+        }
+    }
+
+    H
+}
+
 # quick and dirty (FIXME!!!) way to get
 # surely there must be a more elegant way?
 # dCor/dCov
-# vech.idx <- lavaan:::vech.idx; diag.idx <- lavaan:::diag.idx
 lav_deriv_cov2cor <- function(COV = NULL, num.idx = NULL) {
 
     # dCor/dvar1 = - cov / (2*var1 * sqrt(var1) * sqrt(var2))
     # dCor/dvar2 = - cov / (2*var2 * sqrt(var1) * sqrt(var2))
     # dCor/dcov  =  1/(sqrt(var1) * sqrt(var2))
 
-    # diagonal: diag(vech(tcrossprod(1/delta)))
+    # diagonal: diag(lav_matrix_vech(tcrossprod(1/delta)))
 
     nvar <- ncol(COV);  pstar <- nvar*(nvar+1)/2
     delta <- sqrt(diag(COV))
@@ -133,17 +181,17 @@ lav_deriv_cov2cor <- function(COV = NULL, num.idx = NULL) {
         delta[num.idx] <- 1.0
     }
 
-    A <- COV * -1/( 2*delta^2*tcrossprod(delta) )
+    A <- COV * -1/( 2*delta*delta*tcrossprod(delta) )
     if(length(num.idx) > 0L) {
         A[num.idx,] <- 0; A[cbind(num.idx, num.idx)] <- 1
     }
     A2 <- diag(nvar) %x% t(A)
 
     OUT <- diag( pstar )
-    diag(OUT) <- vech(tcrossprod(1/delta))
-    var.idx <- which(!vech.idx(nvar) %in% vech.idx(nvar, diagonal=FALSE))
-    DUP <- duplicationMatrix(nvar)
-    OUT[,var.idx] <- t(DUP) %*% A2[,diag.idx(nvar)]
+    diag(OUT) <- lav_matrix_vech(tcrossprod(1/delta))
+    var.idx <- lav_matrix_diagh_idx(nvar)
+    DUP <- lav_matrix_duplication(nvar)
+    OUT[,var.idx] <- t(DUP) %*% A2[,lav_matrix_diag_idx(nvar)]
 
     if(length(num.idx) > 0L) {
         var.idx <- var.idx[-num.idx]
@@ -157,18 +205,18 @@ lav_deriv_cov2cor <- function(COV = NULL, num.idx = NULL) {
 lav_deriv_cov2cor_numerical <- function(COV, num.idx=integer(0)) {
 
     compute.R <- function(x) {
-        S <- vech.reverse(x)
+        S <- lav_matrix_vech_reverse(x)
         diagS <- diag(S); delta <- 1/sqrt(diagS)
         if(length(num.idx) > 0L) {
             delta[num.idx] <- 1.0
         }
         R <- diag(delta) %*% S %*% diag(delta)
         #R <- cov2cor(S)
-        R.vec <- vech(R, diagonal = TRUE)
+        R.vec <- lav_matrix_vech(R, diagonal = TRUE)
         R.vec
     }
 
-    x <- vech(COV, diagonal = TRUE)
+    x <- lav_matrix_vech(COV, diagonal = TRUE)
     dx <- lav_func_jacobian_complex(func=compute.R, x=x)
 
     dx

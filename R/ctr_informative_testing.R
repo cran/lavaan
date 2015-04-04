@@ -135,7 +135,7 @@ print.InformativeTesting <- function(x, ...) {
   else if(object$double.bootstrap == "no"){
     cat(t30.txt, t31.txt, t32.txt, "\n", sep="")
     cat(t40.txt, t41.txt, t42.txt, "\n\n", sep="") 
-    cat("  *For meaningfull results set double.bootstrap\n\n")
+    cat("  *For meaningful results set double.bootstrap\n\n")
   }
   
 }
@@ -201,7 +201,7 @@ plot.InformativeTesting <- function(x, ...,
       plot(plot, freq = freq, main = main.lrt[i], xlab = xlab.lrt, ylab = ylab, 
            cex.axis = cex.axis, cex.main = cex.main, cex.lab = cex.lab, 
            col = col, border = border, axes = FALSE, xaxt = "n", ...) 
-      axis(side = 1, at = 0:max(lrt[,i]))
+      axis(side = 1)
       axis(side = 2)
       box(lty = 1, col = "black")
       

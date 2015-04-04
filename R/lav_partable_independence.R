@@ -1,45 +1,62 @@
 # generate parameter table for an independence model
-lav_partable_independence <- function(lavobject = NULL, 
-                              ov.names=NULL, ov=NULL, 
-                              ov.names.x=NULL, sample.cov=NULL,
-                              meanstructure=FALSE, sample.mean=NULL,
-                              sample.th=NULL, parameterization = "delta",
-                              fixed.x=TRUE) {
+lav_partable_independence <- function(lavobject        = NULL, 
+                                      lavdata        = NULL,
+                                      lavoptions     = NULL,
+                                      lavsamplestats = NULL,
+                                      # optional user-provided sample stats
+                                      sample.cov       = NULL,
+                                      sample.mean      = NULL,
+                                      sample.th        = NULL, 
+                                      sample.th.idx    = NULL) {
 
     # grab everything from lavaan lavobject
     if(!is.null(lavobject)) {
         stopifnot(inherits(lavobject, "lavaan"))
 
-        OV.X <- lapply(as.list(1:lavobject@Data@ngroups),
-                       function(x) vnames(lavobject@ParTable, type="ov.x", x))
-        # what with fixed.x?
-        if(lavobject@Options$mimic %in% c("lavaan", "Mplus")) {
-            FIXED.X = lavobject@Model@fixed.x
-        } else if(lavobject@Options$mimic == "EQS") {
-            # always ignore fixed.x
-            OV.X = NULL
-            FIXED.X = FALSE
-        } else if(lavobject@Options$mimic == "LISREL") {
-            # always ignore fixed.x??? CHECKME!!
-            OV.X = NULL
-            FIXED.X = FALSE
-        }
-
-        ov.names      = lavobject@Data@ov.names
-        ov            = lavobject@Data@ov
-        ov.names.x    = OV.X
-        sample.cov    = lavobject@SampleStats@cov
-        meanstructure = lavobject@Model@meanstructure
-        sample.mean   = lavobject@SampleStats@mean
-        sample.th     = lavobject@SampleStats@th
-        parameterization = lavobject@Options$parameterization
-        fixed.x       = FIXED.X
+        lavdata <- lavobject@Data
+        lavoptions <- lavobject@Options
+        lavsamplestats <- lavobject@SampleStats
     }
 
+    # if user-based moments are given, use these
+    if(is.null(sample.cov) && !is.null(lavsamplestats)) {
+        sample.cov <- lavsamplestats@cov
+    }
+    if(is.null(sample.mean) && !is.null(lavsamplestats)) {
+        sample.mean <- lavsamplestats@mean
+    }
+    if(is.null(sample.th) && !is.null(lavsamplestats)) {
+         sample.th <- lavsamplestats@th
+    }
+    if(is.null(sample.th.idx) && !is.null(lavsamplestats)) {
+         sample.th.idx <- lavsamplestats@th.idx
+    }
+
+    ov.names         = lavdata@ov.names
+    ov               = lavdata@ov
+    meanstructure    = lavoptions$meanstructure
+    parameterization = lavoptions$parameterization
+
+    # what with fixed.x?
+    if(lavoptions$mimic %in% c("lavaan", "Mplus")) {
+        fixed.x = lavoptions$fixed.x
+        ov.names.x = lavdata@ov.names.x
+    } else if(lavoptions$mimic == "EQS") {
+        # always ignore fixed.x
+        fixed.x = FALSE
+        ov.names.x = NULL
+    } else if(lavoptions$mimic == "LISREL") {
+        # always ignore fixed.x??? CHECKME!!
+        fixed.x = FALSE
+        ov.names.x = NULL
+    }
 
     ngroups <- length(ov.names)
-    ov.names.nox <- lapply(as.list(1:ngroups), function(g) 
-                    ov.names[[g]][ !ov.names[[g]] %in% ov.names.x[[g]] ])
+
+    # DO NOT USE: ov.names.nox <- lavobject@pta$vnames$ov.nox
+    # even if fixed.x = FALSE, we need to make a distinction
+    ov.names.nox <- lapply(seq_len(ngroups), function(g)
+                ov.names[[g]][ !ov.names[[g]] %in% ov.names.x[[g]] ])
 
     lhs <- rhs <- op <- character(0)
     group <- free <- exo <- integer(0)
@@ -94,9 +111,14 @@ lav_partable_independence <- function(lavobject = NULL,
                 group <- c(group, rep(g, nel))
                  free <- c(free, rep(1L, nel))
                   exo <- c(exo, rep(0L, nel))
-               th.start <- rep(0, nel)
-               #th.start <- sample.th[[g]] ### FIXME:: ORDER??? ONLY ORD!!!
-               ustart <- c(ustart, th.start)
+
+                # starting values
+                if(!is.null(sample.th) && !is.null(sample.th.idx)) {
+                    th.start <- sample.th[[g]][ sample.th.idx[[g]] > 0L ]
+                    ustart <- c(ustart, th.start)
+                } else {
+                    ustart <- c(ustart, rep(as.numeric(NA), nel))
+                }
 
                 # add delta
                 if(parameterization == "theta") {
@@ -112,6 +134,19 @@ lav_partable_independence <- function(lavobject = NULL,
                   delta.start <- rep(1, nel)
                   ustart <- c(ustart, delta.start)
                 }
+
+                # add mean/intercept, but fix to zero
+                lhs.int <- ord.names
+                nel   <- length(lhs.int)
+                rhs.int <- rep("", nel)
+                lhs   <- c(lhs, lhs.int)
+                rhs   <- c(rhs, rhs.int)
+                 op   <- c(op, rep("~1", nel))
+                group <- c(group, rep(g, nel))
+                 free <- c(free, rep(0L, nel))
+                  exo <- c(exo, rep(0L, nel))
+               int.start <- rep(0, nel)
+               ustart <- c(ustart, int.start)
             }
         }
         # meanstructure?
@@ -201,9 +236,9 @@ lav_partable_independence <- function(lavobject = NULL,
                         free        = free,
                         ustart      = ustart,
                         exo         = exo,
-                        label       = rep("",  length(lhs)),
-                        eq.id       = rep(0L,  length(lhs)),
-                        unco        = free
+                        label       = rep("",  length(lhs))
+                        #eq.id       = rep(0L,  length(lhs)),
+                        #unco        = free
                    )
     LIST
 

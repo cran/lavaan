@@ -83,7 +83,7 @@ pml_deriv1 <- function(Sigma.hat = NULL,    # model-based var/cov/cor
         GRAD <- matrix(0, pstar, GRAD.size) # each pair is a row
     }
     PSTAR <- matrix(0, nvar, nvar)   # utility matrix, to get indices
-    PSTAR[vech.idx(nvar, diagonal=FALSE)] <- 1:pstar
+    PSTAR[lav_matrix_vech_idx(nvar, diagonal = FALSE)] <- 1:pstar
 
     for(j in seq_len(nvar-1L)) {
         for(i in (j+1L):nvar) {
@@ -123,7 +123,8 @@ pml_deriv1 <- function(Sigma.hat = NULL,    # model-based var/cov/cor
                                                 th.y1 = TH[ th.idx == i ],
                                                 th.y2 = TH[ th.idx == j ],
                                                 sl.y1 = NULL,
-                                                sl.y2 = NULL)
+                                                sl.y2 = NULL,
+                                                na.zero = TRUE)
                     # TH
                     SCORES[,th.idx_i] <- SCORES[,th.idx_i] + SC.COR.UNI$dx.th.y1
                     SCORES[,th.idx_j] <- SCORES[,th.idx_j] + SC.COR.UNI$dx.th.y2
@@ -140,33 +141,42 @@ pml_deriv1 <- function(Sigma.hat = NULL,    # model-based var/cov/cor
                 } else {
                     # TH
                     if(length(th.idx_i) > 1L) {
-                        GRAD[pstar.idx, th.idx_i] <- colSums(SC.COR.UNI$dx.th.y1)
+                        GRAD[pstar.idx, th.idx_i] <- 
+                            colSums(SC.COR.UNI$dx.th.y1, na.rm = TRUE)
                     } else {
-                        GRAD[pstar.idx, th.idx_i] <- sum(SC.COR.UNI$dx.th.y1)
+                        GRAD[pstar.idx, th.idx_i] <- 
+                            sum(SC.COR.UNI$dx.th.y1, na.rm = TRUE)
                     }
                     if(length(th.idx_j) > 1L) {
-                         GRAD[pstar.idx, th.idx_j] <- colSums(SC.COR.UNI$dx.th.y2)
+                         GRAD[pstar.idx, th.idx_j] <- 
+                             colSums(SC.COR.UNI$dx.th.y2, na.rm = TRUE)
                     } else {
-                         GRAD[pstar.idx, th.idx_j] <- sum(SC.COR.UNI$dx.th.y2)
+                         GRAD[pstar.idx, th.idx_j] <- 
+                             sum(SC.COR.UNI$dx.th.y2, na.rm = TRUE)
                     }
     
                     # SL
                     if(nexo > 0L) {
                         if(length(sl.idx_i) > 1L) {
-                            GRAD[pstar.idx, sl.idx_i] <- colSums(SC.COR.UNI$dx.sl.y1)
+                            GRAD[pstar.idx, sl.idx_i] <- 
+                                colSums(SC.COR.UNI$dx.sl.y1, na.rm = TRUE)
                         } else {
-                            GRAD[pstar.idx, sl.idx_i] <- sum(SC.COR.UNI$dx.sl.y1)
+                            GRAD[pstar.idx, sl.idx_i] <- 
+                                sum(SC.COR.UNI$dx.sl.y1, na.rm = TRUE)
                         }
                         if(length(sl.idx_j) > 1L) {
-                            GRAD[pstar.idx, sl.idx_j] <- colSums(SC.COR.UNI$dx.sl.y2)
+                            GRAD[pstar.idx, sl.idx_j] <- 
+                                colSums(SC.COR.UNI$dx.sl.y2, na.rm = TRUE)
                         } else {
-                            GRAD[pstar.idx, sl.idx_j] <- sum(SC.COR.UNI$dx.sl.y2)
+                            GRAD[pstar.idx, sl.idx_j] <- 
+                                sum(SC.COR.UNI$dx.sl.y2, na.rm = TRUE)
                         }
                     }
                     # NO VAR
 
                     # RHO
-                    GRAD[pstar.idx,cor.idx] <- sum(SC.COR.UNI$dx.rho)
+                    GRAD[pstar.idx,cor.idx] <- 
+                        sum(SC.COR.UNI$dx.rho, na.rm = TRUE)
                 }
             }
         }
@@ -176,7 +186,7 @@ pml_deriv1 <- function(Sigma.hat = NULL,    # model-based var/cov/cor
     if(scores) return(SCORES)
 
     # gradient is sum over all pairs
-    gradient <- colSums(GRAD)
+    gradient <- colSums(GRAD, na.rm = TRUE)
 
     # we multiply by -1 because we minimize
     if(negative) {
@@ -639,7 +649,7 @@ derLtoTau <- function(ind.vec, th.rho.vec, n.xixj, pi.xixj, no.x=0L) {
   cum.prob.vec <- rep(NA, length(xi$index.thres.var2.of.pair) )
   cum.prob.vec[xi$index.thres.var2.of.pair==0] <- 0
   cum.prob.vec[xi$last.thres.var2.of.pair] <- 1
-  denom <- (1-th.rho.vec$rho.vector^2)^0.5
+  denom <- sqrt(1-(th.rho.vec$rho.vector*th.rho.vec$rho.vector))
   cum.prob.vec[is.na(cum.prob.vec)] <-
       pnorm( (th.rho.vec$thres.var2.of.pair -
               th.rho.vec$rho.vector* th.rho.vec$thres.var1.of.pair) /
@@ -658,7 +668,7 @@ derLtoTau <- function(ind.vec, th.rho.vec, n.xixj, pi.xixj, no.x=0L) {
   cum.prob.vec <- rep(NA, length(xj$index.thres.var1.of.pair) )
   cum.prob.vec[xj$index.thres.var1.of.pair==0] <- 0
   cum.prob.vec[xj$last.thres.var1.of.pair] <- 1
-  denom <- (1-th.rho.vec$rho.vector^2)^0.5
+  denom <- sqrt(1-(th.rho.vec$rho.vector*th.rho.vec$rho.vector))
   cum.prob.vec[is.na(cum.prob.vec)] <-
       pnorm( (th.rho.vec$thres.var1.of.pair -
               th.rho.vec$rho.vector* th.rho.vec$thres.var2.of.pair) /

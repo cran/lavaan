@@ -73,6 +73,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     FLAT.fixed       <- character(0)  # only for display purposes! 
     FLAT.start       <- character(0)  # only for display purposes!
     FLAT.label       <- character(0)  # only for display purposes!
+    FLAT.prior       <- character(0)
     FLAT.idx <- 0L
     MOD.idx  <- 0L
     CON.idx  <- 0L
@@ -129,7 +130,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     
         # 2. split by operator (only the *first* occurence!)
         # check first if equal/label modifier has been used on the LEFT!
-        if(substr(x,1,5) == "label") 
+        if(substr(x,1,6) == "label(") 
             stop("label modifier can not be used on the left-hand side of the operator")
         if(op == "|") {
             op.idx <- regexpr("\\|", x)
@@ -150,7 +151,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
             lhs <- gsub("\\\"", "", lhs)
             rhs <- gsub("\\\"", "", rhs)
             CON.idx <- CON.idx + 1L
-            CON[[CON.idx]] <- list(op=op, lhs=lhs, rhs=rhs)
+            CON[[CON.idx]] <- list(op=op, lhs=lhs, rhs=rhs, user=1L)
             next
         }
     
@@ -163,6 +164,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
             FLAT.fixed[FLAT.idx] <- ""
             FLAT.start[FLAT.idx] <- ""
             FLAT.label[FLAT.idx] <- ""
+            FLAT.prior[FLAT.idx] <- ""
             FLAT.rhs.mod.idx[FLAT.idx] <- 0L
             if(GRP_OP) {
                 GRP <- GRP + 1L
@@ -205,9 +207,9 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
                     } else {
                         stop("lavaan ERROR: right-hand side of formula contains an intercept, but operator is \"", op, "\" in: ", x)
                     }
-                } else if(names(out)[j] == "zero" && op == "~") {
+                } else if(names(out)[j] == "..zero.." && op == "~") {
                     rhs.name <- ""
-                } else if(names(out)[j] == "constant" && op == "~") {
+                } else if(names(out)[j] == "..constant.." && op == "~") {
                     rhs.name <- ""
                 } else {
                     rhs.name <- names(out)[j]
@@ -257,6 +259,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
                 FLAT.fixed[FLAT.idx] <- ""
                 FLAT.start[FLAT.idx] <- ""
                 FLAT.label[FLAT.idx] <- ""
+                FLAT.prior[FLAT.idx] <- ""
         
                 mod <- list()
                 rhs.mod <- 0L
@@ -273,6 +276,11 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
                 if(length(out[[j]]$label) > 0L) {
                     mod$label <- out[[j]]$label
                     FLAT.label[FLAT.idx] <- paste(mod$label, collapse=";")
+                    rhs.mod <- 1L
+                }
+                if(length(out[[j]]$prior) > 0L) {
+                    mod$prior <- out[[j]]$prior
+                    FLAT.prior[FLAT.idx] <- paste(mod$prior, collapse=";")
                     rhs.mod <- 1L
                 }
                 #if(op == "~1" && rhs == "0") {
@@ -304,7 +312,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     FLAT <- list(lhs=FLAT.lhs, op=FLAT.op, rhs=FLAT.rhs,
                  mod.idx=FLAT.rhs.mod.idx, group=FLAT.group,
                  fixed=FLAT.fixed, start=FLAT.start,
-                 label=FLAT.label)
+                 label=FLAT.label, prior=FLAT.prior)
 
     # change op for intercepts (for convenience only)
     int.idx <- which(FLAT$op == "~" & FLAT$rhs == "")
@@ -348,6 +356,10 @@ lav_syntax_parse_rhs <- function(rhs, op="") {
                             eval, envir=NULL, enclos=NULL))
             label[is.na(label)] <- "" # catch 'NA' elements in a label
             return( list(label=label) )
+        } else if(mod[[1L]] == "prior") {
+            prior <- unlist(lapply(as.list(mod)[-1],
+                            eval, envir=NULL, enclos=NULL))
+            return( list(prior=prior) )
         } else if(mod[[1L]] == "c") {
             # vector: we allow numeric and character only!
             cof <- unlist(lapply(as.list(mod)[-1],    
@@ -387,10 +399,10 @@ lav_syntax_parse_rhs <- function(rhs, op="") {
                 if(as.character(rhs) == "1") {
                     names(out)[1L] <- "intercept"
                 } else if(as.character(rhs) == "0") {
-                    names(out)[1L] <- "zero"
+                    names(out)[1L] <- "..zero.."
                     out[[1L]]$fixed <- 0
                 } else {
-                    names(out)[1L] <- "constant"
+                    names(out)[1L] <- "..constant.."
                     out[[1L]]$fixed <- 0 
                 }
             }

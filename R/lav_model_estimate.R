@@ -42,6 +42,10 @@ lav_model_estimate <- function(lavmodel       = NULL,
         #x[lavmodel@x.free.var.idx] <- tan(x[lavmodel@x.free.var.idx])
 
         # update GLIST (change `state') and make a COPY!
+        if(lavmodel@eq.constraints) {
+            x <- as.numeric(lavmodel@eq.constraints.K %*% x) + 
+                            lavmodel@eq.constraints.k0
+        }
         GLIST <- lav_model_x2GLIST(lavmodel, x=x)
 
         fx <- lav_model_objective(lavmodel       = lavmodel, 
@@ -52,13 +56,21 @@ lav_model_estimate <- function(lavmodel       = NULL,
                                   estimator      = estimator, 
                                   verbose        = verbose,
                                   forcePD        = forcePD)
+
+        # only for PML: divide by N (to speed up convergence)
+        if(estimator == "PML") {
+            fx <- fx / lavsamplestats@ntotal
+        }
+
+
+
         if(debug || verbose) { 
             cat("Objective function  = ", sprintf("%18.16f", fx), "\n", sep="") 
         }
         if(debug) {
-            cat("Current unconstrained parameter values =\n")
-            tmp.x <- lav_model_get_parameters(lavmodel, GLIST=GLIST, type="unco")
-            print(tmp.x); cat("\n")
+            #cat("Current unconstrained parameter values =\n")
+            #tmp.x <- lav_model_get_parameters(lavmodel, GLIST=GLIST, type="unco")
+            #print(tmp.x); cat("\n")
             cat("Current free parameter values =\n"); print(x); cat("\n")
         }
 
@@ -78,6 +90,10 @@ lav_model_estimate <- function(lavmodel       = NULL,
         #x[lavmodel@x.free.var.idx] <- tan(x[lavmodel@x.free.var.idx])
 
         # update GLIST (change `state') and make a COPY!
+        if(lavmodel@eq.constraints) {
+            x <- as.numeric(lavmodel@eq.constraints.K %*% x) +
+                            lavmodel@eq.constraints.k0
+        }
         GLIST <- lav_model_x2GLIST(lavmodel, x=x)
 
         dx <- lav_model_gradient(lavmodel       = lavmodel, 
@@ -91,8 +107,21 @@ lav_model_estimate <- function(lavmodel       = NULL,
                                  verbose        = verbose,
                                  forcePD        = TRUE)
 
+        # only for PML: divide by N (to speed up convergence)
+        if(estimator == "PML") {
+            dx <- dx / lavsamplestats@ntotal
+        }
+
         if(debug) {
             cat("Gradient function (analytical) =\n"); print(dx); cat("\n")
+        }
+
+        #print( dx %*% lavmodel@eq.constraints.K )
+        #stop("for now")
+
+        # handle linear equality constraints
+        if(lavmodel@eq.constraints) {
+            dx <- as.numeric( dx %*% lavmodel@eq.constraints.K )
         }
 
         dx
@@ -132,14 +161,20 @@ lav_model_estimate <- function(lavmodel       = NULL,
  
     # starting values
     start.x <- lav_model_get_parameters(lavmodel)
+    if(lavmodel@eq.constraints) {
+        start.x <- as.numeric( (start.x - lavmodel@eq.constraints.k0) %*% 
+                                lavmodel@eq.constraints.K )
+    }
+
     if(debug) {
-        cat("start.unco = ", lav_model_get_parameters(lavmodel, type="unco"), "\n")
+        #cat("start.unco = ", lav_model_get_parameters(lavmodel, type="unco"), "\n")
         cat("start.x = ", start.x, "\n")
     }
 
     # check if the initial values produce a positive definite Sigma
     # to begin with -- but only for estimator="ML"
-    if(estimator %in% c("ML","PML","FML","MML")) {
+    #if(estimator %in% c("ML","PML","FML","MML")) {
+    if(estimator %in% c("ML","FML","MML")) {
         Sigma.hat <- computeSigmaHat(lavmodel, extra=TRUE, debug=lavoptions$debug)
         for(g in 1:ngroups) {
             if(!attr(Sigma.hat[[g]], "po")) {
@@ -211,8 +246,9 @@ lav_model_estimate <- function(lavmodel       = NULL,
     }
 
     # optimizer
-    if(is.null(body(lavmodel@ceq.function)) && 
-       is.null(body(lavmodel@cin.function)) ) {
+    if(length(lavmodel@ceq.nonlinear.idx) == 0L &&
+       length(lavmodel@cin.linear.idx)    == 0L &&
+       length(lavmodel@cin.nonlinear.idx) == 0L) {
         if(is.null(lavmodel@control$optim.method)) {
             OPTIMIZER <- "NLMINB"
             #OPTIMIZER <- "BFGS"  # slightly slower, no bounds; better scaling!
@@ -222,6 +258,10 @@ lav_model_estimate <- function(lavmodel       = NULL,
             stopifnot(OPTIMIZER %in% c("NLMINB", "BFGS", "L-BFGS-B", "NONE"))
         }
     } else {
+        #cat("DEBUG: constrained optimization is currently broken!\n")
+        #cat("DEBUG: please reinstall lavaan 0.5-17 if you need this\n")
+        #cat("DEBUG: only *linear* *equality* constraints are supported in this version.\n")
+        #stop("not read yet - dev version")
         if(is.null(lavmodel@control$optim.method)) {
             OPTIMIZER <- "NLMINB.CONSTR"
         } else {
@@ -417,6 +457,11 @@ lav_model_estimate <- function(lavmodel       = NULL,
     }
 
     fx <- minimize.this.function(x) # to get "fx.group" attribute
+    # transform back
+    if(lavmodel@eq.constraints) {
+        x <- as.numeric(lavmodel@eq.constraints.K %*% x) +
+                        lavmodel@eq.constraints.k0
+    }
 
     # transform variances back
     #x[lavmodel@x.free.var.idx] <- tan(x[lavmodel@x.free.var.idx])

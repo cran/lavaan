@@ -10,8 +10,10 @@ lav_model_gradient <- function(lavmodel       = NULL,
                                verbose        = FALSE, 
                                forcePD        = TRUE, 
                                group.weight   = TRUE,
-                               constraints    = TRUE,
-                               Delta          = NULL) {
+                               constraints    = FALSE,
+                               Delta          = NULL,
+                               m.el.idx       = NULL,
+                               x.el.idx       = NULL) {
 
     nmat           <- lavmodel@nmat
     representation <- lavmodel@representation
@@ -21,14 +23,16 @@ lav_model_gradient <- function(lavmodel       = NULL,
     fixed.x        <- lavmodel@fixed.x
     num.idx        <- lavmodel@num.idx
     th.idx         <- lavmodel@th.idx
-    nx.unco        <- lavmodel@nx.unco
+    nx.free        <- lavmodel@nx.free
 
     # state or final?
     if(is.null(GLIST)) GLIST <- lavmodel@GLIST
 
+    if(estimator == "REML") warning("analytical gradient not implement; use numerical approximation")
+
     # group.weight
     if(group.weight) {
-        if(estimator %in% c("ML","PML","FML","MML")) {
+        if(estimator %in% c("ML","PML","FML","MML","REML")) {
             group.w <- (unlist(lavsamplestats@nobs)/lavsamplestats@ntotal)
         } else {
             # FIXME: double check!
@@ -53,10 +57,11 @@ lav_model_gradient <- function(lavmodel       = NULL,
             }
         }
 
-    } else if(estimator == "ML" || estimator == "PML" || estimator == "FML") {
+    } else if(estimator == "ML" || estimator == "PML" || 
+              estimator == "FML" || estimator == "REML") {
         # compute moments for all groups
         Sigma.hat <- computeSigmaHat(lavmodel = lavmodel, GLIST = GLIST,
-                                     extra = (estimator == "ML"))
+                                     extra = (estimator %in% c("ML", "REML")))
 
         # ridge here?
         if(meanstructure && !categorical) {
@@ -81,7 +86,7 @@ lav_model_gradient <- function(lavmodel       = NULL,
     # - PML/FML/MML: custom
 
     # 1. ML/GLS approach
-    if(estimator == "ML" || estimator == "GLS") {
+    if(estimator == "ML" || estimator == "REML" || estimator == "GLS") {
         if(meanstructure) {
             Omega <- computeOmega(Sigma.hat=Sigma.hat, Mu.hat=Mu.hat,
                                   lavsamplestats=lavsamplestats, estimator=estimator, 
@@ -123,20 +128,20 @@ lav_model_gradient <- function(lavmodel       = NULL,
 
         # extract free parameters
         if(type == "free") {
-            dx <- numeric( nx.unco )
+            dx <- numeric( nx.free )
             for(g in 1:lavsamplestats@ngroups) {
                 mm.in.group <- 1:nmat[g] + cumsum(c(0,nmat))[g]
                 for(mm in mm.in.group) {
-                      m.unco.idx  <- lavmodel@m.unco.idx[[mm]]
-                         x.unco.idx  <- lavmodel@x.unco.idx[[mm]]
-                      dx[x.unco.idx] <- DX[[mm]][m.unco.idx]
+                      m.free.idx  <- lavmodel@m.free.idx[[mm]]
+                         x.free.idx  <- lavmodel@x.free.idx[[mm]]
+                      dx[x.free.idx] <- DX[[mm]][m.free.idx]
                 }
             }
 
             # handle equality constraints
-            if(lavmodel@eq.constraints && constraints) {
-                dx <- as.numeric( t(lavmodel@eq.constraints.K) %*% dx )
-            }
+            #if(lavmodel@eq.constraints && constraints) {
+            #    dx <- as.numeric( t(lavmodel@eq.constraints.K) %*% dx )
+            #}
         } else {
             dx <- DX
             # handle equality constraints
@@ -185,7 +190,9 @@ lav_model_gradient <- function(lavmodel       = NULL,
         } else {
             # make a GLIST
             dx <- lav_model_x2GLIST(lavmodel = lavmodel, x = dx, 
-                                    type = "full", setDelta = FALSE)
+                                    type = "custom", setDelta = FALSE,
+                                    m.el.idx = m.el.idx, 
+                                    x.el.idx = x.el.idx)
         }
 
     } # WLS
@@ -218,9 +225,8 @@ lav_model_gradient <- function(lavmodel       = NULL,
                                  lavcache  = lavcache[[g]])
 
                 # chain rule (fmin)
-                ### FIXME why -1L ???
                 group.dx <- 
-                    as.numeric(t(d1) %*% Delta[[g]])/lavsamplestats@nobs[[g]]
+                    as.numeric(t(d1) %*% Delta[[g]])
 
             } else if(estimator == "FML") {
                 d1 <- fml_deriv1(Sigma.hat = Sigma.hat[[g]],
@@ -261,7 +267,7 @@ lav_model_gradient <- function(lavmodel       = NULL,
 
 
     # group.w.free for ML
-    if(lavmodel@group.w.free && estimator %in% c("ML","MML","FML","PML")) {
+    if(lavmodel@group.w.free && estimator %in% c("ML","MML","FML","PML","REML")) {
         #est.prop <- unlist( computeGW(lavmodel = lavmodel, GLIST = GLIST) )
         #obs.prop <- unlist(lavsamplestats@group.w)
         # FIXME: G2 based -- ML and friends only!!
@@ -283,6 +289,11 @@ lav_model_gradient <- function(lavmodel       = NULL,
         dx[gw.x.idx] <- dx.GW
     }
 
+    # dx is 1xnpar matrix of LIST (type != "free")
+    if(is.matrix(dx)) {
+        dx <- as.numeric(dx)
+    }
+
     dx
 }
 
@@ -295,7 +306,7 @@ lav_model_gradient <- function(lavmodel       = NULL,
 #   compute.moments <- function(x) {
 #       GLIST <- lav_model_x2GLIST(lavmodel = NULL, x=x, type="free")
 #       Sigma.hat <- computeSigmaHat(lavmodel = NULL, GLIST = GLIST)
-#        S.vec <- vech(Sigma.hat[[g]])
+#        S.vec <- lav_matrix_vech(Sigma.hat[[g]])
 #        if(lavmodel@meanstructure) {
 #            Mu.hat <- computeMuHat(lavmodel = NULL, GLIST=GLIST)
 #            out <- c(Mu.hat[[g]], S.vec)
@@ -368,15 +379,15 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
 
     # number of columns in DELTA + m.el.idx/x.el.idx
     if(type == "free") {
-        NCOL <- lavmodel@nx.unco
+        NCOL <- lavmodel@nx.free
         m.el.idx <- x.el.idx <- vector("list", length=length(GLIST))
         for(mm in 1:length(GLIST)) {
-            m.el.idx[[mm]] <- lavmodel@m.unco.idx[[mm]]
-            x.el.idx[[mm]] <- lavmodel@x.unco.idx[[mm]]
+            m.el.idx[[mm]] <- lavmodel@m.free.idx[[mm]]
+            x.el.idx[[mm]] <- lavmodel@x.free.idx[[mm]]
             # handle symmetric matrices
             if(lavmodel@isSymmetric[mm]) {
-                # since we use 'x.unco.idx', only symmetric elements
-                # are duplicated (not the equal ones, only in x.free.unco)
+                # since we use 'x.free.idx', only symmetric elements
+                # are duplicated (not the equal ones, only in x.free.free)
                 dix <- duplicated(x.el.idx[[mm]])
                 if(any(dix)) {
                     m.el.idx[[mm]] <- m.el.idx[[mm]][!dix]
@@ -414,9 +425,7 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
             dsigma <- diag(sigma.hat)
             # dcor/dcov for sigma
             R <- lav_deriv_cov2cor(sigma.hat, num.idx = lavmodel@num.idx[[g]])
-
-            theta.var.idx <- which(!vech.idx(nvar[g]) %in%
-                                    vech.idx(nvar[g], diagonal=FALSE))
+            theta.var.idx <- lav_matrix_diagh_idx(nvar[g])
         }
 
         for(mm in mm.in.group) {
@@ -440,8 +449,8 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
                 
                 if(categorical) {
                     # reorder: first variances (of numeric), then covariances
-                    cov.idx  <- vech.idx(nvar[g])
-                    covd.idx <- vech.idx(nvar[g], diagonal=FALSE)
+                    cov.idx  <- lav_matrix_vech_idx(nvar[g])
+                    covd.idx <- lav_matrix_vech_idx(nvar[g], diagonal = FALSE)
 
                     var.idx <- which(is.na(match(cov.idx, 
                                                  covd.idx)))[num.idx[[g]]]
@@ -488,8 +497,9 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
                                     idx = 1:nvar[g],
                                     MLIST = GLIST[ mm.in.group ])
                             # add dpi.dDelta %*% dDelta.dx
-                            no.num.idx <- which(!seq.int(1L,nvar) %in% num.idx)
-                            no.num.idx <- rep(seq.int(0,nexo-1) * nvar,
+                            no.num.idx <- 
+                                which(!seq.int(1L,nvar[g]) %in% num.idx[[g]])
+                            no.num.idx <- rep(seq.int(0,nexo[g]-1) * nvar[g],
                                           each=length(no.num.idx)) + no.num.idx
                             DELTA.pi[no.num.idx,] <- 
                                 DELTA.pi[no.num.idx,,drop=FALSE] +
@@ -516,9 +526,9 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
         # save(Delta.group, file=paste0("delta_NO_EQ",g,".Rdata"))
 
         # if type == "free" take care of equality constraints
-        if(type == "free" && lavmodel@eq.constraints) {
-            Delta.group <- Delta.group %*% lavmodel@eq.constraints.K
-        }
+        #if(type == "free" && lavmodel@eq.constraints) {
+        #    Delta.group <- Delta.group %*% lavmodel@eq.constraints.K
+        #}
   
         #Delta.eq <- Delta.group
         # save(Delta.eq, file=paste0("delta_NO_EQ",g,".Rdata"))
@@ -544,15 +554,15 @@ computeDeltaDx <- function(lavmodel = NULL, GLIST = NULL, target = "lambda") {
     # number of columns in DELTA + m.el.idx/x.el.idx
     type <- "free"
     #if(type == "free") {
-        NCOL <- lavmodel@nx.unco
+        NCOL <- lavmodel@nx.free
         m.el.idx <- x.el.idx <- vector("list", length=length(GLIST))
         for(mm in 1:length(GLIST)) {
-            m.el.idx[[mm]] <- lavmodel@m.unco.idx[[mm]]
-            x.el.idx[[mm]] <- lavmodel@x.unco.idx[[mm]]
+            m.el.idx[[mm]] <- lavmodel@m.free.idx[[mm]]
+            x.el.idx[[mm]] <- lavmodel@x.free.idx[[mm]]
             # handle symmetric matrices
             if(lavmodel@isSymmetric[mm]) {
-                # since we use 'x.unco.idx', only symmetric elements
-                # are duplicated (not the equal ones, only in x.free.unco)
+                # since we use 'x.free.idx', only symmetric elements
+                # are duplicated (not the equal ones, only in x.free.free)
                 dix <- duplicated(x.el.idx[[mm]])
                 if(any(dix)) {
                     m.el.idx[[mm]] <- m.el.idx[[mm]][!dix]
@@ -624,9 +634,9 @@ computeDeltaDx <- function(lavmodel = NULL, GLIST = NULL, target = "lambda") {
             }
         } # mm
 
-        if(type == "free" && lavmodel@eq.constraints) {
-            Delta.group <- Delta.group %*% lavmodel@eq.constraints.K
-        }
+        #if(type == "free" && lavmodel@eq.constraints) {
+        #    Delta.group <- Delta.group %*% lavmodel@eq.constraints.K
+        #}
 
         Delta[[g]] <- Delta.group
     } # g
@@ -643,7 +653,7 @@ computeOmega <- function(Sigma.hat=NULL, Mu.hat=NULL,
     for(g in 1:lavsamplestats@ngroups) {
 
         # ML
-        if(estimator == "ML") {
+        if(estimator == "ML" || estimator == "REML") {
 
             if(attr(Sigma.hat[[g]], "po") == FALSE) {
                 # FIXME: WHAT IS THE BEST THING TO DO HERE??
@@ -756,10 +766,10 @@ lav_model_gradient_DD <- function(lavmodel, GLIST = NULL, group = 1L) {
     nfac <- ncol(MLIST$lambda) - length(lv.dummy.idx)
 
     # DD$theta
-    theta.idx <- diagh.idx(nvar)
+    theta.idx <- lav_matrix_diagh_idx(nvar)
     DD$theta <-  Delta.theta[theta.idx,,drop=FALSE]
     if(length(ov.dummy.idx) > 0L) {
-        psi.idx <- diagh.idx( ncol(MLIST$psi)   )[lv.dummy.idx]
+        psi.idx <- lav_matrix_diagh_idx( ncol(MLIST$psi) )[lv.dummy.idx]
         DD$theta[ov.dummy.idx,] <- Delta.psi[psi.idx,,drop=FALSE]
     }
     # num only? FIXME or just all of them?

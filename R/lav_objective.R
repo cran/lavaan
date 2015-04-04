@@ -29,6 +29,45 @@ estimator.ML <- function(Sigma.hat=NULL, Mu.hat=NULL,
     fx
 }
 
+# fitting function for restricted ML
+estimator.REML <- function(Sigma.hat=NULL, Mu.hat=NULL,
+                           data.cov=NULL, data.mean=NULL,
+                           data.cov.log.det=NULL,
+                           meanstructure=FALSE,
+                           group = 1L, lavmodel = NULL, 
+                           lavsamplestats = NULL, lavdata = NULL) {
+
+    if(!attr(Sigma.hat, "po")) return(Inf)
+
+    Sigma.hat.inv     <- attr(Sigma.hat, "inv")
+    Sigma.hat.log.det <- attr(Sigma.hat, "log.det")
+    nvar <- ncol(Sigma.hat)
+
+    if(!meanstructure) {
+        fx <- (Sigma.hat.log.det + sum(data.cov * Sigma.hat.inv) -
+               data.cov.log.det - nvar)
+    } else {
+        W.tilde <- data.cov + tcrossprod(data.mean - Mu.hat)
+        fx <- (Sigma.hat.log.det + sum(W.tilde * Sigma.hat.inv) -
+               data.cov.log.det - nvar)
+    }
+
+    lambda.idx <- which(names(lavmodel@GLIST) == "lambda")
+    LAMBDA <- lavmodel@GLIST[[ lambda.idx[group] ]]
+    data.cov.inv <- lavsamplestats@icov[[group]]
+    reml.h0 <- log(det(t(LAMBDA) %*% Sigma.hat.inv %*% LAMBDA))
+    reml.h1 <- log(det(t(LAMBDA) %*% data.cov.inv %*% LAMBDA))
+    nobs <- lavsamplestats@nobs[[group]]
+
+    #fx <- (Sigma.hat.log.det + tmp - data.cov.log.det - nvar) + 1/Ng * (reml.h0  - reml.h1)
+    fx <- fx + ( 1/nobs * (reml.h0  - reml.h1) )
+
+    # no negative values
+    if(fx < 0.0) fx <- 0.0
+
+    fx
+}
+
 # 'classic' fitting function for GLS, not used for now
 estimator.GLS <- function(Sigma.hat=NULL, Mu.hat=NULL,
                           data.cov=NULL, data.mean=NULL, data.nobs=NULL,
@@ -145,8 +184,8 @@ estimator.PML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
     # the idea is to compute for each pair of variables, the model-based 
     # probability (or likelihood in mixed case) (that we observe the data 
     # for this pair under the model) for *each case* 
-    # after taking logs, the sum over the cases gives the probablity/likelihood 
-    # for this pair
+    # after taking logs, the sum over the cases gives the 
+    # log probablity/likelihood for this pair
     # the sum over all pairs gives the final PML based logl
 
     # first of all: check if all correlations are within [-1,1]
@@ -156,7 +195,9 @@ estimator.PML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
     #cat("[DEBUG objective\n]"); print(range(cors)); print(range(TH)); cat("\n")
     if(any(abs(cors) > 1)) {
         # question: what is the best approach here??
-        return(+Inf) 
+        OUT <- +Inf
+        attr(OUT, "logl") <- as.numeric(NA)
+        return(OUT) 
         #idx <- which( abs(cors) > 0.99 )
         #cors[idx] <- 0.99 # clip
         #cat("CLIPPING!\n")
@@ -170,7 +211,7 @@ estimator.PML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
 
     LIK <- matrix(0, nrow(X), pstar) # likelihood per case, per pair
     PSTAR <- matrix(0, nvar, nvar)   # utility matrix, to get indices
-    PSTAR[vech.idx(nvar, diagonal=FALSE)] <- 1:pstar
+    PSTAR[lav_matrix_vech_idx(nvar, diagonal = FALSE)] <- 1:pstar
     PROW <- row(PSTAR)
     PCOL <- col(PSTAR)
 
@@ -184,22 +225,25 @@ estimator.PML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
         # get expected probability per table, per pair
         PI <- pairwiseExpProbVec(ind.vec = lavcache$LONG, th.rho.vec=LONG2)
         # get frequency per table, per pair
-        #LogLik <- sum(lavcache$bifreq * log(PI))
+        logl <- sum(lavcache$bifreq * log(PI))
     
         # more convenient fit function
         prop <- lavcache$bifreq / lavcache$nobs
+        freq <- lavcache$bifreq
         # remove zero props # FIXME!!! or add 0.5???
         zero.idx <- which(prop == 0.0)
         if(length(zero.idx) > 0L) {
+            freq <- freq[-zero.idx]
             prop <- prop[-zero.idx]
             PI   <- PI[-zero.idx]
-        }
-        Fmin <- sum( prop*log(prop/PI) )
+        } 
+        ##Fmin <- sum( prop*log(prop/PI) )
+        Fmin <- sum( freq * log(prop/PI) ) # to avoid 'N'
 
     } else {
-        # # order! first i, then j, vec(table)!
-        for(i in seq_len(nvar-1L)) {
-            for(j in (i+1L):nvar) {
+        # # order! first i, then j, lav_matrix_vec(table)!
+        for(j in seq_len(nvar-1L)) {
+            for(i in (j+1L):nvar) {
                 pstar.idx <- PSTAR[i,j]
                 # cat("pstar.idx =", pstar.idx, "i = ", i, " j = ", j, "\n")
                 if(ov.types[i] == "numeric" && ov.types[j] == "numeric") {
@@ -239,6 +283,9 @@ estimator.PML <- function(Sigma.hat = NULL,    # model-based var/cov/cor
     # function value as returned to the minimizer
     #fx <- -1 * LogLik
     fx <- Fmin
+
+    # attach 'loglikelihood' 
+    attr(fx, "logl") <- logl
 
     fx
 }

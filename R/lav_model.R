@@ -2,10 +2,11 @@
 #
 # initial version: YR 22/11/2010
 # - YR 14 Jan 2014: moved to lav_model.R
+# - YR 18 Nov 2014: more efficient handling of linear equality constraints
+# - YR 02 Dec 2014: allow for bare-minimum parameter tables
 
 # construct MATRIX representation of the model
 lav_model <- function(lavpartable      = NULL,
-                      start            = NULL,
                       representation   = "LISREL",
                       th.idx           = list(),
                       parameterization = "delta",
@@ -13,6 +14,9 @@ lav_model <- function(lavpartable      = NULL,
                       control          = list(),
                       debug            = FALSE) {
 
+    # handle bare-minimum partables
+    lavpartable <- lav_partable_complete(lavpartable)
+ 
     # global info from user model
     ngroups <- max(lavpartable$group)
     meanstructure <- any(lavpartable$op == "~1")
@@ -21,54 +25,21 @@ lav_model <- function(lavpartable      = NULL,
     group.w.free <- any(lavpartable$lhs == "group" & lavpartable$op == "%")
 
 
-    # what if no starting values are provided? 
-    #if(is.null(lavpartable$start)) {
-    if(is.null(start)) {
-        startValues <- lav_start(start.method = "simple", 
-                                 lavpartable = lavpartable)
+    # handle variable definitions and (in)equality constraints
+    CON <- lav_constraints_parse(partable = lavpartable,
+                                 constraints = NULL,
+                                 debug = debug)
+
+    # handle *linear* equality constraints special
+    if(CON$ceq.linear.only.flag) {
+        con.jac <- CON$ceq.JAC
+        con.lambda <- numeric(nrow(CON$ceq.JAC))
+        attr(con.jac, "inactive.idx") <- integer(0L)
+        attr(con.jac, "ceq.idx") <- seq_len( nrow(CON$ceq.JAC) )
     } else {
-        #startValues <- lavpartable$start
-        startValues <- start
+        con.jac <- matrix(0,0,0)
+        con.lambda <- numeric(0)
     }
- 
-    # check start length
-    stopifnot(length(startValues) == nrow(lavpartable))
-
-    # only representation = "LISREL" for now
-    stopifnot(representation == "LISREL")
-
-
-    # capture equality constraints in 'K' matrix
-    # rows are the unconstrained parameters, cols are the unique parameters
-    n.unco <- max(lavpartable$unco)
-    n.free       <- max(lavpartable$free)
-    if(n.free == n.unco) {
-        eq.constraints <- FALSE
-        K <- matrix(0, 0, 0)
-    } else {
-        K <- matrix(0, nrow=n.unco, ncol=n.free)
-        #####
-        #####     FIXME !
-        #####
-        idx.free <- lavpartable$free[ lavpartable$free > 0 ]
-        for(k in 1:n.unco) {
-            c <- idx.free[k]
-            K[k, c] <- 1
-        }
-        eq.constraints <- TRUE
-    }
-
-    # Ku matrix (relation th and ov.ord)
-    # FIXME (not for mixed!)
-    #if(categorical) {
-    #    th <- vnames(lavpartable, "th")
-    #    ov <- vnames(lavpartable, "ov")
-    #    Ku <- t(sapply(ov, grepl, th) + 0L)
-    #} else {
-    #    Ku <- matrix(0,0,0)
-    #}
-
-
 
     # select model matrices
     if(representation == "LISREL") {
@@ -86,10 +57,8 @@ lav_model <- function(lavpartable      = NULL,
     isSymmetric <- logical(nG)
     mmSize      <- integer(nG)
 
-    m.free.idx <- m.unco.idx <- m.user.idx <- 
-        vector(mode="list", length=nG)
-    x.free.idx <- x.unco.idx <- x.user.idx <-
-        vector(mode="list", length=nG)
+    m.free.idx <- m.user.idx <- vector(mode="list", length=nG)
+    x.free.idx <- x.user.idx <- vector(mode="list", length=nG)
 
     # prepare ngroups-sized slots
     nvar <- integer(ngroups)
@@ -162,19 +131,19 @@ lav_model <- function(lavpartable      = NULL,
 
             # 2. if equality constraints, unconstrained free parameters
             #    -> to be used in lav_model_gradient
-            if(eq.constraints) {
-                tmp[ cbind(REP$row[idx], 
-                           REP$col[idx]) ] <- lavpartable$unco[idx]
-                if(mmSymmetric[mm]) {
-                    # NOTE: we assume everything is in the UPPER tri!
-                    T <- t(tmp); tmp[lower.tri(tmp)] <- T[lower.tri(T)]
-                }
-                m.unco.idx[[offset]] <-     which(tmp > 0)
-                x.unco.idx[[offset]] <- tmp[which(tmp > 0)]
-            } else {
-                m.unco.idx[[offset]] <- m.free.idx[[offset]]
-                x.unco.idx[[offset]] <- x.free.idx[[offset]]
-            }
+            #if(CON$ceq.linear.only.flag) {
+            #    tmp[ cbind(REP$row[idx], 
+            #               REP$col[idx]) ] <- lavpartable$unco[idx]
+            #    if(mmSymmetric[mm]) {
+            #        # NOTE: we assume everything is in the UPPER tri!
+            #        T <- t(tmp); tmp[lower.tri(tmp)] <- T[lower.tri(T)]
+            #    }
+            #    m.unco.idx[[offset]] <-     which(tmp > 0)
+            #    x.unco.idx[[offset]] <- tmp[which(tmp > 0)]
+            #} else {
+            #    m.unco.idx[[offset]] <- m.free.idx[[offset]]
+            #    x.unco.idx[[offset]] <- x.free.idx[[offset]]
+            #}
 
             # 3. general mapping between user and GLIST
             tmp[ cbind(REP$row[idx], REP$col[idx]) ] <- lavpartable$id[idx]
@@ -189,7 +158,7 @@ lav_model <- function(lavpartable      = NULL,
             # FIXME: again, we may want to use sparse matrices here...
             tmp <- matrix(0.0, nrow=mmRows[mm],
                                ncol=mmCols[mm])
-            tmp[ cbind(REP$row[idx], REP$col[idx]) ] <- startValues[idx]
+            tmp[ cbind(REP$row[idx], REP$col[idx]) ] <- lavpartable$start[idx]
             if(mmSymmetric[mm]) {
                 T <- t(tmp); tmp[lower.tri(tmp)] <- T[lower.tri(T)]
             }
@@ -234,41 +203,6 @@ lav_model <- function(lavpartable      = NULL,
         fixed.x <- TRUE
     }
     
-    # constraints
-
-    # 1. simple equality constraints (eg b1 == b2)
-    #    capture equality constraints in 'K' matrix
-    #    rows are the unconstrained parameters, cols are the unique parameters
-    n.unco <- max(lavpartable$unco)
-    n.free       <- max(lavpartable$free)
-    if(n.free == n.unco) {
-        eq.constraints <- FALSE
-        K <- matrix(0, 0, 0)
-    } else {
-        K <- matrix(0, nrow=n.unco, ncol=n.free)
-        idx.free <- lavpartable$free[ lavpartable$free > 0 ]
-        for(k in 1:n.unco) {
-            c <- idx.free[k]
-            K[k, c] <- 1
-        }
-        eq.constraints <- TRUE
-    }
-
-    # 2. variable definitions
-    def.function <- lav_partable_constraints_def(lavpartable, con = NULL,
-                                                 debug = debug)
-    # 3a. non-trivial equality constraints (linear or nonlinear)
-    ceq.function <- lav_partable_constraints_ceq(lavpartable, con = NULL, 
-                                                 debug = debug)
-    # 3b. construct jacobian function  TODO!!!
-    ceq.jacobian <- function() NULL
-   
-    # 4a. non-trivial inequality constraints (linear or nonlinear)
-    cin.function <- lav_partable_constraints_ciq(lavpartable, con = NULL,
-                                                 debug = debug)
-    # 4b. construct jacobian function  TODO!!
-    cin.jacobian <- function() NULL
-
 
 
     Model <- new("Model",
@@ -288,24 +222,40 @@ lav_model <- function(lavpartable      = NULL,
                  num.idx=num.idx,
                  th.idx=th.idx,
                  nx.free=max(lavpartable$free),
-                 nx.unco=max(lavpartable$unco),
+                 #nx.unco=max(lavpartable$unco),
                  nx.user=max(lavpartable$id),
                  m.free.idx=m.free.idx,
                  x.free.idx=x.free.idx,
-                 m.unco.idx=m.unco.idx,
-                 x.unco.idx=x.unco.idx,
+                 #m.unco.idx=m.unco.idx,
+                 #x.unco.idx=x.unco.idx,
                  m.user.idx=m.user.idx,
                  x.user.idx=x.user.idx,
                  x.def.idx=which(lavpartable$op == ":="),
                  x.ceq.idx=which(lavpartable$op == "=="),
                  x.cin.idx=which(lavpartable$op == ">" | lavpartable$op == "<"),
-                 eq.constraints=eq.constraints,
-                 eq.constraints.K=K,
-                 def.function=def.function,
-                 ceq.function=ceq.function,
-                 ceq.jacobian=ceq.jacobian,
-                 cin.function=cin.function,
-                 cin.jacobian=cin.jacobian, 
+
+                 eq.constraints      = CON$ceq.linear.only.flag,
+                 eq.constraints.K    = CON$ceq.JAC.NULL,
+                 eq.constraints.k0   = CON$ceq.rhs.NULL,
+
+                 def.function        = CON$def.function,
+                 ceq.function        = CON$ceq.function,
+                 ceq.JAC             = CON$ceq.JAC,
+                 ceq.rhs             = CON$ceq.rhs,
+                 ceq.jacobian        = CON$ceq.jacobian,
+                 ceq.linear.idx      = CON$ceq.linear.idx,
+                 ceq.nonlinear.idx   = CON$ceq.nonlinear.idx,
+
+                 cin.function        = CON$cin.function,
+                 cin.JAC             = CON$cin.JAC,
+                 cin.rhs             = CON$cin.rhs,
+                 cin.jacobian        = CON$cin.jacobian,
+                 cin.linear.idx      = CON$cin.linear.idx,
+                 cin.nonlinear.idx   = CON$cin.nonlinear.idx,
+
+                 con.jac=con.jac,
+                 con.lambda=con.lambda,
+
                  nexo=nexo,
                  fixed.x=fixed.x,
                  parameterization=parameterization,

@@ -34,17 +34,17 @@ lav_model_wls_est <- function(lavmodel = NULL, GLIST = NULL) {
             # 3. variances (if any)
             # 4. correlations (no diagonal!)
             if(fixed.x) {
-                wls.est <- c(TH[[g]],vec(PI[[g]]),
+                wls.est <- c(TH[[g]],lav_matrix_vec(PI[[g]]),
                              diag(Sigma.hat[[g]])[num.idx[[g]]],
-                             vech(Sigma.hat[[g]], diagonal=FALSE))
+                             lav_matrix_vech(Sigma.hat[[g]], diagonal=FALSE))
             } else {
                 wls.est <- c(TH[[g]],diag(Sigma.hat[[g]])[num.idx[[g]]],
-                             vech(Sigma.hat[[g]], diagonal=FALSE))
+                             lav_matrix_vech(Sigma.hat[[g]], diagonal=FALSE))
             }
         } else if(meanstructure) {
-            wls.est <- c(Mu.hat[[g]], vech(Sigma.hat[[g]]))
+            wls.est <- c(Mu.hat[[g]], lav_matrix_vech(Sigma.hat[[g]]))
         } else {
-            wls.est <- vech(Sigma.hat[[g]])
+            wls.est <- lav_matrix_vech(Sigma.hat[[g]])
         }
         if(group.w.free) {
             #wls.est <- c(log(GW[[g]]/GW[[samplestats@ngroups]]), wls.est)
@@ -57,7 +57,7 @@ lav_model_wls_est <- function(lavmodel = NULL, GLIST = NULL) {
     WLS.est
 }
 
-# compute WLS.est (as a list per group)
+# compute WLS.V (as a list per group)
 lav_model_wls_v <- function(lavmodel       = NULL, 
                             lavsamplestats = NULL,
                             estimator      = "ML",

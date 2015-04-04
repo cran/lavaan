@@ -1,196 +1,124 @@
-modificationIndices <- modificationindices <- modindices <- function(object, 
-    standardized=TRUE, power=FALSE, delta=0.1, alpha=0.05, high.power=0.75) {
+# univariate modification indices
+#
+
+modindices <- function(object, 
+                       standardized = TRUE, 
+
+                       # power statistics?
+                       power = FALSE, 
+                       delta = 0.1, 
+                       alpha = 0.05, 
+                       high.power = 0.75,
+
+                       # customize output
+                       sort. = FALSE, 
+                       minimum.value = 0.0, 
+                       maximum.number = nrow(LIST),
+                       na.remove = FALSE, 
+                       op = NULL) {
 
     # check if model has converged
     if(object@Fit@npar > 0L && !object@Fit@converged) {
-        stop("lavaan ERROR: model did not converge")
+        warning("lavaan WARNING: model did not converge")
     }
 
+    # not ready for estimator = "PML"
+    if(object@Options$estimator == "PML") {
+        stop("lavaan WARNING: modification indices for estimator PML are not implemented yet.")
+    }
+ 
+    # sanity check
     if(power) standardized <- TRUE
 
-    # get LIST parameter list
-    LIST <- lav_partable_full(object@ParTable)
-    LIST$free <- 0L; LIST$eq.id <- 0L; LIST$unco <- 0L
-    LIST <- as.data.frame(LIST)
+    # user-specified model parameters
+    partable <- object@ParTable[c("lhs","op","rhs","group","free","exo")]
+    # replace 'start' column, since lav_model will fill these in in GLIST
+    partable$start <- parameterEstimates(object, 
+                          remove.eq = FALSE, remove.ineq = FALSE)$est 
 
-    # fill in USER information
-    partable <- object@ParTable; N <- length(partable$lhs)
-    for(i in 1:N) {
-        LIST.idx <- which(LIST$lhs == partable$lhs[i] &
-                          LIST$op  == partable$op[i] &
-                          LIST$rhs == partable$rhs[i] &
-                          LIST$group == partable$group[i])
-        LIST$free[LIST.idx] <- partable$free[i]
-        LIST$eq.id[LIST.idx] <- partable$eq.id[i]
-        LIST$unco[LIST.idx] <- partable$unco[i]
+    # extended list (fixed-to-zero parameters)
+    strict.exo <- FALSE
+    if(object@Model@fixed.x && object@Model@categorical) {
+        strict.exo <- TRUE ## truly conditional.x
+    }
+    FULL <- lav_partable_full(object@ParTable, free = TRUE, start = TRUE,
+                              strict.exo = strict.exo)
+
+    # merge
+    LIST <- lav_partable_merge(partable, FULL, remove.duplicated = TRUE, 
+                               warn = FALSE)
+
+    # remove  ==, <, :=, > rows from partable
+    nonpar.idx <- which(LIST$op %in% c("==", ":=", "<", ">"))
+    if(length(nonpar.idx) > 0L) {
+        LIST <- LIST[-nonpar.idx,]   
     }
 
-    # add matrix representation
-    if(object@Model@representation == "LISREL") {
-        REP <- representation.LISREL(partable=object@ParTable, target=LIST,
-                                     extra=FALSE)
-    } else {
-        stop("only LISREL representation has been implemented")
+    # create lavmodel object for this 'full' LIST
+    LIST2 <- LIST; LIST2$free <- 1:nrow(LIST)
+
+    # reconstruct th.idx
+    th.idx <- vector("list", length=object@Data@ngroups)
+    for(g in 1:object@Data@ngroups) {
+        th.idx[[g]] <- lav_partable_ov_idx(LIST2, type="th", group = g)
     }
-    LIST <- cbind(LIST, as.data.frame(REP, stringsAsFactors = FALSE))
-
-    # here we remove `non-existing' parameters (depends on the matrix
-    # representation (eg in LISREL rep, there is no ~~ between lv and ov)
-    idx <- which( nchar(LIST$mat) > 0L &
-                  !is.na(LIST$row) & LIST$row > 0L &
-                  !is.na(LIST$col) & LIST$col > 0L )
-    LIST <- LIST[idx,]
-
-    # check for duplicated matrix elements
-    idx <- which( duplicated(LIST[,c("group", "mat","row","col")], 
-                  fromLast=TRUE) )
-    # FIXME!!! what to do here?
-    # remove....
-    if(length(idx) > 0L) LIST <- LIST[-idx,]
-
-    # here we should remove elements that will produce NA anyways...
-    # eg - first indicator of factors
-    #    - regressions that are already free covariances
-    # TODO
-    #if(object@Model@categorical) {
-    #    for(g in 1:object@Model@ngroups) {
-    #        if(object@Model@parameterization == "delta") {
-    #            # if parameterization == "delta", remove all residual variances
-    #            # of the observed indicators (they are always a function of 
-    #            # other model parameters)
-    #            ov.names.ord <- object@pta$vnames$ov.ord[[g]]
-    #            var.idx <- which(LIST$op == "~~" &
-    #                             LIST$group == g &
-    #                             LIST$lhs == LIST$rhs &
-    #                             LIST$lhs %in% ov.names.ord)
-    #            if(length(var.idx) > 0L) {
-    #                LIST <- LIST[-var.idx,]
-    #            }
-    #        } else if(object@Model@parameterization == "theta") {
-    #            # if parameterization == "theta", remove all scaling elements
-    #            # in DELTA (they are a function of other model parameters)
-    #            scale.idx <- which(LIST$op == "~*~" &
-    #                               LIST$group == g)
-    #            if(length(scale.idx) > 0L) {
-    #                LIST <- LIST[-scale.idx,]
-    #            }
-    #        }
-    #    }
-    #}
- 
-
-    # master index: *all* elements that we will feed to computeDelta
-    LIST$id <- 1:nrow(LIST)
-
-    # compute Delta for remaining parameters
-    ngroups  <- object@Model@ngroups
-    mmNumber <- object@Model@nmat
-    mmNames  <- names(object@Model@GLIST)
-    m.el.idx <- x.el.idx <- vector("list", length=length(object@Model@GLIST))
-    offset <- 0L
-    for(g in 1:ngroups) {
-        for(mm in 1:mmNumber[g]) {
-            # offset in GLIST
-            offset <- offset + 1L
-
-            # select elements for this matrix
-            idx <- which(LIST$group == g & LIST$mat == mmNames[offset])
-
-            tmp <- matrix(0L, nrow=nrow(object@Model@GLIST[[mm]]),
-                              ncol=ncol(object@Model@GLIST[[mm]]))
-
-            # assign id values
-            tmp[ cbind(LIST$row[idx], LIST$col[idx]) ] <- LIST$id[idx]
-            if(object@Model@isSymmetric[mm]) {
-                # everything is in upper tri, but we only extract lower tri
-                tmp <- t(tmp)
-            }
-            m.el.idx[[offset]] <-     which(tmp > 0)
-            x.el.idx[[offset]] <- tmp[which(tmp > 0)]
-        }
-    }
-    Delta <- computeDelta(lavmodel = object@Model, 
-                          m.el.idx. = m.el.idx, x.el.idx. = x.el.idx)
-
-    # compute information matrix
-    E <- computeExpectedInformation(lavmodel       = object@Model, 
-                                    lavsamplestats = object@SampleStats,
-                                    estimator      = object@Options$estimator,
-                                    Delta          = Delta)
+    lavmodelFULL <- lav_model(lavpartable = LIST2,
+                              representation = object@Model@representation,
+                              th.idx = th.idx,
+                              parameterization = object@Model@parameterization,
+                              link = object@Model@link,
+                              debug = FALSE)
+    LIST$start <- NULL
+    LIST$exo <- NULL
+                              
+    # compute information matrix 'full'
+    E <- 
+       lav_model_information_expected(lavmodel       = lavmodelFULL,
+                                      lavsamplestats = object@SampleStats,
+                                      estimator      = object@Options$estimator)
     Q <- (1/object@SampleStats@ntotal) * E
 
-    # list!
-    DX <- lav_model_gradient(lavmodel       = object@Model, 
+    # compute gradient 'full'
+    dx <- lav_model_gradient(lavmodel       = lavmodelFULL,
                              GLIST          = NULL, 
                              lavsamplestats = object@SampleStats,
                              lavdata        = object@Data,
                              lavcache       = object@Cache,
-                             type           = "allofthem", 
+                             type           = "free",
                              estimator      = object@Options$estimator,
                              group.weight   = TRUE,
-                             constraints    = TRUE, #### FIXME???
-                             Delta          = Delta)
+                             constraints    = FALSE) #### not used anymore?
 
-    # flatten list DX to a vector dx
-    dx <- numeric(0)
-    for(mm in 1:length(object@Model@GLIST)) {
-        dx[ x.el.idx[[mm]] ] <- DX[[mm]][ m.el.idx[[mm]] ] 
-    }
-                             
     # Saris, Satorra & Sorbom 1987
     # partition Q into Q_11, Q_22 and Q_12/Q_21
     # which elements of Q correspond with 'free' and 'nonfree' parameters?
-    all.idx      <- LIST$id
-    free.idx     <- LIST$id[LIST$free > 0L & !duplicated(LIST$free)]
-    eq.idx       <- LIST$id[LIST$eq.id > 0L]
-    eq.id        <- LIST$eq.id[ eq.idx ]
 
-    # nonfree
-    if(length(free.idx) > 0L) nonfree.idx <- all.idx[ -free.idx ]
-    # if eqs.idx, remove them from free.idx
-    if(length(eq.idx) > 0L) free.idx <- free.idx[-which(free.idx %in% eq.idx)]
- 
-    # check: nonfree.idx, free.idx and eq.idx should NOT overlap!
+    # NOTE: since 0.5-18, we do not make a distinction anymore between
+    #       equality constrained parameters (using labels), and general
+    #       linear constraints (using ==)
+    #       As a result, the 'free' parameters are not necessarily a clean
+    #       subset of the total set of parameters
+    #
+    #       But we can compute what would happen if we release a constraint,
+    #       one at a time
+    #       FIXME!!!
+
+    model.idx <- which(LIST$free  > 0L)
+    extra.idx <- which(LIST$free == 0L)
 
     # partition Q
-    Q11 <- Q[nonfree.idx, nonfree.idx]
-    Q12 <- Q[nonfree.idx,    free.idx]
-    Q21 <- Q[free.idx,    nonfree.idx]
-    Q22 <- Q[free.idx,       free.idx]
+    Q11 <- Q[extra.idx, extra.idx, drop = FALSE]
+    Q12 <- Q[extra.idx, model.idx, drop = FALSE]
+    Q21 <- Q[model.idx, extra.idx, drop = FALSE]
+    Q22 <- Q[model.idx, model.idx, drop = FALSE]
 
-    # take care of constraints (if any)
-    # handle constraints
-    if(nrow(object@Model@con.jac) > 0L) {
-        H <- object@Model@con.jac
-        inactive.idx <- attr(H, "inactive.idx")
-        lambda <- object@Model@con.lambda # lagrangean coefs
-        if(length(inactive.idx) > 0L) {
-            H <- H[-inactive.idx,,drop=FALSE]
-            lambda <- lambda[-inactive.idx]
-        }
-        # if length(eq.idx) > 0L, remove them from the columns of H
-        if(length(eq.idx) > 0L) {
-            free.again.idx <- LIST$id[LIST$free > 0L & !duplicated(LIST$free)]
-            idx <- LIST$free[ free.again.idx[ free.again.idx %in% eq.idx ] ]
-            H <- H[,-idx]
-        }
-        if(nrow(H) > 0L) {
-            H0 <- matrix(0,nrow(H),nrow(H))
-            H10 <- matrix(0, ncol(Q22), nrow(H))
-            DL <- 2*diag(lambda, nrow(H), nrow(H))
-            E3 <- rbind( cbind(     Q22,  H10, t(H)),
-                         cbind(t(H10),     DL,  H0),
-                         cbind(     H,     H0,  H0)  )
-            Q22.inv <- MASS::ginv(E3)[1:ncol(Q22), 1:ncol(Q22)]
-            # FIXME: better include inactive + slacks??
-        } else {
-            Q22.inv <- solve(Q22)
-        }
-    } else {
-        Q22.inv <- solve(Q22)
-    }
+    #Q22.inv <- vcov(object) * (nobs(object)) * (nobs(object))
+    # ALWAYS use *expected* information (for now)
+    Q22.inv <- 
+        lavTech(object, "inverted.information.expected") * nobs(object)
 
     V <- Q11 - Q12 %*% Q22.inv %*% Q21
+    #V.diag <- c(diag(V), diag(Q22))
     V.diag <- diag(V)
     # dirty hack: catch very small or negative values in diag(V)
     # this is needed eg when parameters are not identified if freed-up;
@@ -198,55 +126,72 @@ modificationIndices <- modificationindices <- modindices <- function(object,
 
     # create and fill in mi
     mi <- numeric( length(dx) )
-    mi[nonfree.idx] <- dx[nonfree.idx]^2 / V.diag
-
-    # take care of equality constraints
-    # Sorbom 1989 equations 12 and 13
-    # surely this code needs some serious optimization
-    # but it seems to work for now
-    # we should use the K matrix somewhere...
-    if(object@Model@eq.constraints) {
-        for(i in 1:length(eq.idx)) {
-            # index in all.idx (only mi.fixed elements)
-            theta2.idx <- eq.idx[i]
-            thetac.idx <- eq.idx[eq.id == eq.id[i] & eq.idx != eq.idx[i]]
-            #f.idx <- free.idx[-which(free.idx == theta2.idx)]
-            f.idx <- free.idx
-            Q22 <- Q[f.idx, f.idx, drop=FALSE]
-
-            ivec <- as.matrix(rep(1,length(thetac.idx)))
-            C11 <- Q[thetac.idx, thetac.idx, drop=FALSE]
-            C21 <- Q[theta2.idx, thetac.idx, drop=FALSE]; C12 <- t(C21)
-            C22 <- Q[theta2.idx, theta2.idx, drop=FALSE] 
-            D1  <- Q[f.idx, thetac.idx, drop=FALSE]; 
-            d2  <- Q[f.idx, theta2.idx, drop=FALSE]
-
-            c11 <- t(ivec) %*% C11 %*% ivec
-            c21 <- C21 %*% ivec; c12 <- t(c21)
-            c22 <- C22
-
-            C <- rbind( cbind(c11,c12), cbind(c21, c22) )
-        
-            D <- cbind(D1 %*% ivec, d2)
-
-   
-            e12 <- (D1 %*% ivec) + d2; e21 <- t(e12)
-            e22 <- (t(ivec) %*% C11 %*% ivec) + (t(ivec) %*% C12) + (C21 %*% ivec) + C22
-            E.star <- rbind( cbind(Q22, e12), cbind(e21, e22) )
-
-            E.star.inv <- inv.chol(E.star)
-            n.free <- length(f.idx); n.ref <- length(theta2.idx)
-            E11 <- E.star.inv[1:n.free, 1:n.free]
-            E21 <- t(E.star.inv[n.free + 1:n.ref, 1:n.free]); E12 <- t(E21)
-            E22 <- as.numeric(E.star.inv[n.free + 1:n.ref, n.free + 1:n.ref])
-            E.inv <- E11 - (E12 %*% E21)/E22
-
-            H <- C - (t(D) %*% E.inv %*% D)
-            h11 <- H[1,1]; h12 <- H[1,2]; h21 <- H[2,1]; h22 <- H[2,2]
-
-            mi[theta2.idx] <- dx[theta2.idx]^2 * (h11 + 2*h21 + h22) / (h11*h22 - h12^2)
-        }
+    mi[extra.idx] <- dx[extra.idx]*dx[extra.idx] / V.diag
+    if(length(model.idx) > 0L) {
+        mi[model.idx]    <- dx[model.idx]*dx[model.idx] / diag(Q22)
     }
+
+    # correct mi's for equality constraints
+    #if(length(model.idx) > 0L && object@Model@eq.constraints) {
+    #    # take care of equality constraints
+    #    # Sorbom 1989 equations 12 and 13
+    #    # surely this code needs some serious optimization
+    #    # but it seems to work for now
+    #    # we should use the K matrix somewhere...
+    #
+    #    A <- object@Model@ceq.JAC
+    #    ncon <- nrow(A) # # number of constraints
+    #
+    #    for(con in seq_len(ncon)) {
+    #
+    #        # what are the involved parameters (in model.idx)?
+    #        eq.idx <- which(A[con,] != 0)
+    #
+    #        for(i in 1:length(eq.idx)) {
+    #            # index in all.idx (only mi.fixed elements)
+    #            theta2.idx <- model.idx[ eq.idx[i]  ]
+    #            thetac.idx <- model.idx[ eq.idx[-i] ]
+    #            #f.idx <- free.idx[-which(free.idx == theta2.idx)]
+    #            f.idx <- model.idx[ -eq.idx ]
+    #            Q22 <- Q[f.idx, f.idx, drop=FALSE]
+    #
+    #            ivec <- as.matrix(rep(1,length(thetac.idx)))
+    #            C11 <- Q[thetac.idx, thetac.idx, drop=FALSE]
+    #            C21 <- Q[theta2.idx, thetac.idx, drop=FALSE]; C12 <- t(C21)
+    #            C22 <- Q[theta2.idx, theta2.idx, drop=FALSE]
+    #            D1  <- Q[f.idx, thetac.idx, drop=FALSE];
+    #            d2  <- Q[f.idx, theta2.idx, drop=FALSE]
+    # 
+    #            c11 <- t(ivec) %*% C11 %*% ivec
+    #            c21 <- C21 %*% ivec; c12 <- t(c21)
+    #            c22 <- C22
+    # 
+    #            C <- rbind( cbind(c11,c12), cbind(c21, c22) )
+    #
+    #            D <- cbind(D1 %*% ivec, d2)
+    #
+    #
+    #            e12 <- (D1 %*% ivec) + d2; e21 <- t(e12)
+    #            e22 <- (t(ivec) %*% C11 %*% ivec) + (t(ivec) %*% C12) + (C21 %*% ivec) + C22
+    #            E.star <- rbind( cbind(Q22, e12), cbind(e21, e22) )
+    # 
+    #            E.star.inv <- inv.chol(E.star)
+    #            #E.star.inv <- 
+    #            #    lav_model_information_augment_invert(object@Model, 
+    #            #        information = E.star, inverted = TRUE)
+    #            n.free <- length(f.idx); n.ref <- length(theta2.idx)
+    #            E11 <- E.star.inv[1:n.free, 1:n.free]
+    #            E21 <- t(E.star.inv[n.free + 1:n.ref, 1:n.free]); E12 <- t(E21)
+    #            E22 <- as.numeric(E.star.inv[n.free + 1:n.ref, n.free + 1:n.ref])
+    #            E.inv <- E11 - (E12 %*% E21)/E22
+    #
+    #            H <- C - (t(D) %*% E.inv %*% D)
+    #            h11 <- H[1,1]; h12 <- H[1,2]; h21 <- H[2,1]; h22 <- H[2,2]
+    #
+    #            mi[theta2.idx] <- dx[theta2.idx]*dx[theta2.idx] * (h11 + 2*h21 + h22) / (h11*h22 - h12*h12)
+    #        } #i
+    #    } # ncon
+    #}
 
     # EPC
     d <- (-1 * object@SampleStats@ntotal) * dx
@@ -256,14 +201,14 @@ modificationIndices <- modificationindices <- modindices <- function(object,
 
     # FIXME: epc for equality constraints must be adapted!?
     # we need a reference for this!!!!
-    if(object@Model@eq.constraints) {
-        for(i in 1:length(eq.idx)) {
-            # this is just a temporary solution
-            # until we get it right
-            neq <- length(eq.idx[eq.id == eq.id[i]])
-            epc[eq.idx[i]] <- epc[eq.idx[i]] / neq * (neq - 1)
-        }
-    }
+    #if(object@Model@eq.constraints) {
+    #    for(i in 1:length(eq.idx)) {
+    #        # this is just a temporary solution
+    #        # until we get it right
+    #        neq <- length(eq.idx[eq.id == eq.id[i]])
+    #        epc[eq.idx[i]] <- epc[eq.idx[i]] / neq * (neq - 1)
+    #    }
+    #}
 
     LIST$mi <- mi
     if(length(object@Fit@test) > 1L) {
@@ -274,17 +219,51 @@ modificationIndices <- modificationindices <- modindices <- function(object,
     # remove some rows
     #idx <- which(LIST$free > 0L & !duplicated(LIST$free) & !LIST$eq.id > 0L)
     #LIST <- LIST[-idx,]
+    #if(length(model.idx) > 0L) {
+    #    LIST <- LIST[-model.idx,]
+    #}
 
     # standardize?
     if(standardized) {
-        LIST$sepc.lv  <- standardize.est.lv(object, partable=LIST, est=LIST$epc,
-                                            cov.std=FALSE)
-        LIST$sepc.all <- standardize.est.all(object, partable=LIST, est=LIST$epc,
-                                             est.std=LIST$sepc.lv,
-                                             cov.std=FALSE)
-        LIST$sepc.nox <- standardize.est.all.nox(object,partable=LIST,est=LIST$epc,
-                                             est.std=LIST$sepc.lv,
-                                             cov.std=FALSE)
+        # two problems: 
+        #   - EPC of variances can be negative, and that is
+        #     perfectly leagel
+        #   - EPC (of variances) can be tiny (near-zero), and we should 
+        #     not divide by tiny variables
+ 
+        EPC <- LIST$epc
+        small.idx <- which(LIST$op == "~~" & 
+                           LIST$lhs == LIST$rhs &
+                           abs(EPC) < sqrt( .Machine$double.eps ) )
+        if(length(small.idx) > 0L) {
+            EPC[ small.idx ] <- as.numeric(NA)
+        }
+
+        # get the sign
+        EPC.sign <- sign(LIST$epc)
+
+        LIST$sepc.lv <- EPC.sign * standardize.est.lv(object, 
+                                                      partable = LIST, 
+                                                      est = abs(EPC),
+                                                      cov.std = FALSE)
+        if(length(small.idx) > 0L) {
+            LIST$sepc.lv[small.idx] <- 0
+        }
+        LIST$sepc.all <- EPC.sign * standardize.est.all(object, 
+                                                        partable = LIST, 
+                                                        est = abs(EPC),
+                                                        cov.std = FALSE)
+        if(length(small.idx) > 0L) {
+            LIST$sepc.all[small.idx] <- 0
+        }
+        LIST$sepc.nox <- EPC.sign * standardize.est.all.nox(object, 
+                                                            partable = LIST,
+                                                            est = abs(EPC),
+                                                            cov.std = FALSE)
+        if(length(small.idx) > 0L) {
+            LIST$sepc.nox[small.idx] <- 0
+        }
+ 
     }
 
     # power?
@@ -293,7 +272,7 @@ modificationIndices <- modificationindices <- modindices <- function(object,
         # FIXME: this is using epc in unstandardized metric
         #        this would be much more useful in standardized metric
         #        we need a standardize.est.all.reverse function...
-        LIST$ncp <- (LIST$mi / LIST$epc^2) * (delta)^2
+        LIST$ncp <- (LIST$mi / LIST$epc*LIST$epc) * (delta*delta)
         LIST$power <- 1 - pchisq(qchisq((1.0 - alpha), df=1), 
                                  df=1, ncp=LIST$ncp)
         LIST$decision <- character( length(LIST$power) )
@@ -310,17 +289,79 @@ modificationIndices <- modificationindices <- modindices <- function(object,
 
 
     # remove some columns
-    LIST$free <- LIST$eq.id <- LIST$unco <- NULL
+    LIST$free <- NULL
     LIST$mat <- LIST$row <- LIST$col <- LIST$id <- NULL
     #if(power) {
     #    LIST$epc <- NULL
     #    LIST$sepc.lv <- NULL
     #}
-    if(ngroups == 1) LIST$group <- NULL
 
     class(LIST) <- c("lavaan.data.frame", "data.frame")
+
+    # add eq constraints (if any)
+    eq.idx <- which(partable$op == "==")
+    if(length(eq.idx) > 0L) {
+        warning("lavaan WARNING: modification indices do not reflect (yet) what happens if we release an equality constraint")
+        # FIXME!!!!
+        N <- length(eq.idx)
+        TMP <- data.frame(lhs = partable$lhs[eq.idx],
+                           op = partable$op[eq.idx],
+                          rhs = partable$rhs[eq.idx],
+                          group = partable$group[eq.idx],
+                          mi = rep(as.numeric(NA), N),
+                          epc = rep(as.numeric(NA), N),
+                          sepc.lv = rep(as.numeric(NA), N),
+                          sepc.all = rep(as.numeric(NA), N),
+                          sepc.nox = rep(as.numeric(NA), N) )
+        if(!standardized) {
+            TMP$sepc.lv <- TMP$sepc.all <- TMP$sepc.nox <- NULL
+        }
+        if(!is.null(LIST$mi.scaled)) {
+            TMP$mi.scaled <- rep(as.numeric(NA), N)
+        }
+        LIST <- rbind(LIST, TMP)
+    }
+
+    # remove 'existing' parameters
+    #TMP1 <- data.frame(lhs = partable$lhs,
+    #                   op = partable$op,
+    #                   rhs = partable$rhs,
+    #                   group = partable$group)
+    #TMP2 <- data.frame(lhs = LIST$lhs, 
+    #                   op = LIST$op,
+    #                   rhs = LIST$rhs,
+    #                   group = LIST$group)
+    #idx <- which(duplicated(rbind(TMP2, TMP1), fromLast = TRUE))
+    #if(length(idx) > 0L) {
+    #    LIST <- LIST[-idx,]
+    #}
+    if(max(LIST$group) == 1) LIST$group <- NULL
+    
+    # sort?
+    if(sort.) {
+        LIST <- LIST[order(LIST$mi, decreasing = TRUE),]
+    }
+    if(minimum.value > 0.0) {
+        LIST <- LIST[!is.na(LIST$mi) & LIST$mi > minimum.value,]  
+    }
+    if(maximum.number < nrow(LIST)) {
+        LIST <- LIST[seq_len(maximum.number),]
+    }
+    if(na.remove) {
+        idx <- which(is.na(LIST$mi))
+        if(length(idx) > 0) {
+            LIST <- LIST[-idx,]
+        }
+    }
+    if(!is.null(op)) {
+        idx <- LIST$op %in% op
+        if(length(idx) > 0) {
+            LIST <- LIST[idx,]
+        }
+    }
 
     LIST
 }
 
-
+# aliases
+modificationIndices <- modificationindices <- modindices

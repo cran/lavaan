@@ -253,23 +253,45 @@ lav_model_test <- function(lavmodel       = NULL,
                           df=df,
                           refdistr="unknown",
                           pvalue=as.numeric(NA))
+
+        # just in case
+        TEST[[2]] <- list(test=test,
+                          stat=as.numeric(NA),
+                          stat.group=as.numeric(NA),
+                          df=df,
+                          refdistr="unknown",
+                          pvalue=as.numeric(NA))
         return(TEST)
     }    
 
-    # get fx.group
-    fx <- attr(x, "fx")
-    fx.group <- attr(fx, "fx.group")
+    if(lavoptions$estimator == "PML" && test != "none") {
+        PML <- ctr_pml_plrt(lavobject = NULL,
+                            lavmodel = lavmodel,
+                            lavdata = lavdata,
+                            lavoptions = lavoptions,
+                            x = x, VCOV = VCOV,
+                            lavcache = lavcache,
+                            lavsamplestats = lavsamplestats,
+                            lavpartable = lavpartable)
+        # get chi.group from PML, since we compare to `unrestricted' model,
+        # NOT observed data
+        chisq.group <- PML$PLRTH0Sat.group
+    } else {
+        # get fx.group
+        fx <- attr(x, "fx")
+        fx.group <- attr(fx, "fx.group")
 
-    # always compute `standard' test statistic
-    ## FIXME: the NFAC is now implicit in the computation of fx...
-    NFAC <- 2 * unlist(lavsamplestats@nobs)
-    if(lavoptions$estimator == "ML" && lavoptions$likelihood == "wishart") {
-        # first divide by two
-        NFAC <- NFAC / 2
-        NFAC <- NFAC - 1
-        NFAC <- NFAC * 2
+        # always compute `standard' test statistic
+        ## FIXME: the NFAC is now implicit in the computation of fx...
+        NFAC <- 2 * unlist(lavsamplestats@nobs)
+        if(lavoptions$estimator == "ML" && lavoptions$likelihood == "wishart") {
+            # first divide by two
+            NFAC <- NFAC / 2
+            NFAC <- NFAC - 1
+            NFAC <- NFAC * 2
+        } 
+        chisq.group <- fx.group * NFAC
     }
-    chisq.group <- fx.group * NFAC
 
     # check for negative values
     chisq.group[which(chisq.group < 0)] <- 0.0
@@ -336,8 +358,27 @@ lav_model_test <- function(lavmodel       = NULL,
         }
     }
 
-    if(test %in% c("satorra.bentler", "mean.var.adjusted", "scaled.shifted") &&
-       df > 0) {
+    if(lavoptions$estimator == "PML") {
+        if(test == "standard") {
+            # nothing to do
+        } else if(test == "mean.var.adjusted") {
+            TEST[[2]] <- list(test               = test,
+                              stat               = PML$stat,
+                              stat.group         = TEST[[1]]$stat.group*PML$scaling.factor,
+                              df                 = PML$df,
+                              pvalue             = PML$p.value,
+                              scaling.factor     = 1/PML$scaling.factor,
+                              shift.parameter    = as.numeric(NA),
+                              trace.UGamma       = as.numeric(NA),
+                              trace.UGamma4      = as.numeric(NA),
+                              trace.UGamma2      = as.numeric(NA),
+                              UGamma.eigenvalues = as.numeric(NA))
+        } else {
+            warning("test option ", test, " not available for estimator PML")
+        }
+    } else if(test %in% 
+          c("satorra.bentler", "mean.var.adjusted", "scaled.shifted") &&
+          df > 0 && lavoptions$estimator != "PML") {
         # try to extract attr from VCOV (if present)
         E.inv <- attr(VCOV, "E.inv")
         Delta <- attr(VCOV, "Delta")
@@ -346,16 +387,20 @@ lav_model_test <- function(lavmodel       = NULL,
         # if not present (perhaps se.type="standard" or se.type="none")
         #  we need to compute these again
         if(is.null(E.inv) || is.null(Delta) || is.null(WLS.V)) {
+            # this happens, for example, when we compute the independence
+            # model
             if(mimic == "Mplus" && estimator == "ML") {
                 # special treatment for Mplus
-                E <- computeExpectedInformationMLM(lavmodel = lavmodel,
-                         lavsamplestats=lavsamplestats)
+                E <- lav_model_information_expected_MLM(lavmodel = lavmodel,
+                         augmented = FALSE, inverted = FALSE,
+                         lavsamplestats=lavsamplestats, extra = TRUE)
             } else {
-                E <- computeExpectedInformation(lavmodel = lavmodel, 
+                E <- lav_model_information_expected(lavmodel = lavmodel, 
                          lavsamplestats = lavsamplestats, lavdata = lavdata,
                          estimator = estimator, extra = TRUE)
             }
-            E.inv <- try(solve(E), silent=TRUE)
+            E.inv <- try(lav_model_information_augment_invert(lavmodel,
+                         information = E, inverted = TRUE), silent=TRUE)
             if(inherits(E.inv, "try-error")) {
                 TEST[[2]] <- list(test=test, stat=as.numeric(NA), 
                     stat.group=rep(as.numeric(NA), lavsamplestats@ngroups),
@@ -384,7 +429,7 @@ lav_model_test <- function(lavmodel       = NULL,
 #                                  debug          = FALSE)
 #
 #                Delta <- computeDelta(lavmodel = augModel)
-#                E <- computeExpectedInformationMLM(object, lavsamplestats=lavsamplestats,
+#                E <- lav_model_information_expected_MLM(object, lavsamplestats=lavsamplestats,
 #                                                   Delta=Delta)
 #                fixed.x.idx <- max(lavpartable$free) + 1:length(idx)
 #                free.idx    <- 1:max(lavpartable$free)
@@ -473,20 +518,31 @@ lav_model_test <- function(lavmodel       = NULL,
             # if se="standard", information is probably expected
             # change it to observed
             if(lavoptions$se != "robust.mlr") information <- "observed"
-            E.inv <- Nvcov.standard(lavmodel       = lavmodel,
-                                    lavsamplestats = lavsamplestats,
-                                    lavdata        = lavdata,
-                                    estimator      = "ML",
-                                    information    = information)
+            E.inv <- lav_model_information(lavmodel       = lavmodel,
+                                           lavsamplestats = lavsamplestats,
+                                           lavdata        = lavdata,
+                                           estimator      = "ML",
+                                           lavcache       = lavcache,
+                                           information    = information,
+                                           extra          = FALSE,
+                                           augmented      = TRUE,
+                                           inverted       = TRUE)
         }
 
         if(mimic == "Mplus" || mimic == "lavaan") {
             if(is.null(B0.group)) {
-                Nvcov <- Nvcov.first.order(lavmodel       = lavmodel,
-                                           lavsamplestats = lavsamplestats,
-                                           lavdata        = lavdata)
-                B0.group <- attr(Nvcov, "B0.group")
-            } 
+                B0 <- 
+                    lav_model_information_firstorder(lavmodel = lavmodel,
+                                             lavsamplestats = lavsamplestats,
+                                             lavdata        = lavdata,
+                                             estimator      = estimator,
+                                             lavcache       = lavcache,
+                                             extra          = TRUE,
+                                             check.pd       = FALSE,
+                                             augmented      = FALSE,
+                                             inverted       = FALSE)
+                B0.group <- attr(B0, "B0.group")
+            }
             trace.UGamma <- 
                 testStatisticYuanBentler.Mplus(lavsamplestats = lavsamplestats,
                                                lavdata        = lavdata,

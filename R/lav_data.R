@@ -50,7 +50,9 @@ lavData <- function(data          = NULL,          # data.frame
                     stop("lavaan WARNING: data argument looks like a covariance matrix; please use the sample.cov argument instead")
                 } else {
                     # or perhaps it is a data matrix?
-                    warning("lavaan WARNING: data argument has been coerced to a data.frame")
+                    if(warn) {
+                        warning("lavaan WARNING: data argument has been coerced to a data.frame")
+                    }
                     ### FIXME, we should avoid as.data.frame() and handle
                     ### data matrices directly
                     data <- as.data.frame(data, stringsAsFactors = FALSE)
@@ -147,6 +149,11 @@ lavData <- function(data          = NULL,          # data.frame
         ov$idx  <- rep(NA, nvar)
         ov$nobs <- rep(sample.nobs, nvar)
         ov$type <- rep("numeric", nvar)
+
+        # if std.ov = TRUE, give a warning (suggested by Peter Westfall)
+        if(std.ov) {
+            warning("lavaan WARNING: std.ov argument is ignored if only sample statistics are provided.")
+        }
 
         # construct lavData object
         lavData <- new("lavData",
@@ -491,11 +498,11 @@ lav_data_full <- function(data          = NULL,          # data.frame
         if(std.ov) {
             num.idx <- which(ov.names[[g]] %in% ov$name & ov$type == "numeric")
             if(length(num.idx) > 0L) {
-                X[[g]][,num.idx]  <- scale(X[[g]][,num.idx,drop=FALSE])[,] 
+                X[[g]][,num.idx]  <- scale(X[[g]][,num.idx,drop=FALSE])[,,drop = FALSE] 
                 # three copies are made!!!!!
             }
             if(length(exo.idx) > 0L) {
-                eXo[[g]] <- scale(eXo[[g]])[,]
+                eXo[[g]] <- scale(eXo[[g]])[,,drop = FALSE]
             }
         }
 

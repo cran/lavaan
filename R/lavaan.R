@@ -82,6 +82,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                    slotSampleStats    = NULL,
                    slotData           = NULL,
                    slotModel          = NULL,
+                   slotCache          = NULL,
   
                    # verbosity
                    verbose            = FALSE,
@@ -194,9 +195,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         }
 
         # 3. warn that this is still experimental
-        message("Please note: the PML estimator is still under development.\n",
-                "Future releases will improve speed, and allow for mixed ord/cont variables.\n",
-                "Research on how to compute a proper goodness-of-fit test is ongoing.\n")
+        #message("Please note: the PML estimator is still under development.\n",
+        #        "Future releases will improve speed, and allow for mixed ord/cont variables.\n")
     }
 
     # 1b. check data/sample.cov and get the number of groups
@@ -308,6 +308,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         if(!is.null(model$lhs) && !is.null(model$op)  &&
            !is.null(model$rhs) && !is.null(model$free)) {
             lavpartable <- as.list(model)
+            # complete table
+            lavpartable <- lav_partable_complete(lavpartable)
         } else if(is.character(model[[1]])) {
             stop("lavaan ERROR: model is a list, but not a parameterTable?")
         }
@@ -320,7 +322,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     # at this point, we should check if the partable is complete
     # or not; this is especially relevant if the lavaan() function
     # was used, but the user has forgotten some variances/intercepts...
-    check <- lav_partable_check(lavpartable)
+    check <- lav_partable_check(lavpartable, categorical = categorical,
+                                warn = TRUE)
     
 
     # 2b. change meanstructure flag?
@@ -338,8 +341,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         lavsamplestats <- lav_samplestats_from_data(
                        lavdata       = lavdata,
                        missing       = lavoptions$missing,
-                       rescale       = (lavoptions$estimator == "ML" &&
-                                        lavoptions$likelihood == "normal"),
+                       rescale       = 
+                           (lavoptions$estimator %in% c("ML","REML") &&
+                            lavoptions$likelihood == "normal"),
                        estimator     = lavoptions$estimator,
                        mimic         = lavoptions$mimic,
                        meanstructure = lavoptions$meanstructure,
@@ -407,13 +411,11 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         timing$Start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
 
-        #lavpartable$start <- lavaanStart # not yet, breaks semTools
-        #print(as.data.frame(lavpartable))
+        lavpartable$start <- lavaanStart # since semTools 0.4-6 (lav 0.5-18)
 
         # 5. construct internal model (S4) representation
         lavmodel <- 
             lav_model(lavpartable      = lavpartable,
-                      start            = lavaanStart, # stay, for semTools
                       representation   = lavoptions$representation,
                       th.idx           = lavsamplestats@th.idx,
                       parameterization = lavoptions$parameterization,
@@ -437,31 +439,37 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     #    stop("lavaan ERROR: bootstrap not supported (yet) for categorical data")
     #}
 
-    # prepare cache -- stuff needed for estimation, but also post-estimation
-    lavcache <- vector("list", length=lavdata@ngroups)
-    if(lavoptions$estimator == "PML") {
-        TH <- computeTH(lavmodel)
-        for(g in 1:lavdata@ngroups) {
-            nvar <- ncol(lavdata@X[[g]])
-            nobs <- nrow(lavdata@X[[g]])
-            th.idx <- lavmodel@th.idx[[g]]
-            # pairwise tables, as a long vector
-            PW <- pairwiseTables(data=lavdata@X[[g]], no.x=nvar)$pairTables
-            bifreq <- as.numeric(unlist(PW))
-            ### FIXME!!! Check for zero cells!!
-            #zero.idx <- which(bifreq == 0)
-            #bifreq[zero.idx] <- 0.001 ####????
-            LONG <- LongVecInd(no.x               = nvar,
-                               all.thres          = TH[[g]],
-                               index.var.of.thres = th.idx)
-            lavcache[[g]] <- list(bifreq=bifreq, nobs=nobs, LONG=LONG)
+    if(!is.null(slotCache)) {
+        lavcache <- slotCache
+    } else {
+        # prepare cache -- stuff needed for estimation, but also post-estimation
+        lavcache <- vector("list", length=lavdata@ngroups)
+        if(lavoptions$estimator == "PML") {
+            TH <- computeTH(lavmodel)
+            BI <- lav_tables_pairwise_freq_cell(lavdata)
+            for(g in 1:lavdata@ngroups) {
+                if(is.null(BI$group) || max(BI$group) == 1L) {
+                    bifreq <- BI$obs.freq
+                    binobs  <- BI$nobs
+                } else {
+                    idx <- which(BI$group == g)
+                    bifreq <- BI$obs.freq[idx]
+                    binobs  <- BI$nobs[idx]
+                }
+                LONG  <- LongVecInd(no.x               = ncol(lavdata@X[[g]]),
+                                   all.thres          = TH[[g]],
+                                   index.var.of.thres = lavmodel@th.idx[[g]])
+                lavcache[[g]] <- list(bifreq = bifreq,
+                                      nobs   = binobs,
+                                     LONG   = LONG)
+            }
         }
-    }
-    # copy response patterns to cache -- FIXME!! (data not included 
-    # in Model only functions)
-    if(lavdata@data.type == "full" && !is.null(lavdata@Rp[[1L]])) {
-        for(g in 1:lavdata@ngroups) {
-            lavcache[[g]]$pat <- lavdata@Rp[[g]]$pat
+        # copy response patterns to cache -- FIXME!! (data not included 
+        # in Model only functions)
+        if(lavdata@data.type == "full" && !is.null(lavdata@Rp[[1L]])) {
+            for(g in 1:lavdata@ngroups) {
+                lavcache[[g]]$pat <- lavdata@Rp[[g]]$pat
+            }
         }
     }
 
@@ -536,21 +544,21 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 #     out <- lm.fit(x=YX[,ov.x.idx], y=YX[,ov.y.idx])
                 #     x.beta <- c(0,out$coefficients)
                 #}
-                y.rvar <- sum(out$residuals^2)/length(out$residuals) #ML?
+                y.rvar <- sum(out$residuals*out$residuals)/length(out$residuals) #ML?
                 if(!lavoptions$meanstructure) {
                     x <- numeric(1L + length(x.beta) - 1L)
-                    x[lavpartable$unco[lavpartable$op == "~~" &
-                                          lavpartable$unco]] <- y.rvar
-                    x[lavpartable$unco[lavpartable$op == "~" &
-                                          lavpartable$unco]] <- x.beta[-1L]
+                    x[lavpartable$free[lavpartable$op == "~~" &
+                                          lavpartable$free]] <- y.rvar
+                    x[lavpartable$free[lavpartable$op == "~" &
+                                          lavpartable$free]] <- x.beta[-1L]
                 } else {
                     x <- numeric(1L + length(x.beta))
-                    x[lavpartable$unco[lavpartable$op == "~~" &
-                                          lavpartable$unco]] <- y.rvar
-                    x[lavpartable$unco[lavpartable$op == "~" &
-                                          lavpartable$unco]] <- x.beta[-1L]
-                    x[lavpartable$unco[lavpartable$op == "~1" &
-                                          lavpartable$unco]] <- x.beta[1L]
+                    x[lavpartable$free[lavpartable$op == "~~" &
+                                          lavpartable$free]] <- y.rvar
+                    x[lavpartable$free[lavpartable$op == "~" &
+                                          lavpartable$free]] <- x.beta[-1L]
+                    x[lavpartable$free[lavpartable$op == "~1" &
+                                          lavpartable$free]] <- x.beta[1L]
                 }
                 lavmodel <- lav_model_set_parameters(lavmodel, x = x,
                                            estimator=lavoptions$estimator)
@@ -581,12 +589,12 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 con.jac <- t(A)
 
                 # meanstructure?
-                rvar.idx <- lavpartable$unco[lavpartable$op == "~~" &
-                                                lavpartable$unco]
+                rvar.idx <- lavpartable$free[lavpartable$op == "~~" &
+                                                lavpartable$free]
                 if(lavoptions$meanstructure) {
                     # where is the intercept?
-                    int.idx <- lavpartable$unco[lavpartable$op == "~1" &
-                                                   lavpartable$unco]
+                    int.idx <- lavpartable$free[lavpartable$op == "~1" &
+                                                   lavpartable$free]
                     # first intercept, then coefficients, remove resvar
                     A <- rbind(A[int.idx,,drop=FALSE], 
                                A[-c(int.idx,rvar.idx),,drop=FALSE])
@@ -618,7 +626,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                 meq=length(lavmodel@x.ceq.idx))
                 x.beta <- out$solution
                 residuals <- Y - (X %*% x.beta)
-                y.rvar <- sum(residuals^2)/length(residuals) #ML?
+                y.rvar <- sum(residuals*residuals)/length(residuals) #ML?
                 if(!lavoptions$meanstructure) {
                     x <- numeric(1L + length(x.beta) - 1L)
                     x[lavpartable$free[lavpartable$op == "~~" &
@@ -744,7 +752,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
     # 9. collect information about model fit (S4)
     lavfit <- lav_model_fit(lavpartable = lavpartable, 
-                            start       = lavaanStart,
                             lavmodel    = lavmodel,
                             x           = x, 
                             VCOV        = VCOV,

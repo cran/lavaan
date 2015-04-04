@@ -84,13 +84,13 @@ setClass("Model",          # MATRIX representation of the sem model
         th.idx="list",
 
         nx.free="integer",
-        nx.unco="integer",
+        #nx.unco="integer",
         nx.user="integer",
 
         m.free.idx="list",
         x.free.idx="list",
-        m.unco.idx="list",
-        x.unco.idx="list",
+        #m.unco.idx="list",
+        #x.unco.idx="list",
         m.user.idx="list",
         x.user.idx="list",
         x.def.idx="integer",
@@ -100,12 +100,21 @@ setClass("Model",          # MATRIX representation of the sem model
 
         eq.constraints="logical",
         eq.constraints.K="matrix",
+        eq.constraints.k0="numeric",
 
         def.function="function",
         ceq.function="function",
         ceq.jacobian="function",
+        ceq.JAC="matrix",
+        ceq.rhs="numeric",
+        ceq.linear.idx="integer",
+        ceq.nonlinear.idx="integer",
         cin.function="function",
         cin.jacobian="function",
+        cin.JAC="matrix",
+        cin.rhs="numeric",
+        cin.linear.idx="integer",
+        cin.nonlinear.idx="integer",
         con.jac="matrix",
         con.lambda="numeric",
 
@@ -132,6 +141,8 @@ setClass("Fit",
         se="numeric",              # standard errors
         fx="numeric",
         fx.group="numeric",
+        logl="numeric",
+        logl.group="numeric",
         iterations="integer",      # number of iterations
         converged="logical",
         control="list",

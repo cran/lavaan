@@ -1,29 +1,28 @@
-# compare to nested models, by default using the chi-square
+# compare two nested models, by default using the chi-square
 # difference test
 
-# NOTE: in 0.5-16, SB.classic = TRUE is the default again (for now)
+# - in 0.5-16, SB.classic = TRUE is the default again (for now)
+# - in 0.5-18, SB.classic is replaced by 'method', with the following
+#   options:
+#     method = "default" (we choose a default method, based on the estimator)
+#     method = "Satorra-2000"
+#     method = "Satorra-Bentler-2001"
+#     method = "Satorra-Bentler-2010"
+#     method = "Satorra-Bentler-2010-PML"
 
-lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
-                       type = "Chisq", model.names = NULL) {
+lavTestLRT <- function(object, ..., method = "default", A.method = "exact",
+                       H1 = TRUE, type = "Chisq", model.names = NULL) {
 
     if(object@Fit@npar > 0L && !object@Fit@converged)
         stop("lavaan ERROR: model did not converge")
     type <- tolower(type)
+    method <- tolower( gsub("[-_\\.]", "", method ) )
 
     # NOTE: if we add additional arguments, it is not the same generic
     # anova() function anymore, and match.call will be screwed up
 
     mcall <- match.call(expand.dots = TRUE)
     dots <- list(...)
-    #arg.names <- names(dots)
-    #arg.idx <- which(nchar(arg.names) > 0L)
-    #if(length(arg.idx) > 0L) {
-    #    if(!is.null(dots$SB.classic))
-    #        SB.classic <- dots$SB.classic
-    #    if(!is.null(dots$SB.H0))
-    #        SB.H0 <- dots$SB.H0           
-    #    dots <- dots[-arg.idx]
-    #}
   
     modp <- if(length(dots))
         sapply(dots, is, "lavaan") else logical(0)
@@ -65,7 +64,8 @@ lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
     if(!is.null(model.names)) {
         names(mods) <- model.names
     } else {
-        names(mods) <- sapply(as.list(mcall)[c(FALSE, TRUE, modp)], deparse)
+        names(mods) <- sapply(as.list(mcall)[which(c(FALSE, TRUE, modp))], 
+                              deparse)
     }
 
     ## put them in order (using number of free parameters)
@@ -83,7 +83,12 @@ lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
 
     # here come the checks
     if(TRUE) {
-        # 1. same data? we check the covariance matrices of the first group
+        # 1. same set of observed variables?
+        ov.names <- lapply(mods, lavNames)
+        OV <- ov.names[[1L]] # the observed variable names of the first model
+        if(!all(sapply(ov.names, function(x) identical(x, OV)))) {
+            warning("lavaan WARNING: some models are based on a different set of observed variables")
+        }
         ## wow FIXME: we may need to reorder the rows/columns first!!
         #COVS <- lapply(mods, function(x) slot(slot(x, "Sample"), "cov")[[1]])
         #if(!all(sapply(COVS, all.equal, COVS[[1]]))) {
@@ -94,6 +99,11 @@ lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
         # TODO!
         
         # 3. all meanstructure?
+        mean.structure <- sapply(mods, inspect, "meanstructure")
+        if(sum(mean.structure) > 0L && 
+           sum(mean.structure) < length(mean.structure)) {
+            warning("lavaan WARNING: not all models have a meanstructure")
+        }
     }
 
     mods.scaled <- unlist( lapply(mods, function(x) {
@@ -152,98 +162,63 @@ lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
     
     # correction for scaled test statistics
     if(type == "chisq" && scaled) {
-        if(SB.classic && TEST %in% c("satorra.bentler", "yuan.bentler")) {
-            # use formula from Satorra & Bentler 2001
-            scaling.factor <- unlist(lapply(mods, 
-                function(x) slot(slot(x, "Fit"), "test")[[2]]$scaling.factor))
- 
-            # saturated model? (has NA scaling.factor)
-            sat.idx <- which(Df == 0)
-            if(length(sat.idx) > 0L) {
-                scaling.factor[sat.idx] <- 1
+
+        # select method
+        if(method == "default") {
+            if(estimator == "PML") {
+                method <- "satorra.bentler.2010.pml"
+            } else if(TEST %in% c("satorra.bentler", "yuan.bentler")) {
+                method <- "satorra.bentler.2001"
+            } else {
+                method <- "satorra.2000"
             }
-
-            cd1 <- diff(scaling.factor * Df)/diff(Df)
-
-
-            # check for negative scaling factors
-            if(any(cd1 < 0)) {
-                warning("lavaan WARNING: some scaling factors are negative: [",
-                        paste(round(cd1, 3), collapse=" "),"]; rerun with SB.classic=FALSE")
-                cd1[cd1 < 0] <- NA
-            }
-            cd <- c(NA, cd1)
-            STAT.delta <- STAT.delta/cd
-
-            # extract scaled Chisq for each model
-            STAT <- unlist(lapply(mods, function(x) slot(slot(x, "Fit"),
-                            "test")[[2]]$stat))
+        } else if(method == "satorrabentler2010pml") {
+            method <- "satorra.bentler.2010.pml"
+            stopifnot(estimator == "PML")
+        } else if(method == "satorra2000") {
+            method <- "satorra.2000"
+        } else if(method == "satorrabentler2001") {
+            method <- "satorra.bentler.2001"
+        } else if(method == "satorrabentler2010") {
+            method <- "satorra.bentler.2010"
         } else {
-            # see Mplus Web Note 10 (2006)
+            stop("lavaan ERROR: unknown method for scaled difference test: ", method)
+        }
+
+        if(method == "satorra.bentler.2001") {
+            # use formula from Satorra & Bentler 2001
             for(m in seq_len(length(mods) - 1L)) {
-
-                if(mods[[m]]@Fit@test[[1]]$df == mods[[m+1]]@Fit@test[[1]]$df) {
-                    warnings("lavaan WARNING: some models have the same number of free parameters")
-                    next
-                }
-
-                if(SB.H0) {
-                    # evaluate under H0
-                    stop("SB.H0 has not been implemented yet. FIXME!")
-                }
-
-                # original M (Satorra)
-                Delta1 <- computeDelta(lavmodel = mods[[m]]@Model)
-                npar <- ncol(Delta1[[1]])
-                WLS.V <- lav_object_inspect_wls_v( mods[[m]] )  ## always H1
-                Gamma <- lav_object_inspect_sampstat_nacov( mods[[m]] ) 
-                
-
-                # weight WLS.V
-                for(g in 1:ngroups) {
-                    WLS.V[[g]] <- nobs[[g]]/ntotal * WLS.V[[g]]
-                }
-
-                # information matrix
-                P1 <- matrix(0, nrow=npar, ncol=npar)
-                for(g in 1:ngroups) {
-                     P1 <- P1 + (t(Delta1[[g]]) %*% WLS.V[[g]] %*% Delta1[[g]])
-                }
-                P1.inv <- solve(P1)
-
-                # compute A for these two nested models
-                p1 <- mods[[m   ]]@ParTable # partable h1
-                p0 <- mods[[m+1L]]@ParTable # partable h0
-                af <- lav_partable_constraints_function(p1,p0)
-                A <- lav_func_jacobian_complex(func=af, x=mods[[m   ]]@Fit@x)
-
-                trace.UGamma  <- numeric( ngroups )
-                trace.UGamma2 <- numeric( ngroups )
-                for(g in 1:ngroups) {
-                    U <- WLS.V[[g]]  %*% Delta1[[g]] %*%
-                         (P1.inv %*% t(A) %*% solve(A %*% P1.inv %*% t(A)) %*% A %*% P1.inv) %*% t(Delta1[[g]]) %*% WLS.V[[g]]
-                    UG <- U %*% Gamma[[g]]; tUG <- t(UG)
-                    trace.UGamma[g]  <- ntotal/nobs[[g]] * sum( U * Gamma[[g]] )
-                    trace.UGamma2[g] <- ntotal/nobs[[g]] * sum( UG * tUG )
-                }
-
-                tr.M  <- sum(trace.UGamma)
-                tr2.M <- sum(trace.UGamma2)
-
-                # adjust Df.delta?
-                if(TEST == "mean.var.adjusted") {
-                    # NOT needed for scaled.shifted; see
-                    # see 'Simple Second Order Chi-Square Correction' 2010 paper
-                    # on www.statmodel.com, section 4
-                    # Df.delta[m+1L] <- floor((tr.M1^2 / tr2.M1) + 0.5)
-                    Df.delta[m+1L] <- tr.M^2 / tr2.M
-                } 
-
-                scaling.factor <- tr.M / Df.delta[m+1L]
-                if(scaling.factor < 0) scaling.factor <- as.numeric(NA)
-                STAT.delta[m+1L] <- STAT.delta[m+1L]/scaling.factor
+                out <- lav_test_diff_SatorraBentler2001(mods[[m]], mods[[m+1]])
+                STAT.delta[m+1] <- out$T.delta
+                  Df.delta[m+1] <- out$df.delta
             }
-        } 
+        } else if (method == "satorra.bentler.2010.pml") {
+            for(m in seq_len(length(mods) - 1L)) {
+                out <- ctr_pml_plrt_nested(mods[[m]], mods[[m+1]])
+                STAT.delta[m+1] <- out$FSMA.PLRT
+                  Df.delta[m+1] <- out$adj.df
+            }
+        } else if(method == "satorra.bentler.2010") {
+            for(m in seq_len(length(mods) - 1L)) {
+                out <- lav_test_diff_SatorraBentler2010(mods[[m]], mods[[m+1]])
+                STAT.delta[m+1] <- out$T.delta
+                  Df.delta[m+1] <- out$df.delta
+            }
+        } else if(method == "satorra.2000") {
+            for(m in seq_len(length(mods) - 1L)) {
+                if(TEST %in% c("satorra.bentler", "yuan.bentler")) {
+                    Satterthwaite <- FALSE
+                } else {
+                    Satterthwaite <- TRUE
+                }
+                out <- lav_test_diff_Satorra2000(mods[[m]], mods[[m+1]],
+                                                 H1 = TRUE,
+                                                 Satterthwaite = Satterthwaite,
+                                                 A.method = A.method)
+                STAT.delta[m+1] <- out$T.delta
+                  Df.delta[m+1] <- out$df.delta
+            }
+        }
     }
 
     # Pvalue
@@ -253,23 +228,39 @@ lavTestLRT <- function(object, ..., SB.classic = TRUE, SB.H0 = FALSE,
     if(estimator == "ML") {
         aic <- sapply(mods, FUN=AIC)
         bic <- sapply(mods, FUN=BIC)
+    } else if(estimator == "PML") {
+        OUT <- lapply(mods, ctr_pml_aic_bic)
+        aic <- sapply(OUT, "[[", "PL_AIC")
+        bic <- sapply(OUT, "[[", "PL_BIC")
     }
 
-    val <- data.frame(Df = Df,
-                      AIC = aic,
-                      BIC = bic,
-                      Chisq = STAT,
-                      "Chisq diff" = STAT.delta,
-                      "Df diff" = Df.delta,
-                      "Pr(>Chisq)" = Pvalue.delta,
-                      row.names = names(mods), 
-                      check.names = FALSE)
+    if(estimator == "PML") {
+        val <- data.frame(Df = Df,
+                          PL_AIC = aic,
+                          PL_BIC = bic,
+                          Chisq = STAT,
+                          "Chisq diff" = STAT.delta,
+                          "Df diff" = Df.delta,
+                          "Pr(>Chisq)" = Pvalue.delta,
+                          row.names = names(mods),
+                          check.names = FALSE)
+    } else {
+        val <- data.frame(Df = Df,
+                          AIC = aic,
+                          BIC = bic,
+                          Chisq = STAT,
+                          "Chisq diff" = STAT.delta,
+                          "Df diff" = Df.delta,
+                          "Pr(>Chisq)" = Pvalue.delta,
+                          row.names = names(mods), 
+                          check.names = FALSE)
+    }
 
     if(type == "chisq") {
         if(scaled) {
             attr(val, "heading") <- 
-                paste("Scaled Chi Square Difference Test (test = ",
-                      TEST, ")\n", sep="")
+                paste("Scaled Chi Square Difference Test (method = \"",
+                      method, "\")\n", sep="")
         } else {
             attr(val, "heading") <- "Chi Square Difference Test\n"
         }

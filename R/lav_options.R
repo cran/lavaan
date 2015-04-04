@@ -123,6 +123,8 @@ lav_options_set <- function(opt = formals(lavaan)) {
         # nothing to do
     } else if(opt$missing == "pairwise") {
         # nothing to do
+    } else if(opt$missing == "available.cases") {
+        # nothing to do, or warn if not categorical?
     } else {
         stop("unknown value for `missing' argument: ", opt$missing, "\n")
     }
@@ -387,8 +389,8 @@ lav_options_set <- function(opt = formals(lavaan)) {
         opt$information <- "observed"
         if(opt$se == "default")
             opt$se <- "robust.huber.white"
-        if(opt$test != "none") opt$test <- "standard"
-        opt$missing <- "listwise"
+        if(opt$test != "none") opt$test <- "mean.var.adjusted"
+        #opt$missing <- "listwise"
     } else if(opt$estimator %in% c("fml","umn")) {
         opt$estimator <- "FML"
         opt$information <- "observed"
@@ -396,6 +398,13 @@ lav_options_set <- function(opt = formals(lavaan)) {
             opt$se <- "standard"
         if(opt$test != "none") opt$test <- "standard"
         #opt$missing <- "listwise"
+    } else if(opt$estimator == "reml") {
+        opt$estimator <- "REML"
+        opt$information <- "observed"
+        if(opt$se == "default")
+            opt$se <- "standard"
+        if(opt$test != "none") opt$test <- "standard"
+        opt$missing <- "listwise"
     } else if(opt$estimator %in% c("mml")) {
         opt$estimator <- "MML"
         opt$information <- "observed"
@@ -430,7 +439,7 @@ lav_options_set <- function(opt = formals(lavaan)) {
     }
 
     # likelihood approach (wishart or normal) + sample.cov.rescale
-    if(opt$estimator != "ML") {
+    if(!opt$estimator %in% c("ML", "REML", "PML", "FML")) {
         if(opt$likelihood != "default") {
             stop("likelihood argument is only relevant if estimator = ML")
         }
@@ -439,8 +448,10 @@ lav_options_set <- function(opt = formals(lavaan)) {
         } else {
             warning("sample.cov.rescale argument is only relevant if estimator = ML")
         }
-    } else { # ml
-        if(opt$likelihood == "default") {
+    } else { # ml and friends
+        if(opt$estimator %in% c("PML", "FML")) {
+            opt$likelihood <- "normal"
+        } else if(opt$likelihood == "default") {
            opt$likelihood <- "normal"
             if(opt$mimic == "EQS"    || 
                opt$mimic == "LISREL" || 

@@ -26,8 +26,8 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
         upper <- apply(combn(ncol(A),2),2,
                        function(x) sum(A[,x[1]] * A[,x[2]], na.rm=TRUE))
         tmp <- diag(apply(A, 2, function(x) sum(x*x, na.rm=TRUE)))
-        tmp[ vechru.idx(ndim, diagonal=FALSE) ] <- upper
-        tmp[ vech.idx(  ndim, diagonal=FALSE) ] <- upper
+        tmp[ lav_matrix_vechru_idx(ndim, diagonal = FALSE) ] <- upper
+        tmp[ lav_matrix_vech_idx(  ndim, diagonal = FALSE) ] <- upper
         tmp
     }
     
@@ -97,7 +97,12 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
         th.idx <- th.start.idx[i]:th.end.idx[i]
         sl.idx <- seq(i, by=nvar, length.out=nexo)
         if(ov.types[i] == "numeric") {
-            fit <- lavOLS(y=Data[,i], X=eXo); scores <- fit$scores()
+            fit <- lavOLS(y=Data[,i], X=eXo)
+            if( any(is.na(fit$theta)) ) {
+                stop("lavaan ERROR: linear regression failed for ",ov.names[i],
+                     "; X may not be of full rank in group ", group)
+            }
+            scores <- fit$scores()
             FIT[[i]] <- fit
             ov.num <- ov.num + 1L
             # compute mean and variance
@@ -123,7 +128,12 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
                 stop("lavaan ERROR: variable ", ov.names[i], " has fewer categories (", length(y.freq), ") than expected (", ov.levels[i], ") in group ", group)
             if(any(y.freq == 0L))
                 stop("lavaan ERROR: some categories of variable `", ov.names[i], "' are empty in group ", group, "; frequencies are [", paste(y.freq, collapse=" "), "]")
-            fit <- lavProbit(y=Data[,i], X=eXo); scores <- fit$scores()
+            fit <- lavProbit(y=Data[,i], X=eXo)
+            if( any(is.na(fit$theta)) ) {
+                stop("lavaan ERROR: probit regression failed for ",ov.names[i],
+                     "; X may not be of full rank in group ", group)
+            }
+            scores <- fit$scores()
             FIT[[i]] <- fit
             TH[[i]] <- fit$theta[fit$th.idx]
             TH.NOX[[i]] <- pc_th(Y=Data[,i])
@@ -169,7 +179,7 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
 
     # LAVAAN style: col-wise! (LISREL style: row-wise using vechr.idx)
     PSTAR <- matrix(0, nvar, nvar)
-    PSTAR[vech.idx(nvar, diagonal=FALSE)] <- 1:pstar
+    PSTAR[lav_matrix_vech_idx(nvar, diagonal = FALSE)] <- 1:pstar
     for(j in seq_len(nvar-1L)) {
         for(i in (j+1L):nvar) {
             if(verbose) { cat(" i = ", i, " j = ", j, 
@@ -391,7 +401,7 @@ muthen1984 <- function(Data, ov.names=NULL, ov.types=NULL, ov.levels=NULL,
     # A22
     A22 <- matrix(0, pstar, pstar)
     for(i in seq_len(pstar)) {
-        A22[i,i] <- sum( SC.COR[,i]^2, na.rm=TRUE )
+        A22[i,i] <- sum( SC.COR[,i]*SC.COR[,i], na.rm=TRUE )
     }
 
     # A12

@@ -167,7 +167,7 @@ lavaanify <- lavParTable <- function(
             ngroups = ngroups)
     }        
     if(debug) {
-        cat("[lavaan DEBUG]: parameter LIST:\n")
+        cat("[lavaan DEBUG]: parameter LIST without MODIFIERS:\n")
         print( as.data.frame(LIST, stringsAsFactors=FALSE) )
     }
 
@@ -178,6 +178,7 @@ lavaanify <- lavParTable <- function(
             MOD.fixed <- MOD[[el]]$fixed  
             MOD.start <- MOD[[el]]$start
             MOD.label <- MOD[[el]]$label 
+            MOD.prior <- MOD[[el]]$prior
 
             # check for single argument if multiple groups
             if(ngroups > 1L && length(idx) > 1L) {
@@ -185,6 +186,7 @@ lavaanify <- lavParTable <- function(
                 # A) here we force same behavior across groups
                 if(length(MOD.fixed) == 1L) MOD.fixed <- rep(MOD.fixed, ngroups)
                 if(length(MOD.start) == 1L) MOD.start <- rep(MOD.start, ngroups)
+                if(length(MOD.prior) == 1L) MOD.prior <- rep(MOD.prior, ngroups)
                 # B) here we do NOT! otherwise, it would imply an equality 
                 #                    constraint...
                 #    except if group.equal="loadings"!
@@ -201,6 +203,7 @@ lavaanify <- lavParTable <- function(
             nidx <- length(idx)
             if( (!is.null(MOD.fixed) && nidx != length(MOD.fixed)) ||
                 (!is.null(MOD.start) && nidx != length(MOD.start)) ||
+                (!is.null(MOD.prior) && nidx != length(MOD.prior)) ||
                 (!is.null(MOD.label) && nidx != length(MOD.label)) ) {
                 el.idx <- which(LIST$mod.idx == el)[1L]
                 stop("lavaan ERROR: wrong number of arguments in modifier (",
@@ -210,14 +213,27 @@ lavaanify <- lavParTable <- function(
 
             # apply modifiers
             if(!is.null(MOD.fixed)) {
+                # two options: constant or NA
                 na.idx <- which(is.na(MOD.fixed))
                 not.na.idx <- which(!is.na(MOD.fixed))
+
+                # constant
                 LIST$ustart[idx][not.na.idx] <- MOD.fixed[not.na.idx]
                 LIST$free[  idx][not.na.idx] <- 0L
-                LIST$free[  idx][na.idx]     <- 1L # eg factor loading
+
+                # NA* modifier
+                LIST$free[  idx][na.idx] <- 1L # eg factor loading
+                LIST$ustart[idx][na.idx] <- as.numeric(NA)
             }
             if(!is.null(MOD.start)) {
                 LIST$ustart[idx] <- MOD.start
+            }
+            if(!is.null(MOD.prior)) {
+                # do we already have a `prior' column? if not, create one
+                if(is.null(LIST$prior)) {
+                    LIST$prior <- character( length(LIST$lhs) )
+                }
+                LIST$prior[idx] <- MOD.prior
             }
             if(!is.null(MOD.label)) {
                 LIST$label[idx] <- MOD.label
@@ -227,109 +243,140 @@ lavaanify <- lavParTable <- function(
     # remove mod.idx column
     LIST$mod.idx <- NULL
 
-    # check if CON contains *simple* equality constraints (eg b1 == b2)
-    # FIXME!!!
-    # b1 == b3
-    # b2 == b3 does not work
-    # better a general approach for linear constraints!
-    #if(length(CON) > 0L) {
-    #    el.idx <- integer(0L)
-    #    for(el in 1:length(CON)) {
-    #        if(CON[[el]]$op == "==") {
-    #            lhs.idx <- which(LIST$label == CON[[el]]$lhs)
-    #            rhs.idx <- which(LIST$label == CON[[el]]$rhs)
-    #            if(length(lhs.idx) && length(rhs.idx)) {
-    #                # flag this constraint (to be removed)
-    #                el.idx <- c(el.idx, el)
-    #                # fill in equal and fix
-    #                if(LIST$label[lhs.idx] == "") {
-    #                    LIST$label[rhs.idx] <- LIST$label[lhs.idx]
-    #                } else {
-    #                    LIST$label[rhs.idx] <- LIST$label[lhs.idx]
-    #                }
-    #                LIST$free[ rhs.idx] <- 0L
-                     # FIXME: what is needed is to replace all occurences
-                     #        of rhs.idx by lhs.idx in CON!!!
-    #            }
-    #        }
-    #    }
-    #    if(length(el.idx) > 0L) CON <- CON[-el.idx]
-    #}
+    if(debug) {
+        cat("[lavaan DEBUG]: parameter LIST with MODIFIERS:\n")
+        print( as.data.frame(LIST, stringsAsFactors=FALSE) )
+    }
 
     # get 'virtual' parameter labels
     LABEL <- lav_partable_labels(partable=LIST, group.equal=group.equal,
                                 group.partial=group.partial)
-    #cat("DEBUG: label after lav_partable_labels:\n"); print(LABEL); cat("\n")
-    #cat("DEBUG: eq.id after group.equal:\n"); print(LIST$eq.id); cat("\n")
-    #cat("DEBUG: LIST$label:\n"); print(LIST$label); cat("\n")
+
+    if(debug) {
+        cat("[lavaan DEBUG]: parameter LIST with LABELS:\n")
+        tmp <- LIST; tmp$LABEL <- LABEL
+        print( as.data.frame(tmp, stringsAsFactors=FALSE) )
+    }
 
     # handle user-specified equality constraints
-    # insert 'target/reference' id's in eq.id/label columns
-    # so that the eq.id column reflects sets of equal parameters
-    # the 'reference' parameter has free > 0; the 'equal to' pars free == 0
+    # lavaan 0.5-18
+    # - rewrite 'LABEL-based' equality constraints as == constraints
+    # - create plabel: internal labels, based on id
+    # - create CON entries, using these internal labels
+    LIST$plabel <- paste(".p", LIST$id, ".", sep="")
     idx.eq.label <- which(duplicated(LABEL))
     if(length(idx.eq.label) > 0L) {
+        CON.idx <- length(CON)
+        # add 'user' column
+        CON <- lapply(CON, function(x) {x$user <- 1L; x} )
         for(idx in idx.eq.label) {
             eq.label <- LABEL[idx]
-            ref.idx <- which(LABEL == eq.label)[1L] # the first one only
-            # set eq.id equal
-            LIST$eq.id[ref.idx] <- LIST$eq.id[idx] <- ref.idx
-            # fix target
-            LIST$free[idx] <- 0L
+            all.idx <- which(LABEL == eq.label) # all same-label parameters   
+            ref.idx <- all.idx[1L]              # the first one only 
 
-            # special case: check if there are any more instances 
-            # of idx in  LIST$eq.id (perhaps due to group.equal)
-            idx.all <- which(LIST$eq.id == idx)
-            if(length(idx.all) > 0L) {
-                ref.idx.all <- which(LIST$eq.id == ref.idx)
-                LIST$label[ref.idx.all] <- eq.label
-                LIST$eq.id[idx.all] <- ref.idx
-                LIST$free[idx.all] <- 0L  # fix!
-                LIST$label[idx.all] <- eq.label
-            }
-            # special case: ref.idx is a fixed parameter
-            if(LIST$free[ref.idx] == 0L) {
-                ref.idx.all <- which(LIST$eq.id == ref.idx)
-                LIST$ustart[ref.idx.all] <- LIST$ustart[ref.idx]
-                LIST$eq.id[ref.idx.all] <- 0L
+            # two possibilities: 
+            # 1. all.idx contains a fixed parameter: in this case,
+            #    we fix them all (hopefully to the same value)
+            # 2. all.idx contains only free parameters
+
+            # 1. fixed?
+            if(any(LIST$free[all.idx] == 0L)) {
+
+                # which one is fixed? (only pick the first!)
+                fixed.all <- all.idx[ LIST$free[all.idx] == 0L ]
+                fixed.idx <- fixed.all[1] # only pick the first!
+
+                # sanity check: are all ustart values equal?
+                ustart1 <- LIST$ustart[ fixed.idx ]
+                if(! all(ustart1 == LIST$ustart[fixed.all]) ) {
+                    warning("lavaan WARNING: equality constraints involve fixed parameters with different values; only the first one will be used")
+                }
+
+
+                fixed.idx <- fixed.all[1] # only pick the first!
+
+                # fix current 'idx'
+                LIST$ustart[idx] <- LIST$ustart[fixed.idx]
+                LIST$free[idx] <- 0L  # not free anymore, since it must
+                                      # be equal to the 'fixed' parameter
+                                      # (Note: Mplus ignores this)
+
+                # just in case: if ref.idx is not equal to fixed.idx, 
+                # fix this one too
+                LIST$ustart[ref.idx] <- LIST$ustart[fixed.idx]
+                LIST$free[ref.idx] <- 0L
+            } else {
+            # 2. ref.idx is a free parameter
+                # user-label?
+                #if(nchar(LIST$label[ref.idx])  > 0) {
+                #    lhs.lab <- LIST$label[ref.idx]
+                #} else {
+                #    lhs.lab <- PLABEL[ref.idx]
+                #}
+                CON.idx <- CON.idx + 1L
+                CON[[CON.idx]] <- list(op   = "==", 
+                                       lhs  = LIST$plabel[ref.idx], 
+                                       rhs  = LIST$plabel[idx],
+                                       user = 2L)
+
+                # just to trick semTools, also add something in the label
+                # colum, *if* it is empty
+                for(i in all.idx) {
+                    if(nchar(LIST$label[i]) == 0L) {
+                        LIST$label[i] <- LIST$plabel[ ref.idx ]
+                    }
+                }
             }
         }
     }
- 
-    #cat("DEBUG: eq.id after eq.id:\n"); print(LIST$eq.id); cat("\n")    
-    #cat("DEBUG: LIST$label:\n"); print(LIST$label); cat("\n")
+    if(debug) {
+        print(CON)
+    }
+
 
     # count free parameters
     idx.free <- which(LIST$free > 0)
     LIST$free[idx.free] <- seq_along(idx.free)
+    if(!is.null(LIST$unco)) {
+         LIST$unco[idx.free] <- seq_along(idx.free)
+    }
 
     # 2. add free counter to this element
-    idx.equal <- which(LIST$eq.id > 0)
-    LIST$free[idx.equal] <- LIST$free[ LIST$eq.id[idx.equal] ]
+    #idx.equal <- which(LIST$eq.id > 0)
+    #LIST$free[idx.equal] <- LIST$free[ LIST$eq.id[idx.equal] ]
 
     # 3. which parameters would be free without equality constraints?
-    idx.unco <- which(LIST$free > 0)
-    LIST$unco[idx.unco] <- seq_along(idx.unco)
+    #idx.unco <- which(LIST$free > 0)
+    #LIST$unco[idx.unco] <- seq_along(idx.unco)
 
 
     # handle constraints (if any) (NOT per group, but overall - 0.4-11)
     if(length(CON) > 0L) {
         #cat("DEBUG:\n"); print(CON)
-        lhs = unlist(lapply(CON, "[[", "lhs"))
-         op = unlist(lapply(CON, "[[",  "op"))
-        rhs = unlist(lapply(CON, "[[", "rhs"))
+        lhs  = unlist(lapply(CON, "[[", "lhs"))
+         op  = unlist(lapply(CON, "[[",  "op"))
+        rhs  = unlist(lapply(CON, "[[", "rhs"))
+        user = unlist(lapply(CON, "[[", "user"))
         LIST$id         <- c(LIST$id,         length(LIST$id) + seq_along(lhs) )
         LIST$lhs        <- c(LIST$lhs,        lhs)
         LIST$op         <- c(LIST$op,         op)
         LIST$rhs        <- c(LIST$rhs,        rhs)
-        LIST$user       <- c(LIST$user,       rep(1L, length(lhs)) )
+        LIST$user       <- c(LIST$user,       user)
         LIST$group      <- c(LIST$group,      rep(0L, each=length(CON)))
         LIST$free       <- c(LIST$free,       rep(0L, length(lhs)) )
         LIST$ustart     <- c(LIST$ustart,     rep(as.numeric(NA), length(lhs)))
         LIST$exo        <- c(LIST$exo,        rep(0L, length(lhs)) )
         LIST$label      <- c(LIST$label,      rep("",  length(lhs)) )
-        LIST$eq.id      <- c(LIST$eq.id,      rep(0L,  length(lhs)) )
-        LIST$unco       <- c(LIST$unco,       rep(0L,  length(lhs)) )
+        if(!is.null(LIST$prior)) {
+            LIST$prior      <- c(LIST$prior,      rep("",  length(lhs)) )
+        }
+        LIST$plabel     <- c(LIST$plabel,     rep("",  length(lhs)) )
+        if(!is.null(LIST$eq.id)) {
+            LIST$eq.id      <- c(LIST$eq.id,      rep(0L,  length(lhs)) )
+        }
+        if(!is.null(LIST$unco)) {
+            LIST$unco       <- c(LIST$unco,       rep(0L,  length(lhs)) )
+        }
     }
 
     # put lhs of := elements in label column
@@ -630,10 +677,10 @@ lav_partable_labels <- function(partable, group.equal="", group.partial="",
         idx <- 1:length(label)
     } else if(type == "free") {
         idx <- which(partable$free > 0L & !duplicated(partable$free))
-    } else if(type == "unco") {
-        idx <- which(partable$unco > 0L & !duplicated(partable$unco))
+    #} else if(type == "unco") {
+    #    idx <- which(partable$unco > 0L & !duplicated(partable$unco))
     } else {
-        stop("argument `type' must be one of free, unco, or user")
+        stop("argument `type' must be one of free or user")
     }
 
     label[idx]
@@ -643,11 +690,24 @@ lav_partable_labels <- function(partable, group.equal="", group.partial="",
 getParameterLabels <- lav_partable_labels
 
 
-lav_partable_full <- function(partable=NULL, group=NULL) {
+lav_partable_full <- function(partable = NULL, group = NULL,
+                              strict.exo = FALSE,
+                              free = FALSE, start = FALSE) {
 
-    # meanstructure + number of groups
+    # check minimum requirements: lhs, op, rhs
+    stopifnot( !is.null(partable$lhs), 
+               !is.null(partable$op), 
+               !is.null(partable$rhs) )
+
+    # meanstructure
     meanstructure <- any(partable$op == "~1")
-    ngroups <- max(partable$group)
+
+    # number of groups
+    if(!is.null(partable$group)) {
+        ngroups <- max(partable$group)
+    } else {
+        ngroups <- 1L
+    }
 
     # extract `names' of various types of variables:
     lv.names     <- lav_partable_vnames(partable, type="lv",  group=group)   # latent variables
@@ -660,20 +720,50 @@ lav_partable_full <- function(partable=NULL, group=NULL) {
     lvov.names.y <- c(ov.names.y, lv.names.y)
     ov.names.ord <- lav_partable_vnames(partable, type="ov.ord", group=group)
 
+    # eqs.y
+    # eqs.y <- lav_partable_vnames(partable, type="eqs.y", group=group)
+    ov.names.ind <- lav_partable_vnames(partable, type="ov.ind", group=group)
 
     # 1 "=~"
     l.lhs <- r.rhs <- op <- character(0)
     l.lhs <- rep(lv.names, each=length(ov.names.nox))
     l.rhs <- rep(ov.names.nox, times=length(lv.names))
+
+    # remove factor ~ eqs.y combinations, if any
+    # because they also appear as a regression
+    #bad.idx <- which( l.lhs %in% lv.names &
+    #                  l.rhs %in% eqs.y)
+    #if(length(bad.idx) > 0L) {
+    #    l.lhs <- l.lhs[-bad.idx]
+    #    l.rhs <- l.rhs[-bad.idx]
+    #}
+
     l.op  <- rep("=~", length(l.lhs))
 
     # 2a. "~~" ov ## FIXME: ov.names.nox or ov.names??
     ov.lhs <- ov.rhs <- ov.op <- character(0)
-    nx <- length(ov.names)
+    #if(strict.exo) {
+        OV <- ov.names.nox
+    #} else {
+    #    OV <- ov.names
+    #}
+    nx <- length(OV)
     idx <- lower.tri(matrix(0, nx, nx), diag=TRUE)
-    ov.lhs <- rep(ov.names,  each=nx)[idx] # fill upper.tri
-    ov.rhs <- rep(ov.names, times=nx)[idx]
+    ov.lhs <- rep(OV,  each=nx)[idx] # fill upper.tri
+    ov.rhs <- rep(OV, times=nx)[idx]
     ov.op  <- rep("~~", length(ov.lhs))
+
+    # exo ~~
+    if(!strict.exo && length(ov.names.x) > 0L) {
+        OV <- ov.names.x
+        nx <- length(OV)
+        idx <- lower.tri(matrix(0, nx, nx), diag=TRUE)
+        more.lhs <- rep(OV,  each=nx)[idx] # fill upper.tri
+        more.rhs <- rep(OV, times=nx)[idx]
+        ov.lhs <- c(ov.lhs, more.lhs)
+        ov.rhs <- c(ov.rhs, more.rhs)
+        ov.op  <- c(ov.op,  rep("~~", length(more.lhs)))
+    }
 
     # 2b. "~~" lv
     lv.lhs <- lv.rhs <- lv.op <- character(0)
@@ -686,22 +776,46 @@ lav_partable_full <- function(partable=NULL, group=NULL) {
     # 3 regressions?
     r.lhs <- r.rhs <- r.op <- character(0)
     if(any(partable$op == "~")) {
-        # FIXME: better choices?
-        eqs.names <- unique( c(partable$lhs[ partable$op == "~" ],
-                               partable$rhs[ partable$op == "~" ]) )
-        r.lhs <- rep(eqs.names, each=length(eqs.names))
-        r.rhs <- rep(eqs.names, times=length(eqs.names))
+
+        eqs.names <- unique( c(partable$lhs[partable$op == "~"], 
+                               partable$rhs[partable$op == "~"]) )
+        if(strict.exo) {
+            x.idx <- which(eqs.names %in% ov.names.x)
+            if(length(x.idx) > 0L) {
+                eqs.y <- eqs.names[-x.idx]
+            }
+        } else {
+            eqs.y <- eqs.names
+        }
+        eqs.x <- eqs.names
+
+        r.lhs <- rep(eqs.y, each=length(eqs.x))
+        r.rhs <- rep(eqs.x, times=length(eqs.y))
+
         # remove self-arrows
         idx <- which(r.lhs == r.rhs)
         r.lhs <- r.lhs[-idx]
         r.rhs <- r.rhs[-idx]
+
+        # remove indicator ~ factor if they exist
+        bad.idx <- which(r.lhs %in% ov.names.ind &
+                         r.rhs %in% lv.names)
+        if(length(bad.idx) > 0L) {
+            r.lhs <- r.lhs[-bad.idx]
+            r.rhs <- r.rhs[-bad.idx]
+        }
+
         r.op <- rep("~", length(r.rhs))
     }
 
-    # 4. intercetps
+    # 4. intercepts
     int.lhs <- int.rhs <- int.op <- character(0)
     if(meanstructure) {
-        int.lhs <- c(ov.names, lv.names)
+        if(strict.exo) {
+            int.lhs <- c(ov.names.nox, lv.names)
+        } else {
+            int.lhs <- c(ov.names, lv.names)
+        }
         int.rhs <- rep("",   length(int.lhs))
         int.op  <- rep("~1", length(int.lhs))
     }
@@ -740,6 +854,16 @@ lav_partable_full <- function(partable=NULL, group=NULL) {
 
     LIST <- data.frame(lhs=lhs, op=op, rhs=rhs, group=group,
                        stringsAsFactors=FALSE)
+
+    if(free) {
+        LIST$free <- rep(0L, nrow(LIST))
+    }
+
+    if(start) {
+        LIST$start <- rep(0, nrow(LIST))
+    }
+
+    LIST
 }
 
 lav_partable_flat <- function(FLAT = NULL,
@@ -823,8 +947,11 @@ lav_partable_flat <- function(FLAT = NULL,
     lhs <- rhs <- character(0)
 
     # 1. THRESHOLDS (based on varTable)
+    #    NOTE: new in 0.5-18: ALWAYS include threshold parameters in partable,
+    #    but only free them if auto.th = TRUE
     nth <- 0L
-    if(auto.th && length(ov.names.ord2) > 0L) {
+    #if(auto.th && length(ov.names.ord2) > 0L) {
+    if(length(ov.names.ord2) > 0L) {
         for(o in ov.names.ord2) {
             nth  <- varTable$nlev[ varTable$name == o ] - 1L
             if(nth < 1L) next
@@ -974,7 +1101,7 @@ lav_partable_flat <- function(FLAT = NULL,
                 cat("[lavaan DEBUG] idx in DEFAULT: i = ", i, "\n"); print(DEFAULT[i,])
                cat("[lavaan DEBUG] flat.idx:"); print(flat.idx)
             }
-    }
+        }
         DEFAULT <- DEFAULT[-idx,]
     }
 
@@ -992,7 +1119,13 @@ lav_partable_flat <- function(FLAT = NULL,
     label   <- rep(character(1), length(lhs))
     exo     <- rep(0L, length(lhs))
 
-    # 0. if auto.var = FALSE, set the unspecified variances to zero
+    # 0a. if auto.th = FALSE, set fix the thresholds
+    if(!auto.th) {
+        th.idx <- which(op == "|" & user == 0L)
+        free[th.idx] <- 0L
+    }
+
+    # 0b. if auto.var = FALSE, set the unspecified variances to zero
     if(!auto.var) {
         var.idx <- which(op == "~~" &
                          lhs == rhs &
@@ -1216,7 +1349,8 @@ lav_partable_flat <- function(FLAT = NULL,
                         free        = free,
                         ustart      = ustart,
                         exo         = exo,
-                        label       = label,
+                        label       = label    ,
+                        # IF we add these, also change
                         eq.id       = rep(0L,  length(lhs)),
                         unco        = rep(0L,  length(lhs))
                    )
@@ -1225,3 +1359,28 @@ lav_partable_flat <- function(FLAT = NULL,
     LIST
 }
 
+lav_partable_matrixrep <- function(partable, target = NULL,
+                                       representation = "LISREL") {
+
+    if(is.null(target)) {
+        target <- partable
+    } 
+
+    if(representation == "LISREL") {
+        REP <- representation.LISREL(partable = partable, target = target,
+                                     extra = FALSE)
+    } else {
+        stop("only LISREL representation has been implemented")
+    }
+
+    if(is.data.frame(target)) {
+        target <- cbind(target, as.data.frame(REP, stringsAsFactors = FALSE))
+    } else {
+        target$mat <- REP$mat
+        target$row <- REP$row
+        target$col <- REP$col
+    }
+
+    target
+}
+    

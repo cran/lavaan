@@ -1,44 +1,60 @@
 # YR - 26 Nov 2013: generate partable for the unrestricted model
-lav_partable_unrestricted <- function(lavobject = NULL,
-                              ov.names=NULL, ov=NULL, 
-                              ov.names.x=NULL, sample.cov=NULL,
-                              meanstructure=FALSE, sample.mean=NULL,
-                              sample.th=NULL,
-                              fixed.x=TRUE) {
+lav_partable_unrestricted <- function(lavobject      = NULL,
+                                      lavdata        = NULL,
+                                      lavoptions     = NULL,
+                                      lavsamplestats = NULL,
+                                      # optional user-provided sample stats
+                                      sample.cov     = NULL,
+                                      sample.mean    = NULL,
+                                      sample.th      = NULL,
+                                      sample.th.idx  = NULL) {
 
     # grab everything from lavaan lavobject
     if(!is.null(lavobject)) {
         stopifnot(inherits(lavobject, "lavaan"))
 
-        OV.X <- lapply(as.list(1:lavobject@Data@ngroups),
-                       function(x) vnames(lavobject@ParTable, type="ov.x", x))
-        # what with fixed.x?
-        if(lavobject@Options$mimic %in% c("lavaan", "Mplus")) {
-            FIXED.X = lavobject@Model@fixed.x
-        } else if(lavobject@Options$mimic == "EQS") {
-            # always ignore fixed.x
-            OV.X = NULL
-            FIXED.X = FALSE
-        } else if(lavobject@Options$mimic == "LISREL") {
-            # always ignore fixed.x??? CHECKME!!
-            OV.X = NULL
-            FIXED.X = FALSE
-        }
+        lavdata <- lavobject@Data
+        lavoptions <- lavobject@Options
+        lavsamplestats <- lavobject@SampleStats
+    }
 
-        ov.names      = lavobject@Data@ov.names
-        ov            = lavobject@Data@ov
-        ov.names.x    = OV.X
-        sample.cov    = lavobject@SampleStats@cov
-        meanstructure = lavobject@Model@meanstructure
-        sample.mean   = lavobject@SampleStats@mean
-        sample.th     = lavobject@SampleStats@th
-        parameterization = lavobject@Options$parameterization
-        fixed.x       = FIXED.X
+    # if user-based moments are given, use these
+    if(is.null(sample.cov) && !is.null(lavsamplestats)) {
+        sample.cov <- lavsamplestats@cov
+    }
+    if(is.null(sample.mean) && !is.null(lavsamplestats)) {
+        sample.mean <- lavsamplestats@mean
+    }
+    if(is.null(sample.th) && !is.null(lavsamplestats)) {
+         sample.th <- lavsamplestats@th
+    }
+    if(is.null(sample.th.idx) && !is.null(lavsamplestats)) {
+         sample.th.idx <- lavsamplestats@th.idx
+    }
+
+    ov.names      = lavdata@ov.names
+    ov            = lavdata@ov
+    ov.names.x    = lavdata@ov.names.x
+    meanstructure = lavoptions$meanstructure
+
+    # what with fixed.x?
+    if(lavoptions$mimic %in% c("lavaan", "Mplus")) {
+        fixed.x = lavoptions$fixed.x
+    } else if(lavoptions$mimic == "EQS") {
+        # always ignore fixed.x
+        ov.names.x = NULL
+        fixed.x = FALSE
+    } else if(lavoptions$mimic == "LISREL") {
+        # always ignore fixed.x??? CHECKME!!
+        ov.names.x = NULL
+        fixed.x = FALSE
     }
 
     ngroups <- length(ov.names)
     ov.names.nox <- lapply(as.list(1:ngroups), function(g) 
                     ov.names[[g]][ !ov.names[[g]] %in% ov.names.x[[g]] ])
+
+
 
     lhs <- rhs <- op <- character(0)
     group <- free <- exo <- integer(0)
@@ -88,7 +104,7 @@ lav_partable_unrestricted <- function(lavobject = NULL,
             sample.var.idx <- match(OV[[g]], ov.names[[g]])
             COV <-  sample.cov[[g]][sample.var.idx, sample.var.idx]
             ### CHECK ME!!! upper tri??
-            ustart <- c(ustart, COV[upper.tri(COV, diag=FALSE)])
+            ustart <- c(ustart, COV[lower.tri(COV, diag=FALSE)])
         } else {
             ustart <- c(ustart, rep(as.numeric(NA), pstar))
         }
@@ -121,10 +137,14 @@ lav_partable_unrestricted <- function(lavobject = NULL,
                 group <- c(group, rep(g, nel))
                  free <- c(free, rep(1L, nel))
                   exo <- c(exo, rep(0L, nel))
-               #th.start <- rep(0, nel)
-               #th.start <- sample.th[[g]] ### FIXME:: ORDER??? ONLY ORD!!!
-               #ustart <- c(ustart, th.start)
-               ustart <- c(ustart, rep(as.numeric(NA), nel))
+
+                # starting values
+                if(!is.null(sample.th) && !is.null(sample.th.idx)) {
+                    th.start <- sample.th[[g]][ sample.th.idx[[g]] > 0L ]
+                    ustart <- c(ustart, th.start)
+                } else {
+                    ustart <- c(ustart, rep(as.numeric(NA), nel))
+                }
             }
         }
 
@@ -202,9 +222,9 @@ lav_partable_unrestricted <- function(lavobject = NULL,
                         free        = free,
                         ustart      = ustart,
                         exo         = exo,
-                        label       = rep("",  length(lhs)),
-                        eq.id       = rep(0L,  length(lhs)),
-                        unco        = free
+                        label       = rep("",  length(lhs))
+                        #eq.id       = rep(0L,  length(lhs)),
+                        #unco        = free
                    )
     LIST
 

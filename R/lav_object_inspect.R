@@ -45,9 +45,6 @@ lavInspect <- function(lavobject,
     if(what == "free") {
         lav_object_inspect_modelmatrices(lavobject, what = "free", type = "free",
             add.labels = add.labels, add.class = add.class)
-    } else if(what == "unco" || what == "unconstrained") {
-        lav_object_inspect_modelmatrices(lavobject, what = "free", type="unco",
-            add.labels = add.labels, add.class = add.class)
     } else if(what == "partable" || what == "user") {
         lav_object_inspect_modelmatrices(lavobject, what = "free", type="partable",
             add.labels = add.labels, add.class = add.class)
@@ -200,9 +197,14 @@ lavInspect <- function(lavobject,
         lav_object_inspect_empty_idx(lavobject,
             drop.list.single.group = drop.list.single.group)
 
-    #### convergence ####
+    #### convergence, meanstructure, categorical ####
     } else if(what == "converged") {
         lavobject@Fit@converged
+    } else if(what == "meanstructure") {
+        lavobject@Model@meanstructure
+    } else if(what == "categorical") {
+        lavobject@Model@categorical
+    
 
 
     #### wls.est - wls.obs - wls.v ####
@@ -221,23 +223,89 @@ lavInspect <- function(lavobject,
 
 
     #### NACOV samplestats ####
-    } else if(what == "gamma" || what == "sampstat.nacov") {
-        lav_object_inspect_sampstat_nacov(lavobject,
+    } else if(what == "gamma") {
+        lav_object_inspect_sampstat_gamma(lavobject,
             add.labels = add.labels, add.class = add.class,
             drop.list.single.group = drop.list.single.group)
 
 
-    #### Hessian, first.order ####
+    #### Hessian, information, first.order, vcov ####
     } else if(what == "hessian") {
         lav_object_inspect_hessian(lavobject,
             add.labels = add.labels, add.class = add.class)
-    } else if(what == "first.order") {
-        lav_object_inspect_firstorder(lavobject,
+
+    } else if(what == "information") {
+        lav_object_inspect_information(lavobject, information = "default",
+            augmented = FALSE, inverted = FALSE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "information.expected") {
+        lav_object_inspect_information(lavobject, information = "expected",
+            augmented = FALSE, inverted = FALSE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "information.observed") {
+        lav_object_inspect_information(lavobject, information = "observed",
+            augmented = FALSE, inverted = FALSE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "information.first.order" || what == "first.order") {
+        lav_object_inspect_information(lavobject, information = "first.order",
+            augmented = FALSE, inverted = FALSE,
             add.labels = add.labels, add.class = add.class)
 
-    
+    } else if(what == "augmented.information") {
+        lav_object_inspect_information(lavobject, information = "default",
+            augmented = TRUE, inverted = FALSE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "augmented.information.expected") {
+        lav_object_inspect_information(lavobject, information = "expected",
+            augmented = TRUE, inverted = FALSE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "augmented.information.observed") {
+        lav_object_inspect_information(lavobject, information = "observed",
+            augmented = TRUE, inverted = FALSE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "augmented.information.first.order" ||
+              what == "augmented.first.order") {
+        lav_object_inspect_information(lavobject, information = "first.order",
+            augmented = TRUE, inverted = FALSE,
+            add.labels = add.labels, add.class = add.class)
 
+    } else if(what == "inverted.information") {
+        lav_object_inspect_information(lavobject, information = "default",
+            augmented = TRUE, inverted = TRUE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "inverted.information.expected") {
+        lav_object_inspect_information(lavobject, information = "expected",
+            augmented = TRUE, inverted = TRUE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "inverted.information.observed") {
+        lav_object_inspect_information(lavobject, information = "observed",
+            augmented = TRUE, inverted = TRUE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "inverted.information.first.order" || 
+              what == "inverted.first.order") {
+        lav_object_inspect_information(lavobject, information = "first.order",
+            augmented = TRUE, inverted = TRUE,
+            add.labels = add.labels, add.class = add.class)
 
+    } else if(what == "vcov") {
+        lav_object_inspect_vcov(lavobject,
+            standardized = FALSE,
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "vcov.std.all") {
+        lav_object_inspect_vcov(lavobject,
+            standardized = TRUE, type = "std.all",
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "vcov.std.lv") {
+        lav_object_inspect_vcov(lavobject,
+            standardized = TRUE, type = "std.lv",
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "vcov.std.nox") {
+        lav_object_inspect_vcov(lavobject,
+            standardized = TRUE, type = "std.nox",
+            add.labels = add.labels, add.class = add.class)
+    } else if(what == "ugamma" || what == "ug" || what == "u.gamma") {
+        lav_object_inspect_UGamma(lavobject,
+            add.labels = add.labels, add.class = add.class)
 
 
     #### not found ####
@@ -300,13 +368,13 @@ lav_object_inspect_modelmatrices <- function(lavobject, what = "free",
         }
 
         if(what == "free") {
-            # fill in free/unco parameter counts
+            # fill in free parameter counts
             if(type == "free") {
                 m.el.idx <- lavobject@Model@m.free.idx[[mm]]
                 x.el.idx <- lavobject@Model@x.free.idx[[mm]]
-            } else if(type == "unco") {
-                m.el.idx <- lavobject@Model@m.unco.idx[[mm]]
-                x.el.idx <- lavobject@Model@x.unco.idx[[mm]]
+            #} else if(type == "unco") {
+            #    m.el.idx <- lavobject@Model@m.unco.idx[[mm]]
+            #    x.el.idx <- lavobject@Model@x.unco.idx[[mm]]
             } else if(type == "partable") {
                 m.el.idx <- lavobject@Model@m.user.idx[[mm]]
                 x.el.idx <- lavobject@Model@x.user.idx[[mm]]
@@ -742,7 +810,6 @@ lav_object_inspect_vy <- function(lavobject,
     #  - same as diag(Sigma.hat) if all Y are continuous)
     #  - 1.0 (or delta^2) if categorical
     #  - if also Gamma, cov.x is used (only if categorical)
-    # only for semTools?
 
     OUT <- computeVY(lavmodel = lavobject@Model, GLIST = NULL, 
                      lavsamplestats = lavobject@SampleStats)
@@ -751,7 +818,11 @@ lav_object_inspect_vy <- function(lavobject,
     # labels + class
     for(g in 1:G) {
         if(add.labels && length(OUT[[g]]) > 0L) {
-            names(OUT[[g]]) <- lavobject@pta$vnames$ov.nox[[g]]
+            if(lavobject@Model@categorical) {
+                 names(OUT[[g]]) <- lavobject@pta$vnames$ov.nox[[g]]
+            } else {
+                 names(OUT[[g]]) <- lavobject@pta$vnames$ov[[g]]
+            }
         }
         if(add.class) {
             class(OUT[[g]]) <- c("lavaan.vector", "numeric")
@@ -1007,34 +1078,16 @@ lav_object_inspect_wls_v <- function(lavobject,
 }
 
 
-lav_object_inspect_sampstat_nacov <- function(lavobject,
+lav_object_inspect_sampstat_gamma <- function(lavobject,
     add.labels = FALSE, add.class = FALSE, drop.list.single.group = FALSE) {
 
-    if(lavobject@Options$se == "robust.mlr")
-        stop("not done yet; FIX THIS!")
-
     # shortcuts
-    lavsamplestats = lavobject@SampleStats
-    estimator   = lavobject@Options$estimator
     G <- lavobject@Data@ngroups
 
-    OUT <- vector("list", length=lavsamplestats@ngroups)
-
-    if(estimator == "GLS"  ||
-       estimator == "WLS"  ||
-       estimator == "DWLS" ||
-       estimator == "ULS") {
-        OUT <- lavsamplestats@NACOV
-    } else if(estimator == "ML" && !lavobject@SampleStats@missing.flag) {
-        for(g in 1:lavsamplestats@ngroups) {
-            OUT[[g]] <- 
-                compute.Gamma(lavobject@Data@X[[g]], 
-                              meanstructure=lavobject@Options$meanstructure)
-            if(lavobject@Options$mimic == "Mplus") {
-                G11 <- ( lavsamplestats@cov[[g]] * (lavsamplestats@nobs[[g]]-1)/lavsamplestats@nobs[[g]] )
-                OUT[[g]][1:nrow(G11), 1:nrow(G11)] <- G11
-            }
-        }
+    if(!is.null(lavobject@SampleStats@NACOV[[1]])) {
+        OUT <- lavobject@SampleStats@NACOV
+    } else {
+        OUT <- lavGamma(lavobject)
     }
 
     if(G == 1L && drop.list.single.group) {
@@ -1054,20 +1107,17 @@ lav_object_inspect_sampstat_nacov <- function(lavobject,
 lav_object_inspect_hessian <- function(lavobject,
     add.labels = FALSE, add.class = FALSE) {
 
-    # lazy approach: take -1 the observed information
-    E <- computeObservedInformation(lavmodel       = lavobject@Model, 
-                                    lavsamplestats = lavobject@SampleStats,
-                                    lavdata        = lavobject@Data,
-                                    lavcache       = lavobject@Cache,
-                                    type           = "free",
-                                    estimator      = lavobject@Options$estimator,
-                                    group.weight   = TRUE)
-
-    OUT <- -E
+    OUT <- lav_model_hessian(lavmodel       = lavobject@Model, 
+                             lavsamplestats = lavobject@SampleStats,
+                             lavdata        = lavobject@Data,
+                             lavcache       = lavobject@Cache,
+                             estimator      = lavobject@Options$estimator,
+                             group.weight   = TRUE)
 
     # labels
     if(add.labels) {
-        # FIXME!
+        colnames(OUT) <- rownames(OUT) <-
+            lav_partable_labels(lavobject@ParTable, type="free")
     }
 
     # class
@@ -1078,26 +1128,69 @@ lav_object_inspect_hessian <- function(lavobject,
     OUT
 }
 
-lav_object_inspect_firstorder <- function(lavobject,
+lav_object_inspect_information <- function(lavobject, 
+    information = "default", augmented = FALSE, inverted = FALSE,
     add.labels = FALSE, add.class = FALSE) {
 
-    # lazy approach: get it from Nvcov.first.order
-    NACOV <- Nvcov.first.order(lavmodel       = lavobject@Model,
-                               lavsamplestats = lavobject@SampleStats,
-                               lavdata        = lavobject@Data,
-                               estimator      = lavobject@Options$estimator)
+    if(information == "default") {
+        information <- lavobject@Options$information
+    } 
 
-    B0 <- attr(NACOV, "B0")
-
-    if(lavobject@Options$estimator == "PML") {
-        B0 <- B0 * lavobject@SampleStats@ntotal
+    if(information == "expected" || information == "observed") {
+        OUT <- lav_model_information(lavmodel =  lavobject@Model,
+                  lavsamplestats = lavobject@SampleStats,
+                  lavdata        = lavobject@Data,
+                  estimator      = lavobject@Options$estimator,
+                  lavcache       = lavobject@Cache,
+                  information    = information,
+                  augmented      = augmented,
+                  inverted       = inverted)
+    } else if(information == "first.order") {
+        B0 <- lav_model_information_firstorder(lavmodel =  lavobject@Model,
+              lavsamplestats = lavobject@SampleStats,
+              lavdata        = lavobject@Data,
+              estimator      = lavobject@Options$estimator,
+              lavcache       = lavobject@Cache,
+              check.pd       = FALSE,
+              augmented      = augmented,
+              inverted       = inverted)
+        attr(B0, "B0.group") <- NULL
+        OUT <- B0
     }
-    
+
+    # labels
+    if(add.labels) {
+        colnames(OUT) <- rownames(OUT) <-
+            lav_partable_labels(lavobject@ParTable, type="free")
+    }
+
+    # class
+    if(add.class) {
+        class(OUT) <- c("lavaan.matrix.symmetric", "matrix")
+    }
+
+    OUT
+}
+
+# only to provide a direct function to the old 'getVariability()' function
+lav_object_inspect_firstorder <- function(lavobject, 
+    add.labels = FALSE, add.class = FALSE) {
+
+     B0 <- lav_model_information_firstorder(lavmodel =  lavobject@Model,
+              lavsamplestats = lavobject@SampleStats,
+              lavdata        = lavobject@Data,
+              estimator      = lavobject@Options$estimator,
+              lavcache       = lavobject@Cache,
+              check.pd       = FALSE,
+              augmented      = FALSE,
+              inverted       = FALSE)
+    attr(B0, "B0.group") <- NULL
     OUT <- B0
 
     # labels
     if(add.labels) {
-        # FIXME!
+        colnames(OUT) <- rownames(OUT) <-
+            lav_partable_labels(lavobject@ParTable, type="free")
     }
 
     # class
@@ -1108,3 +1201,96 @@ lav_object_inspect_firstorder <- function(lavobject,
     OUT
 }
 
+lav_object_inspect_vcov <- function(lavobject, standardized = FALSE,
+    type = "std.all", free.only = TRUE,
+    add.labels = FALSE, add.class = FALSE) {
+
+    if(lavobject@Fit@npar == 0) {
+        OUT <- matrix(0,0,0)
+    } else {
+        OUT <- lav_model_vcov(lavmodel       = lavobject@Model,
+                              lavsamplestats = lavobject@SampleStats,
+                              lavoptions     = lavobject@Options,
+                              lavdata        = lavobject@Data,
+                              lavpartable    = lavobject@Partable,
+                              lavcache       = lavobject@Cache
+                             )
+    }
+   
+    # strip attributes
+    attr(OUT, "E.inv") <- NULL
+    attr(OUT, "B0") <- NULL
+    attr(OUT, "B0.group") <- NULL
+    attr(OUT, "Delta") <- NULL
+    attr(OUT, "WLS.V") <- NULL
+    attr(OUT, "BOOT.COEF") <- NULL
+    attr(OUT, "BOOT.TEST") <- NULL
+
+    # standardized?
+    if(standardized) {
+        if(type == "std.lv") {
+            JAC <- try(lav_func_jacobian_complex(func = standardize.est.lv.x,
+                x = lavobject@Fit@x, lavobject = lavobject), silent = TRUE)
+            if(inherits(JAC, "try-error")) { # eg. pnorm()
+                JAC <- lav_func_jacobian_simple(func = standardize.est.lv.x,
+                    x = lavobject@Fit@x, lavobject=lavobject)
+            }
+        } else if(type == "std.all") {
+            JAC <- try(lav_func_jacobian_complex(func = standardize.est.all.x,
+                x = lavobject@Fit@x, lavobject = lavobject), silent = TRUE)
+            if(inherits(JAC, "try-error")) { # eg. pnorm()
+                JAC <- lav_func_jacobian_simple(func = standardize.est.all.x,
+                    x = lavobject@Fit@x, lavobject=lavobject)
+            }
+        } else if(type == "std.nox") {
+            JAC <- 
+                try(lav_func_jacobian_complex(func = standardize.est.all.nox.x,
+                    x = lavobject@Fit@x, lavobject = lavobject), silent = TRUE)
+            if(inherits(JAC, "try-error")) { # eg. pnorm()
+                JAC <- 
+                    lav_func_jacobian_simple(func = standardize.est.all.nox.x,
+                        x = lavobject@Fit@x, lavobject=lavobject)
+            }
+        }
+
+        # JAC contains *all* parameters in the parameter table
+        if(free.only) { 
+            free.idx <- which(lavobject@ParTable$free > 0L)
+            JAC <- JAC[free.idx,, drop = FALSE]
+        }
+        OUT <- JAC %*% OUT %*% t(JAC)
+    }
+
+    # labels
+    if(add.labels) {
+        colnames(OUT) <- rownames(OUT) <-
+            lav_partable_labels(lavobject@ParTable, type="free")
+    }
+
+    # class
+    if(add.class) {
+        class(OUT) <- c("lavaan.matrix.symmetric", "matrix")
+    }
+
+    OUT
+}
+
+lav_object_inspect_UGamma <- function(lavobject,
+    add.labels = FALSE, add.class = FALSE) {
+
+    out <- lav_test_satorra_bentler(lavobject     = lavobject,
+                                    return.ugamma = TRUE)
+    OUT <- out$UGamma
+
+    # labels
+    if(add.labels) {
+       # colnames(OUT) <- rownames(OUT) <-
+    }
+
+    # class
+    if(add.class) {
+        class(OUT) <- c("lavaan.matrix.symmetric", "matrix")
+    }
+
+    OUT
+}

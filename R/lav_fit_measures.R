@@ -164,7 +164,7 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
     # select 'default' fit measures
     if(length(fit.measures) == 1L) {
         if(fit.measures == "default") {
-            if(estimator == "ML") {
+            if(estimator == "ML" || estimator == "PML") {
                 fit.measures <- c(fit.always, fit.chisq, fit.baseline, 
                                   fit.cfi.tli, fit.logl, 
                                   fit.rmsea, fit.srmr)
@@ -233,48 +233,25 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
         # this is not strictly needed for ML, but it is for
         # GLS and WLS
         # and MLM and MLR to get the scaling factor(s)!
-        #if(estimator == "ML") {
-        #    if(object@SampleStats@missing.flag) {
-        #        do.fit <- TRUE
-        #    } else {
-        #        do.fit <- FALSE
-        #    }
-        #} else {
-        #    do.fit <- TRUE
-        #}
-
-        #OV.X <- character(0L)
-        #if(object@Options$mimic == "Mplus") 
-        #    OV.X <- vnames(object@ParTable, type="ov.x")
-
-        #indep.syntax <- 
-        #    syntax.independence.model(ov.names   = object@Data@ov.names,
-        #                              ov.names.x = OV.X,
-        #                              sample.cov = object@SampleStats@cov)
-        #fit.indep <- update(object, model = indep.syntax, 
-        #                    se = "none", do.fit=TRUE, 
-        #                    constraints = "",
-        #                    verbose = FALSE, warn = FALSE)
-        #OCALL <- as.list(object@call); OCALL$env <- NULL; OCALL[[1]] <- NULL
-        #NCALL <- list(model = indep.syntax, se = "none", do.fit = TRUE, 
-        #              constraints = "", verbose = FALSE, warn = FALSE)
-        #CALL  <- modifyList(OCALL, NCALL)
-        #cat("DEBUG!\n"); print(as.list(object@call$env)); cat("*******\n")
-        #fit.indep <- do.call("lavaan", args=CALL, envir=object@call$env)
-        #fit.indep <- do.call("lavaan", args=CALL)
-
         if (!is.null(baseline.model) & is(baseline.model, "lavaan")) {
             fit.indep <- baseline.model
         } else {
-            fit.indep <- independence.model.fit(object)
+            fit.indep <- try(lav_object_independence(object), silent = TRUE)
         }
                             
-        X2.null <- fit.indep@Fit@test[[1]]$stat
-        df.null <- fit.indep@Fit@test[[1]]$df
-        if(scaled) {
-            X2.null.scaled <- fit.indep@Fit@test[[2]]$stat
-            df.null.scaled <- fit.indep@Fit@test[[2]]$df
-        } 
+        if(inherits(fit.indep, "try-error")) {
+            X2.null <- df.null <- as.numeric(NA)
+            if(scaled) {
+                X2.null.scaled <- df.null.scaled <- as.numeric(NA)
+            }
+        } else {
+            X2.null <- fit.indep@Fit@test[[1]]$stat
+            df.null <- fit.indep@Fit@test[[1]]$df
+            if(scaled) {
+                X2.null.scaled <- fit.indep@Fit@test[[2]]$stat
+                df.null.scaled <- fit.indep@Fit@test[[2]]$df
+            } 
+        }
 
         # check for NAs
         if(is.na(X2) || is.na(df) || is.na(X2.null) || is.na(df.null)) {
@@ -398,9 +375,13 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
 
             # NFI - normed fit index (Bentler & Bonett, 1980)
             if("nfi" %in% fit.measures) {
-                t1 <- X2.null - X2
-                t2 <- X2.null
-                NFI <- t1/t2
+                if(df > 0) {
+                    t1 <- X2.null - X2
+                    t2 <- X2.null
+                    NFI <- t1/t2
+                } else {
+                    NFI <- 1
+                }
                 indices["nfi"] <- NFI
             }
             if("nfi.scaled" %in% fit.measures) {
@@ -590,7 +571,7 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
         } else if(df > 0) {
             if(scaled) {
                 d <- sum(object@Fit@test[[2]]$trace.UGamma)
-                if(d==0) d <- NA
+                if(is.na(d) || d==0) d <- NA
             } 
             if(object@Options$mimic %in% c("Mplus", "lavaan")) {
                 GG <- 0
@@ -645,10 +626,7 @@ fitMeasures <- fitmeasures <- function(object, fit.measures="all",
             df2 <- df
         } else {
             XX2 <- X2
-            if(test == "mean.var.adjusted") 
-                df2 <- df
-            else
-                df2 <- sum(object@Fit@test[[2]]$trace.UGamma)
+            df2 <- sum(object@Fit@test[[2]]$trace.UGamma)
         }
         lower.lambda <- function(lambda) {
             (pchisq(XX2, df=df2, ncp=lambda) - 0.95)

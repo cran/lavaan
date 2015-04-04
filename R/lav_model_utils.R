@@ -7,7 +7,6 @@ lav_model_get_parameters <- function(lavmodel = NULL, GLIST = NULL,
                                      type = "free", extra = TRUE) {
 
     # type == "free": only non-redundant free parameters (x)
-    # type == "unco": all free parameters (including constrained ones)
     # type == "user": all parameters listed in User model
 
     # state or final?
@@ -15,8 +14,8 @@ lav_model_get_parameters <- function(lavmodel = NULL, GLIST = NULL,
 
     if(type == "free") {
         N <- lavmodel@nx.free
-    } else if(type == "unco") {
-        N <- lavmodel@nx.unco
+    #} else if(type == "unco") {
+    #    N <- lavmodel@nx.unco
     } else if(type == "user") {
         N <- lavmodel@nx.user
     }
@@ -26,9 +25,9 @@ lav_model_get_parameters <- function(lavmodel = NULL, GLIST = NULL,
         if(type == "free") {
             m.idx <- lavmodel@m.free.idx[[mm]]
             x.idx <- lavmodel@x.free.idx[[mm]]
-        } else if(type == "unco") { 
-            m.idx <- lavmodel@m.unco.idx[[mm]]
-            x.idx <- lavmodel@x.unco.idx[[mm]]
+        #} else if(type == "unco") { 
+        #    m.idx <- lavmodel@m.unco.idx[[mm]]
+        #    x.idx <- lavmodel@x.unco.idx[[mm]]
         } else if(type == "user") {
             m.idx <- lavmodel@m.user.idx[[mm]]
             x.idx <- lavmodel@x.user.idx[[mm]]
@@ -109,7 +108,8 @@ lav_model_set_parameters <- function(lavmodel = NULL, x = NULL,
 # create a standalone GLIST, filled with (new) x values
 # (avoiding a copy of lavmodel)
 lav_model_x2GLIST <- function(lavmodel = NULL, x = NULL, 
-                              type = "free", setDelta = TRUE) {
+                              type = "free", setDelta = TRUE,
+                              m.el.idx = NULL, x.el.idx = NULL) {
 
     GLIST <- lavmodel@GLIST
     for(mm in 1:length(GLIST)) {
@@ -117,21 +117,25 @@ lav_model_x2GLIST <- function(lavmodel = NULL, x = NULL,
         if(nrow(GLIST[[mm]]) == 0L)
             next
         if(type == "free") {
-            m.el.idx <- lavmodel@m.free.idx[[mm]]
-            x.el.idx <- lavmodel@x.free.idx[[mm]]
+            M.EL.IDX <- lavmodel@m.free.idx[[mm]]
+            X.EL.IDX <- lavmodel@x.free.idx[[mm]]
         } else if(type == "full") {
             if(lavmodel@isSymmetric[mm]) {
                 N <- ncol(GLIST[[mm]])
-                m.el.idx <- vech.idx(N)
+                M.EL.IDX <- lav_matrix_vech_idx(N)
             } else {
-                m.el.idx <- seq_len(length(GLIST[[mm]]))
+                M.EL.IDX <- seq_len(length(GLIST[[mm]]))
             }
-            x.el.idx <- seq_len(length(m.el.idx))
-            if(mm > 1) x.el.idx <- x.el.idx + sum(lavmodel@mmSize[1:(mm-1)])
+            X.EL.IDX <- seq_len(length(m.el.idx))
+            if(mm > 1) X.EL.IDX <- X.EL.IDX + sum(lavmodel@mmSize[1:(mm-1)])
+        } else if(type == "custom") {
+            # nothing to do, m.el.idx and x.el.idx should be given
+            M.EL.IDX <- m.el.idx[[mm]]
+            X.EL.IDX <- x.el.idx[[mm]]
         }
 
         # assign
-        GLIST[[mm]][m.el.idx] <- x[x.el.idx]
+        GLIST[[mm]][M.EL.IDX] <- x[X.EL.IDX]
 
         # make symmetric (if full)
         if(type == "full" && lavmodel@isSymmetric[mm]) {

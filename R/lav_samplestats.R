@@ -127,7 +127,27 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         # FIXME: check dimension of NACOV!!
     }
 
+    # x.idx <- vector("list", length = ngroups)
     for(g in 1:ngroups) {
+
+        # x.idx
+        #### DEBUGG #####
+        # if(fixed.x && estimator =) {
+        #    x.idx[[g]] <- match(ov.names.x[[g]], ov.names[[g]])
+        #} else {
+        #    x.idx[[g]] <- integer(0L)
+        #}
+
+        # check nobs
+        if(nobs[[g]] < 2L) {
+            if(nobs[[g]] == 0L) {
+                stop("lavaan ERROR: data contains no observations", 
+                     ifelse(ngroups > 1L, paste(" in group ", g, sep=""), ""))
+            } else {
+            stop("lavaan ERROR: data contains only a single observation", 
+                     ifelse(ngroups > 1L, paste(" in group ", g, sep=""), ""))
+            }
+        }
 
         # group weight
         group.w[[g]] <- nobs[[g]] / sum(unlist(nobs))
@@ -139,7 +159,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         CAT <- list()
         if("ordered" %in% ov.types) {
             categorical <- TRUE
-            if(estimator %in% c("ML","PML","FML","MML","none")) {
+            if(estimator %in% c("ML","REML","PML","FML","MML","none")) {
                 WLS.W <- FALSE
             } else {
                 WLS.W <- TRUE
@@ -256,13 +276,13 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             TH[ th.idx[[g]] == 0 ] <- -1*TH[ th.idx[[g]] == 0 ]
 
             WLS.obs[[g]] <- c(TH,
-                              vec(CAT$SLOPES), # FIXME
+                              lav_matrix_vec(CAT$SLOPES), # FIXME
                               unlist(CAT$VAR[ov.types == "numeric"]),
-                              vech(CAT$COV, diagonal=FALSE))
+                              lav_matrix_vech(CAT$COV, diagonal=FALSE))
         } else if(!categorical && meanstructure) {
-            WLS.obs[[g]] <- c(mean[[g]], vech(cov[[g]]))
+            WLS.obs[[g]] <- c(mean[[g]], lav_matrix_vech(cov[[g]]))
         } else {
-            WLS.obs[[g]] <- vech(cov[[g]])
+            WLS.obs[[g]] <- lav_matrix_vech(cov[[g]])
         }
         if(group.w.free) {
             #group.w.last <- nobs[[ngroups]] / sum(unlist(nobs))
@@ -291,7 +311,10 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         # NACOV (=GAMMA)
         if(!NACOV.user) {
             if(estimator == "ML" && !missing.flag. && NACOV.compute) {
-                NACOV[[g]] <- compute.Gamma(X[[g]], meanstructure=meanstructure)
+                NACOV[[g]] <- 
+                    lav_samplestats_Gamma(X[[g]], 
+                                          # x.idx = x.idx[[g]],
+                                          meanstructure = meanstructure)
             } else if(estimator %in% c("WLS","DWLS","ULS")) {
                 if(!categorical) {
                     # sample size large enough?
@@ -307,9 +330,12 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                 nrow(X[[g]]), ") too small to compute Gamma", 
                                 txt)
                     }
-                    NACOV[[g]] <- compute.Gamma(X[[g]], 
-                                                meanstructure=meanstructure,
-                                                Mplus.WLS=(mimic=="Mplus"))
+                    NACOV[[g]] <- 
+                        lav_samplestats_Gamma(X[[g]], 
+                                              meanstructure = meanstructure,
+                                              # x.idx = x.idx[[g]],
+                                              # fixed.x always FALSE for now
+                                              Mplus.WLS = (mimic=="Mplus"))
                 } else { # categorical case
                     NACOV[[g]]  <- CAT$WLS.W  * (nobs[[g]] - 1L)
                 }
@@ -326,11 +352,11 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     if(mimic == "Mplus") { # is this a bug in Mplus?
                         V11 <- V11 * nobs[[g]]/(nobs[[g]]-1)
                     }
-                    V22 <- 0.5 * D.pre.post(icov[[g]] %x% icov[[g]])
+                    V22 <- 0.5 * lav_matrix_duplication_pre_post(icov[[g]] %x% icov[[g]])
                     WLS.V[[g]] <- bdiag(V11,V22)
                 } else {
                     WLS.V[[g]] <-
-                        0.5 * D.pre.post(icov[[g]] %x% icov[[g]])
+                        0.5 * lav_matrix_duplication_pre_post(icov[[g]] %x% icov[[g]])
                 }
             } else if(estimator == "ML") {
                 # no WLS.V here, since function of model-implied moments
@@ -618,9 +644,9 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
 
         # WLS.obs
         if(meanstructure) 
-            WLS.obs[[g]] <- c(mean[[g]], vech(cov[[g]]))
+            WLS.obs[[g]] <- c(mean[[g]], lav_matrix_vech(cov[[g]]))
         else
-            WLS.obs[[g]] <- vech(cov[[g]])
+            WLS.obs[[g]] <- lav_matrix_vech(cov[[g]])
         if(group.w.free) {
             WLS.obs[[g]] <- c(group.w[[g]], WLS.obs[[g]])
         }
@@ -639,11 +665,11 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                     if(mimic == "Mplus") { # is this a bug in Mplus?
                         V11 <- V11 * nobs[[g]]/(nobs[[g]]-1)
                     }
-                    V22 <- 0.5 * D.pre.post(icov[[g]] %x% icov[[g]])
+                    V22 <- 0.5 * lav_matrix_duplication_pre_post(icov[[g]] %x% icov[[g]])
                     WLS.V[[g]] <- bdiag(V11,V22)
                 } else {
                     WLS.V[[g]] <-
-                        0.5 * D.pre.post(icov[[g]] %x% icov[[g]])
+                        0.5 * lav_matrix_duplication_pre_post(icov[[g]] %x% icov[[g]])
                 }
             } else if(estimator == "ULS") {
                 WLS.V[[g]] <- diag(length(WLS.obs[[g]]))

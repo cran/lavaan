@@ -1,45 +1,80 @@
-standardize.est.lv.x <- function(x, object, partable=NULL, cov.std=TRUE) {
-    standardize.est.lv(object=object, partable=partable, est=x, cov.std=cov.std)
+standardize.est.lv.x <- function(x, lavobject, partable = NULL, cov.std = TRUE) {
+    # embed x in est
+    est <- lavobject@Fit@est
+    free.idx <- which(lavobject@ParTable$free > 0L)
+    stopifnot(length(x) == length(free.idx))
+    est[free.idx] <- x
+
+    # take care of setResidualElements...
+    lavmodel <- lav_model_set_parameters(lavmodel = lavobject@Model, x = x, 
+                                         estimator = lavobject@Options$estimator)
+    GLIST <- lavmodel@GLIST
+
+    standardize.est.lv(lavobject = lavobject, partable = partable, est = est, 
+                       GLIST = GLIST, cov.std = cov.std)
 }
 
-standardize.est.all.x <- function(x, object, partable=NULL, cov.std=TRUE) {
-    standardize.est.all(object=object, partable=partable, est=x, est.std=NULL,
-                        cov.std=cov.std)
+standardize.est.all.x <- function(x, lavobject, partable = NULL, cov.std = TRUE) {
+    # embed x in est
+    est <- lavobject@Fit@est
+    free.idx <- which(lavobject@ParTable$free > 0L)
+    stopifnot(length(x) == length(free.idx))
+    est[free.idx] <- x
+
+    # take care of setResidualElements...
+    lavmodel <- lav_model_set_parameters(lavmodel = lavobject@Model, x = x, 
+                                         estimator = lavobject@Options$estimator)
+    GLIST <- lavmodel@GLIST
+
+    standardize.est.all(lavobject = lavobject, partable = partable, est = est,
+                        est.std = NULL, GLIST = GLIST, cov.std = cov.std)
 }
 
-standardize.est.all.nox.x <- function(x, object, partable=NULL, cov.std=TRUE) {
-    standardize.est.all.nox(object=object, partable=partable, est=x, 
-                            est.std=NULL, cov.std=cov.std)
+standardize.est.all.nox.x <- function(x, lavobject, partable = NULL, cov.std = TRUE) {
+    # embed x in est
+    est <- lavobject@Fit@est
+    free.idx <- which(lavobject@ParTable$free > 0L)
+    stopifnot(length(x) == length(free.idx))
+    est[free.idx] <- x
+
+    # take care of setResidualElements...
+    lavmodel <- lav_model_set_parameters(lavmodel = lavobject@Model, x = x, 
+                                         estimator = lavobject@Options$estimator)
+    GLIST <- lavmodel@GLIST
+
+    standardize.est.all.nox(lavobject = lavobject, partable = partable, est = est, 
+                            est.std = NULL, GLIST = GLIST, cov.std = cov.std)
 }
 
-unstandardize.est.ov.x <- function(x, object) {
-    partable <- object@ParTable
+unstandardize.est.ov.x <- function(x, lavobject) {
+    partable <- lavobject@ParTable
     partable$ustart <- x
-    unstandardize.est.ov(partable=partable, ov.var=object@SampleStats@var, 
+    unstandardize.est.ov(partable=partable, ov.var=lavobject@SampleStats@var, 
                          cov.std=TRUE)
 }
 
-standardize.est.lv <- function(object, partable=NULL, est=NULL,
+standardize.est.lv <- function(lavobject, partable=NULL, est=NULL, GLIST=NULL,
                                cov.std = TRUE) {
 
-    if(is.null(partable)) partable <- object@ParTable
-    if(is.null(est))   est <- object@Fit@est
+    if(is.null(partable)) partable <- lavobject@ParTable
+    if(is.null(est))   est <- lavobject@Fit@est
+    if(is.null(GLIST)) GLIST <- lavobject@Model@GLIST
 
     out <- est; N <- length(est)
     stopifnot(N == length(partable$lhs))
 
-    GLIST <- object@Model@GLIST
-    nmat <- object@Model@nmat
+    nmat <- lavobject@Model@nmat
 
     # compute ETA
-    LV.ETA <- computeVETA(lavmodel       = object@Model, 
-                          lavsamplestats = object@SampleStats)
+    LV.ETA <- computeVETA(lavmodel       = lavobject@Model,
+                          GLIST          = GLIST,
+                          lavsamplestats = lavobject@SampleStats)
     
-    for(g in 1:object@Data@ngroups) {
+    for(g in 1:lavobject@Data@ngroups) {
 
-        ov.names <- vnames(object@ParTable, "ov", group=g) # not user, 
+        ov.names <- vnames(lavobject@ParTable, "ov", group=g) # not user, 
                                                        # which may be incomplete
-        lv.names <- vnames(object@ParTable, "lv", group=g)
+        lv.names <- vnames(lavobject@ParTable, "lv", group=g)
        
         # shortcut: no latents in this group, nothing to do
         if(length(lv.names) == 0L)
@@ -98,19 +133,50 @@ standardize.est.lv <- function(object, partable=NULL, est=NULL,
         out[rv.idx] <- ( out[rv.idx] / ETA[ match(partable$lhs[rv.idx], lv.names) ]
                                      / ETA[ match(partable$rhs[rv.idx], lv.names) ] )
 
-        # covariances
-        idx <- which(partable$op == "~~" & partable$rhs %in% lv.names &
-                     partable$lhs != partable$rhs &
-                     partable$group == g)
-        if(cov.std == FALSE) {
-            out[idx] <- ( out[idx] / ETA[ match(partable$lhs[idx], lv.names) ]
-                                   / ETA[ match(partable$rhs[idx], lv.names) ] )
-        } else {
-            RV   <- sqrt(est[rv.idx])
+        # covariances lv
+        # three types:
+        # - only lhs is LV (and fixed.x = FALSE)
+        # - only rhs is LV (and fixed.x = FALSE)
+        # - both lhs and rhs are LV (regular case)
+        if(cov.std) {
+            if(!is.complex(est[rv.idx])) {
+                RV <- sqrt(abs(est[rv.idx])) # abs in case of heywood cases
+            } else {
+                RV <- sqrt( est[rv.idx] )
+            }
             rv.names <- partable$lhs[rv.idx]
-            out[idx] <- ( out[idx] / RV[ match(partable$lhs[idx], rv.names) ]
-                                   / RV[ match(partable$rhs[idx], rv.names) ] )
         }
+
+        # left
+        idx.lhs <- which(partable$op == "~~" &
+                         partable$lhs %in% lv.names &
+                         partable$lhs != partable$rhs &
+                         partable$group == g)
+        if(length(idx.lhs) > 0L) {
+            if(cov.std == FALSE) {
+                out[idx.lhs] <- 
+                   (out[idx.lhs] / ETA[ match(partable$lhs[idx.lhs], lv.names)])
+            } else {
+                out[idx.lhs] <- 
+                   (out[idx.lhs] / RV[ match(partable$lhs[idx.lhs], rv.names)])
+            }
+        }
+
+        # right
+        idx.rhs <- which(partable$op == "~~" & 
+                         partable$rhs %in% lv.names &
+                         partable$lhs != partable$rhs &
+                         partable$group == g)
+        if(length(idx.rhs) > 0L) {
+            if(cov.std == FALSE) {
+                out[idx.rhs] <- 
+                    (out[idx.rhs] / ETA[ match(partable$rhs[idx.rhs],lv.names)])
+            } else {
+                out[idx.rhs] <- 
+                    (out[idx.rhs] / RV[ match(partable$rhs[idx.rhs], rv.names)])
+            }
+        }
+
 
         # 4a. "~1" ov
         #idx <- which(partable$op == "~1" & !(partable$lhs %in% lv.names) &
@@ -126,55 +192,56 @@ standardize.est.lv <- function(object, partable=NULL, est=NULL,
     idx <- which(partable$op == ":=")
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@def.function(x)
+        out[idx] <- lavobject@Model@def.function(x)
     }
 
     # 5b "=="
     idx <- which(partable$op == "==")
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@ceq.function(x)
+        out[idx] <- lavobject@Model@ceq.function(x)
     }
 
     # 5c. "<" or ">"
     idx <- which((partable$op == "<" | partable$op == ">"))
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@cin.function(x)
+        out[idx] <- lavobject@Model@cin.function(x)
     }
 
     out
 }
 
-standardize.est.all <- function(object, partable=NULL, est=NULL, est.std=NULL,
-                                cov.std = TRUE) {
+standardize.est.all <- function(lavobject, partable=NULL, est=NULL, est.std=NULL,
+                                GLIST = NULL, cov.std = TRUE) {
 
-    if(is.null(partable)) partable <- object@ParTable
-    if(is.null(est))   est <- object@Fit@est
+    if(is.null(partable)) partable <- lavobject@ParTable
+    if(is.null(est))   est <- lavobject@Fit@est
     if(is.null(est.std)) {
-        est.std <- standardize.est.lv(object, partable=partable, est=est)
-    } 
+        est.std <- standardize.est.lv(lavobject, partable = partable, est = est,
+                                      GLIST = GLIST, cov.std = cov.std)
+    }
+    if(is.null(GLIST)) GLIST <- lavobject@Model@GLIST
 
     out <- est.std; N <- length(est.std)
     stopifnot(N == length(partable$lhs))
 
-    GLIST <- object@Model@GLIST
+    VY <- computeVY(lavmodel = lavobject@Model,
+                    GLIST = GLIST,
+                    lavsamplestats = lavobject@SampleStats)
 
-    VY <- computeVY(lavmodel = object@Model, 
-                    lavsamplestats = object@SampleStats)
+    for(g in 1:lavobject@Data@ngroups) {
 
-    for(g in 1:object@Data@ngroups) {
-
-        ov.names <- vnames(object@ParTable, "ov", group=g) # not user
-        lv.names <- vnames(object@ParTable, "lv", group=g)
+        ov.names <- vnames(lavobject@ParTable, "ov", group=g) # not user
+        lv.names <- vnames(lavobject@ParTable, "lv", group=g)
 
         OV  <- sqrt(VY[[g]])
 
-        if(object@Model@categorical) {
+        if(lavobject@Model@categorical) {
             # extend OV with ov.names.x
-            ov.names.x <- vnames(object@ParTable, "ov.x", group=g)
+            ov.names.x <- vnames(lavobject@ParTable, "ov.x", group=g)
             ov.names <- c(ov.names, ov.names.x)
-            OV <- c(OV, sqrt(diag(object@SampleStats@cov.x[[g]])))
+            OV <- c(OV, sqrt(diag(lavobject@SampleStats@cov.x[[g]])))
         }
 
         # 1a. "=~" regular indicators
@@ -215,19 +282,47 @@ standardize.est.all <- function(object, partable=NULL, est=NULL, est.std=NULL,
         out[rv.idx] <- ( out[rv.idx] / OV[ match(partable$lhs[rv.idx], ov.names) ]
                                      / OV[ match(partable$rhs[rv.idx], ov.names) ] )
 
-        # covariances
-        idx <- which(partable$op == "~~" & !(partable$lhs %in% lv.names) &
-                     partable$lhs != partable$rhs &
-                     partable$group == g)
-        if(length(idx) > 0L) {
-            if(cov.std == FALSE) {
-                out[idx] <- ( out[idx] / OV[ match(partable$lhs[idx], ov.names) ]
-                                       / OV[ match(partable$rhs[idx], ov.names) ] )
+        # covariances ov
+        # three types:
+        # - only lhs is OV (and fixed.x = FALSE)
+        # - only rhs is OV (and fixed.x = FALSE)
+        # - both lhs and rhs are OV (regular case)
+        if(cov.std) {
+            if(!is.complex(est[rv.idx])) {
+                RV <- sqrt(abs(est[rv.idx]))
             } else {
-                RV   <- sqrt(est[rv.idx])
-                rv.names <- partable$lhs[rv.idx]
-                out[idx] <- ( out[idx] / RV[ match(partable$lhs[idx], rv.names) ]
-                                       / RV[ match(partable$rhs[idx], rv.names) ] )
+                RV <- sqrt( est[rv.idx] )
+            }
+            rv.names <- partable$lhs[rv.idx]
+        }
+
+        # left
+        idx.lhs <- which(partable$op == "~~" &
+                         !(partable$lhs %in% lv.names) &
+                         partable$lhs != partable$rhs &
+                         partable$group == g)
+        if(length(idx.lhs) > 0L) {
+            if(cov.std == FALSE) {
+                out[idx.lhs] <- 
+                   (out[idx.lhs] / OV[ match(partable$lhs[idx.lhs], ov.names)])
+            } else {
+                out[idx.lhs] <- 
+                   (out[idx.lhs] / RV[ match(partable$lhs[idx.lhs], rv.names)])
+            }
+        }
+
+        # right
+        idx.rhs <- which(partable$op == "~~" & 
+                         !(partable$rhs %in% lv.names) &
+                         partable$lhs != partable$rhs &
+                         partable$group == g)
+        if(length(idx.rhs) > 0L) {
+            if(cov.std == FALSE) {
+                out[idx.rhs] <- 
+                    (out[idx.rhs] / OV[ match(partable$rhs[idx.rhs], ov.names)])
+            } else {
+                out[idx.rhs] <- 
+                    (out[idx.rhs] / RV[ match(partable$rhs[idx.rhs], rv.names)])
             }
         }
 
@@ -259,58 +354,60 @@ standardize.est.all <- function(object, partable=NULL, est=NULL, est.std=NULL,
     idx <- which(partable$op == ":=")
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@def.function(x)
+        out[idx] <- lavobject@Model@def.function(x)
     }
 
     # 5b "=="
     idx <- which(partable$op == "==")
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@ceq.function(x)
+        out[idx] <- lavobject@Model@ceq.function(x)
     }
 
     # 5c. "<" or ">"
     idx <- which((partable$op == "<" | partable$op == ">"))
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@cin.function(x)
+        out[idx] <- lavobject@Model@cin.function(x)
     }
 
     out
 }
 
 
-standardize.est.all.nox <- function(object, partable=NULL, est=NULL, 
-                                    est.std=NULL, cov.std = TRUE) {
+standardize.est.all.nox <- function(lavobject, partable=NULL, est=NULL,
+                                    est.std=NULL, GLIST = NULL,
+                                    cov.std = TRUE) {
 
-    if(is.null(partable)) partable <- object@ParTable
-    if(is.null(est))   est <- object@Fit@est
+    if(is.null(partable)) partable <- lavobject@ParTable
+    if(is.null(est))   est <- lavobject@Fit@est
     if(is.null(est.std)) {
-        est.std <- standardize.est.lv(object, partable=partable, est=est)
-    } 
+        est.std <- standardize.est.lv(lavobject, partable = partable, est = est,
+                                      GLIST = GLIST, cov.std = cov.std)
+    }
+    if(is.null(GLIST)) GLIST <- lavobject@Model@GLIST
 
     out <- est.std; N <- length(est.std)
     stopifnot(N == length(partable$lhs))
 
-    GLIST <- object@Model@GLIST
+    VY <- computeVY(lavmodel       = lavobject@Model,
+                    GLIST          = GLIST,
+                    lavsamplestats = lavobject@SampleStats)
 
-    VY <- computeVY(lavmodel = object@Model, 
-                    lavsamplestats = object@SampleStats)
+    for(g in 1:lavobject@Data@ngroups) {
 
-    for(g in 1:object@Data@ngroups) {
-
-        ov.names     <- vnames(object@ParTable, "ov",     group=g) # not user
-        ov.names.x   <- vnames(object@ParTable, "ov.x",   group=g)
-        ov.names.nox <- vnames(object@ParTable, "ov.nox", group=g)
-        lv.names     <- vnames(object@ParTable, "lv",     group=g)
+        ov.names     <- vnames(lavobject@ParTable, "ov",     group=g) # not user
+        ov.names.x   <- vnames(lavobject@ParTable, "ov.x",   group=g)
+        ov.names.nox <- vnames(lavobject@ParTable, "ov.nox", group=g)
+        lv.names     <- vnames(lavobject@ParTable, "lv",     group=g)
 
         OV  <- sqrt(VY[[g]])
 
-        if(object@Model@categorical) {
+        if(lavobject@Model@categorical) {
             # extend OV with ov.names.x
-            ov.names.x <- vnames(object@ParTable, "ov.x", group=g)
+            ov.names.x <- vnames(lavobject@ParTable, "ov.x", group=g)
             ov.names <- c(ov.names, ov.names.x)
-            OV <- c(OV, sqrt(diag(object@SampleStats@cov.x[[g]])))
+            OV <- c(OV, sqrt(diag(lavobject@SampleStats@cov.x[[g]])))
         }
 
         # 1a. "=~" regular indicators
@@ -352,21 +449,49 @@ standardize.est.all.nox <- function(object, partable=NULL, est=NULL,
         out[rv.idx] <- ( out[rv.idx] / OV[ match(partable$lhs[rv.idx], ov.names) ]
                                      / OV[ match(partable$rhs[rv.idx], ov.names) ] )
 
-        # covariances
-        idx <- which(partable$op == "~~" & !(partable$lhs %in% lv.names) &
-                     !(partable$lhs %in% ov.names.x) &
-                     !(partable$rhs %in% ov.names.x) &
-                     partable$lhs != partable$rhs &
-                     partable$group == g)
-        if(length(idx) > 0L) {
-            if(cov.std == FALSE) {
-                out[idx] <- ( out[idx] / OV[ match(partable$lhs[idx], ov.names) ]
-                                       / OV[ match(partable$rhs[idx], ov.names) ] )
+        # covariances ov
+        # three types:
+        # - only lhs is OV (and fixed.x = FALSE)
+        # - only rhs is OV (and fixed.x = FALSE)
+        # - both lhs and rhs are OV (regular case)
+        if(cov.std) {
+            if(!is.complex(est[rv.idx])) {
+                RV <- sqrt(abs(est[rv.idx]))
             } else {
-                RV   <- sqrt(est[rv.idx])
-                rv.names <- partable$lhs[rv.idx]
-                out[idx] <- ( out[idx] / RV[ match(partable$lhs[idx], rv.names) ]
-                                       / RV[ match(partable$rhs[idx], rv.names) ] )
+                RV <- sqrt( est[rv.idx] )
+            }
+            rv.names <- partable$lhs[rv.idx]
+        }
+
+        # left
+        idx.lhs <- which(partable$op == "~~" &
+                         !(partable$lhs %in% lv.names) &
+                         !(partable$lhs %in% ov.names.x) &
+                         partable$lhs != partable$rhs &
+                         partable$group == g)
+        if(length(idx.lhs) > 0L) {
+            if(cov.std == FALSE) {
+                out[idx.lhs] <- 
+                   (out[idx.lhs] / OV[ match(partable$lhs[idx.lhs], ov.names)])
+            } else {
+                out[idx.lhs] <- 
+                   (out[idx.lhs] / RV[ match(partable$lhs[idx.lhs], rv.names)])
+            }
+        }
+
+        # right
+        idx.rhs <- which(partable$op == "~~" & 
+                         !(partable$rhs %in% lv.names) &
+                         !(partable$rhs %in% ov.names.x) &
+                         partable$lhs != partable$rhs &
+                         partable$group == g)
+        if(length(idx.rhs) > 0L) {
+            if(cov.std == FALSE) {
+                out[idx.rhs] <- 
+                    (out[idx.rhs] / OV[ match(partable$rhs[idx.rhs], ov.names)])
+            } else {
+                out[idx.rhs] <- 
+                    (out[idx.rhs] / RV[ match(partable$rhs[idx.rhs], rv.names)])
             }
         }
 
@@ -399,21 +524,21 @@ standardize.est.all.nox <- function(object, partable=NULL, est=NULL,
     idx <- which(partable$op == ":=")
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@def.function(x)
+        out[idx] <- lavobject@Model@def.function(x)
     }
 
     # 5b "=="
     idx <- which(partable$op == "==")
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@ceq.function(x)
+        out[idx] <- lavobject@Model@ceq.function(x)
     }
 
     # 5c. "<" or ">"
     idx <- which((partable$op == "<" | partable$op == ">"))
     if(length(idx) > 0L) {
         x <- out[ partable$free & !duplicated(partable$free) ]
-        out[idx] <- object@Model@cin.function(x)
+        out[idx] <- lavobject@Model@cin.function(x)
     }
 
     out
@@ -495,8 +620,11 @@ unstandardize.est.ov <- function(partable, ov.var=NULL, cov.std=TRUE) {
                 out[idx] <- ( out[idx] * OV[ match(partable$lhs[idx], ov.names) ]
                                        * OV[ match(partable$rhs[idx], ov.names) ] )
             } else {
-                # RV   <- sqrt(est[rv.idx])
-                RV   <- sqrt(out[rv.idx])
+                if(!is.complex(out[rv.idx])) {
+                    RV <- sqrt(abs(out[rv.idx]))
+                } else {
+                    RV <- sqrt( out[rv.idx] )
+                }
                 rv.names <- partable$lhs[rv.idx]
                 out[idx] <- ( out[idx] * RV[ match(partable$lhs[idx], rv.names) ]
                                        * RV[ match(partable$rhs[idx], rv.names) ] )

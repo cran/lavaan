@@ -174,7 +174,7 @@ lav_model_gradient_mml <- function(lavmodel    = NULL,
         }
 
         # again, compute yhat for this node (eta)
-        yhat <- computeYHATetax.LISREL(MLIST = MLIST, eXo = eXo,
+        yhat <- computeEYetax.LISREL(MLIST = MLIST, eXo = eXo,
                     ETA = eta, sample.mean = sample.mean,
                     ov.y.dummy.ov.idx = ov.y.dummy.ov.idx,
                     ov.x.dummy.ov.idx = ov.x.dummy.ov.idx,
@@ -236,7 +236,7 @@ lav_model_gradient_mml <- function(lavmodel    = NULL,
         
         if(length(num.idx) > 0L) {
             # THETA (num only)
-            dsigma2 <- sweep(0.5*PRE[,num.idx]^2, MARGIN=2, 
+            dsigma2 <- sweep(0.5*PRE[,num.idx]*PRE[,num.idx], MARGIN=2, 
                              STATS=1/(2*theta.var), FUN="-")
             dFYp.q <- dFYp.q + (dsigma2 %*% DD$theta)
 
