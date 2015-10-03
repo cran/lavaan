@@ -1,4 +1,4 @@
-# main user-visi ble cfa/sem/growth functions 
+# main user-visible cfa/sem/growth functions 
 #
 # initial version: YR 25/03/2009
 # added lavoptions YR 02/08/2010
@@ -434,11 +434,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         }
     }
 
-    # check for categorical
-    #if(lavmodel@categorical && lavoptions$se == "bootstrap") {
-    #    stop("lavaan ERROR: bootstrap not supported (yet) for categorical data")
-    #}
-
     if(!is.null(slotCache)) {
         lavcache <- slotCache
     } else {
@@ -679,6 +674,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 estimator = lavoptions$estimator)
         }
 
+        # store parameters in @ParTable$est
+        lavpartable$est <- lav_model_get_parameters(lavmodel = lavmodel,
+                                                    type = "user", extra = TRUE)
+
         if(!is.null(attr(x, "con.jac"))) 
             lavmodel@con.jac <- attr(x, "con.jac")
         if(!is.null(attr(x, "con.lambda")))
@@ -695,6 +694,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             lav_model_objective(lavmodel = lavmodel, 
                 lavsamplestats = lavsamplestats, lavdata = lavdata, 
                 lavcache = lavcache, estimator = lavoptions$estimator)
+
+        lavpartable$est <- lavpartable$start
     }
 
     # should we fake/force convergence? (eg. to enforce the
@@ -703,6 +704,26 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
        control$optim.force.converged) {
         attr(x, "converged") <- TRUE
     }
+
+    # store optimization info in lavoptim
+    lavoptim <- list()
+    lavoptim$iterations <- attr(x, "iterations")
+    lavoptim$converged  <- attr(x, "converged")
+    fx.copy <- fx <- attr(x, "fx"); attributes(fx) <- NULL
+    lavoptim$fx         <- fx
+    lavoptim$fx.group   <- attr(fx.copy, "fx.group")
+    if(!is.null(attr(fx.copy, "logl.group"))) {
+        lavoptim$logl.group <- attr(fx.copy, "logl.group")
+        lavoptim$logl       <- sum(lavoptim$logl.group)
+    } else {
+        lavoptim$logl.group <- as.numeric(NA)
+        lavoptim$logl       <- as.numeric(NA)
+    }
+    lavoptim$control        <- attr(x, "control")
+
+    # compute/store some model-implied statistics
+    lavimplied <- lav_model_implied(lavmodel)
+
     timing$Estimate <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
@@ -719,6 +740,27 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                lavcache        = lavcache)
         if(verbose) cat(" done.\n")
     }
+
+    # extract bootstrap results (if any)
+    if(!is.null(attr(VCOV, "BOOT.COEF"))) {
+        lavboot <- list()
+        lavboot$coef <- attr(VCOV, "BOOT.COEF")
+    } else {
+        lavboot <- list()  
+    }
+
+    # store VCOV in vcov
+    # strip all attributes but 'dim'
+    tmp.attr <- attributes(VCOV)
+    VCOV1 <- VCOV
+    attributes(VCOV1) <- tmp.attr["dim"]
+    lavvcov <- list(vcov = VCOV1)
+
+    # store se in partable
+    SE <- lav_model_vcov_se(lavmodel = lavmodel, lavpartable = lavpartable,
+                            VCOV = VCOV, BOOT = lavboot$coef)
+    lavpartable$se <- SE
+
     timing$VCOV <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
@@ -747,6 +789,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                      stat.group=rep(NA, lavdata@ngroups), df=NA, 
                      refdistr="unknown", pvalue=NA))
     }
+
+    # store test in lavtest
+    lavtest <- TEST
+
     timing$TEST <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
@@ -757,45 +803,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                             VCOV        = VCOV,
                             TEST        = TEST)
     timing$total <- (proc.time()[3] - start.time0)
-
-    # 9b. post-fitting checks
-    if(attr(x, "converged")) { # only if estimation was successful
-        # 1. check for Heywood cases, negative (residual) variances, ...
-        var.idx <- which(lavpartable$op == "~~" &
-                         #!lavpartable$lhs %in% unlist(lavpta$vnames$ov.ord) &
-                         lavpartable$lhs == lavpartable$rhs)
-        if(length(var.idx) > 0L && any(lavfit@est[var.idx] < 0.0))
-            warning("lavaan WARNING: some estimated variances are negative")
-        
-        # 2. is cov.lv (PSI) positive definite?
-        if(length(vnames(lavpartable, type="lv.regular")) > 0L) {
-            ETA <- computeVETA(lavmodel, lavsamplestats = lavsamplestats)
-            for(g in 1:lavdata@ngroups) {
-                txt.group <- ifelse(lavdata@ngroups > 1L,
-                                    paste("in group", g, ".", sep=""), "")
-                eigvals <- eigen(ETA[[g]], symmetric=TRUE, 
-                                 only.values=TRUE)$values
-                if(any(eigvals < -1 * .Machine$double.eps^(3/4)))
-                    warning("lavaan WARNING: covariance matrix of latent variables is not positive definite;", txt.group, " use inspect(fit,\"cov.lv\") to investigate.")
-            }
-        }
-
-        # 3. is THETA positive definite (but only for numeric variables)
-        THETA <- computeTHETA(lavmodel)
-        for(g in 1:lavdata@ngroups) { 
-                num.idx <- lavmodel@num.idx[[g]]
-                if(length(num.idx) > 0L) {
-                    txt.group <- ifelse(lavdata@ngroups > 1L,
-                                        paste("in group", g, ".", sep=""), "")
-                    eigvals <- eigen(THETA[[g]][num.idx,num.idx,drop=FALSE], 
-                                     symmetric=TRUE,
-                                     only.values=TRUE)$values
-                    if(any(eigvals < -1 * .Machine$double.eps^(3/4))) {
-                        warning("lavaan WARNING: observed variable error term matrix (theta) is not positive definite;", txt.group, " use inspect(fit,\"theta\") to investigate.")
-                    }
-                }
-        }
-    }
 
     # 10. construct lavaan object
     lavaan <- new("lavaan",
@@ -808,8 +815,19 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                   SampleStats  = lavsamplestats,      # S4 class
                   Model        = lavmodel,            # S4 class
                   Cache        = lavcache,            # list
-                  Fit          = lavfit               # S4 class
+                  Fit          = lavfit,              # S4 class
+                  boot         = lavboot,             # list
+                  optim        = lavoptim,            # list
+                  implied      = lavimplied,          # list
+                  vcov         = lavvcov,             # list
+                  test         = lavtest,             # list
+                  external     = list()               # empty list
                  )
+
+    # post-fitting check
+    if(attr(x, "converged")) {
+        lavInspect(lavaan, "post.check")
+    }
 
     lavaan
 }

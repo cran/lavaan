@@ -279,8 +279,57 @@ function(object) {
 })
 
 setMethod("summary", "lavaan",
-function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE, 
-         rsquare=FALSE, std.nox=FALSE, modindices=FALSE) {
+function(object, header       = TRUE,
+                 fit.measures = FALSE, 
+                 estimates    = TRUE,
+                 ci           = FALSE, 
+                 standardized = FALSE,
+                 rsquare      = FALSE, 
+                 std.nox      = FALSE, 
+                 modindices   = FALSE, 
+                 nd = 3L) {
+
+    if(std.nox) standardized <- TRUE
+
+    # print the 'short' summary
+    if(header) {
+        short.summary(object)
+    }
+
+    # only if requested, the fit measures
+    if(fit.measures) {
+        if(object@Options$test == "none") {
+            warning("lavaan WARNING: fit measures not available if test = \"none\"\n\n")
+        } else if(object@Fit@npar > 0L && !object@Fit@converged) {
+            warning("lavaan WARNING: fit measures not available if model did not converge\n\n")
+        } else {
+            print.fit.measures( fitMeasures(object, fit.measures="default") )
+        }
+    }
+
+    if(estimates) {
+        PE <- parameterEstimates(object, ci = ci, standardized = standardized,
+                                 rsquare = rsquare,
+                                 remove.eq = FALSE, remove.system.eq = TRUE,
+                                 remove.ineq = FALSE, remove.def = FALSE, 
+                                 add.attributes = TRUE)
+        if(standardized && std.nox) {
+            PE$std.all <- PE$std.nox
+        }
+        print(PE, nd = nd)
+    }
+
+    # modification indices?
+    if(modindices) {
+        cat("Modification Indices:\n\n")
+        print( modificationIndices(object, standardized=TRUE) )
+    }
+})
+
+# old summary (<0.5-19)
+summary2 <- function(object, estimates=TRUE, fit.measures=FALSE, 
+                     standardized=FALSE, 
+                     rsquare=FALSE, std.nox=FALSE, modindices=FALSE) {
 
     if(std.nox) standardized <- TRUE
 
@@ -315,10 +364,10 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
     cat(t0.txt, t1.txt, "\n", sep="")
     if(object@Options$se == "bootstrap") {
         t0.txt <- sprintf("  %-40s", "Number of requested bootstrap draws")
-        t1.txt <- sprintf("  %10i", object@Options$boot)
+        t1.txt <- sprintf("  %10i", object@Options$bootstrap)
         cat(t0.txt, t1.txt, "\n", sep="")
         t0.txt <- sprintf("  %-40s", "Number of successful bootstrap draws")
-        t1.txt <- sprintf("  %10i", nrow(attr(object@Fit@est, "BOOT.COEF")))
+        t1.txt <- sprintf("  %10i", NROW(object@boot$coef))
         cat(t0.txt, t1.txt, "\n", sep="")
     }
     cat("\n")
@@ -363,8 +412,8 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
         cat(txt)
     }
 
-    est <- object@Fit@est
-    se  <- object@Fit@se
+    est <- lav_object_inspect_est(object)
+    se  <- lav_object_inspect_se(object)
     if(rsquare || standardized) {
         est.std    <- standardize.est.lv(object)
         if(std.nox) {
@@ -661,7 +710,7 @@ function(object, estimates=TRUE, fit.measures=FALSE, standardized=FALSE,
         print( modificationIndices(object, standardized=TRUE) )
     }
 
-})
+}
 
 
 
@@ -679,7 +728,8 @@ function(object, type="free", labels=TRUE) {
     } else {
         stop("argument `type' must be one of free or user")
     }
-    cof <- object@Fit@est[idx]
+    EST <- lav_object_inspect_est(object)
+    cof <- EST[idx]
   
     # labels?
     if(labels) names(cof) <- lav_partable_labels(object@ParTable, type=type)
@@ -693,15 +743,25 @@ function(object, type="free", labels=TRUE) {
 standardizedSolution <- standardizedsolution <- function(object,
                                                          type = "std.all",
                                                          se = TRUE,
+                                                         zstat = TRUE,
+                                                         pvalue = TRUE,
                                                          remove.eq = TRUE,
                                                          remove.ineq = TRUE,
                                                          remove.def = FALSE) {
 
     stopifnot(type %in% c("std.all", "std.lv", "std.nox"))
 
-    LIST <- inspect(object, "list")
-    free.idx <- which(LIST$free > 0L)
-    LIST <- LIST[,c("lhs", "op", "rhs", "group")]
+    # no zstat + pvalue if estimator is Bayes
+    if(object@Options$estimator == "Bayes") {
+        zstat <- pvalue <- FALSE
+    }
+
+    PARTABLE <- inspect(object, "list")
+    free.idx <- which(PARTABLE$free > 0L)
+    LIST <- PARTABLE[,c("lhs", "op", "rhs")]
+    if(!is.null(PARTABLE$group)) {
+        LIST$group <- PARTABLE$group
+    }
 
     # add std and std.all columns
     if(type == "std.lv") {
@@ -720,8 +780,12 @@ standardizedSolution <- standardizedsolution <- function(object,
                                             add.class = FALSE))
         if(inherits(VCOV, "try-error")) {
             LIST$se <- rep(NA, length(LIST$lhs))
-            LIST$z  <- rep(NA, length(LIST$lhs))
-            LIST$pvalue <- rep(NA, length(LIST$lhs))
+            if(zstat) {
+                LIST$z  <- rep(NA, length(LIST$lhs))
+            }
+            if(pvalue) {
+                 LIST$pvalue <- rep(NA, length(LIST$lhs))
+            }
         } else {
             tmp <- diag(VCOV)
             # catch negative values
@@ -739,9 +803,13 @@ standardizedSolution <- standardizedsolution <- function(object,
             LIST$se <- tmp
  
             # add 'z' column
-            tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
-            LIST$z <- LIST$est.std / tmp.se
-            LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
+            if(zstat) {
+                 tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
+                 LIST$z <- LIST$est.std / tmp.se
+            }
+            if(zstat && pvalue) {
+                 LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
+            }
         }
     }
 
@@ -775,15 +843,20 @@ standardizedSolution <- standardizedsolution <- function(object,
     LIST
 }
 
-parameterEstimates <- parameterestimates <- function(object, 
+parameterEstimates <- parameterestimates <- function(object,
+                                                     zstat = TRUE,
+                                                     pvalue = TRUE,
                                                      ci = TRUE, 
                                                      level = 0.95, 
                                                      boot.ci.type = "perc",
                                                      standardized = FALSE, 
                                                      fmi = "default",
+                                                     remove.system.eq = TRUE,
                                                      remove.eq = TRUE,
                                                      remove.ineq = TRUE,
-                                                     remove.def = FALSE) {
+                                                     remove.def = FALSE,
+                                                     rsquare = FALSE,
+                                                     add.attributes = FALSE) {
 
     # fmi or not
     FMI <- fmi
@@ -791,30 +864,65 @@ parameterEstimates <- parameterestimates <- function(object,
         if(object@SampleStats@missing.flag &&
            object@Fit@converged &&
            object@Options$estimator == "ML" &&
-           object@Options$se == "standard")
+           object@Options$se == "standard") {
             FMI <- TRUE
-        else
+        } else {
             FMI <- FALSE
+        }
     }
     if(FMI && object@Options$se != "standard") {
         warning("lavaan WARNING: fmi only available if se=\"standard\"")
         FMI <- FALSE
     }
 
-    LIST <- as.data.frame(object@ParTable, stringsAsFactors = FALSE)
-    LIST <- LIST[,c("lhs", "op", "rhs", "group", "label")]
-    # add est and se column
-    est <- object@Fit@est
-    BOOT <- attr(est, "BOOT.COEF")
-    attributes(est) <- NULL
-    LIST$est <- est
-
-    if(object@Options$se != "none") {
-        LIST$se  <- object@Fit@se
-        tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
-        LIST$z <- LIST$est / tmp.se
-        LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
+    # no zstat + pvalue if estimator is Bayes
+    if(object@Options$estimator == "Bayes") {
+        zstat <- pvalue <- FALSE
     }
+
+    PARTABLE <- as.data.frame(object@ParTable, stringsAsFactors = FALSE)
+    LIST <- PARTABLE[,c("lhs", "op", "rhs")]
+    if(!is.null(PARTABLE$user)) {
+        LIST$user <- PARTABLE$user
+    }
+    if(!is.null(PARTABLE$group)) {
+        LIST$group <- PARTABLE$group
+    } else {
+        LIST$group <- rep(1L, length(LIST$lhs))
+    }
+    if(!is.null(PARTABLE$label)) {
+        LIST$label <- PARTABLE$label
+    } else {
+        LIST$label <- rep("", length(LIST$lhs))
+    }
+    if(!is.null(PARTABLE$exo)) {
+        LIST$exo <- PARTABLE$exo
+    } else {
+        LIST$exo <- rep(0L, length(LIST$lhs))
+    }
+    if(!is.null(PARTABLE$est)) {
+        LIST$est <- PARTABLE$est
+    } else {
+        LIST$est <- lav_model_get_parameters(object@Model, type = "user",
+                                             extra = TRUE)    
+    }
+
+
+    # add se, zstat, pvalue
+    if(object@Options$se != "none") {
+        LIST$se <- lav_object_inspect_se(object)
+        tmp.se <- ifelse( LIST$se == 0.0, NA, LIST$se)
+        if(zstat) { 
+            LIST$z <- LIST$est / tmp.se
+            if(pvalue) {
+                LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
+            }
+        }
+    }
+
+    # extract bootstrap data (if any)
+    BOOT <- lav_object_inspect_boot(object)
+    bootstrap.successful <- NROW(BOOT) # should be zero if NULL
 
     # confidence interval
     if(object@Options$se != "none" && ci) {
@@ -957,11 +1065,21 @@ parameterEstimates <- parameterestimates <- function(object,
         LIST$ci.lower <- ci[,1]; LIST$ci.upper <- ci[,2]    
     }
 
-    # add std and std.all columns
+    # standardized estimates?
     if(standardized) {
         LIST$std.lv  <- standardize.est.lv(object)
         LIST$std.all <- standardize.est.all(object, est.std=LIST$est.std)
         LIST$std.nox <- standardize.est.all.nox(object, est.std=LIST$est.std)
+    }
+
+    # rsquare?
+    if(rsquare) {
+        r2 <- lavTech(object, "rsquare", add.labels = TRUE)
+        NAMES <- unlist(lapply(r2, names)); nel <- length(NAMES)
+        R2 <- data.frame( lhs = NAMES, op = rep("r2", nel), rhs = NAMES,
+                          group = rep(1:length(r2), sapply(r2, length)),
+                          est = unlist(r2), stringsAsFactors = FALSE )
+        LIST <- lav_partable_merge(pt1 = LIST, pt2 = R2, warn = FALSE)
     }
 
     # fractional missing information (if estimator="fiml")
@@ -989,7 +1107,15 @@ parameterEstimates <- parameterestimates <- function(object,
                         sample.cov   = COV,
                         sample.mean  = MEAN,
                         sample.nobs  = object@Data@nobs)
-        SE.step2 <- ifelse(step2@Fit@se == 0.0, as.numeric(NA), step2@Fit@se)
+        SE2 <- lav_object_inspect_se(step2)
+        SE.step2 <- ifelse(SE2 == 0.0, as.numeric(NA), SE2)
+        if(rsquare) {
+            # add additional elements, since LIST$se is now longer
+            r2.idx <- which(LIST$op == "r2")
+            if(length(r2.idx) > 0L) {
+                SE.step2 <- c(SE.step2, rep(as.numeric(NA), length(r2.idx)))
+            }
+        }
         LIST$fmi <- 1-(SE.step2*SE.step2/(SE.orig*SE.orig))
     }
 
@@ -1001,7 +1127,13 @@ parameterEstimates <- parameterestimates <- function(object,
 
     # remove == rows?
     if(remove.eq) {
-        eq.idx <- which(LIST$op == "==")
+        eq.idx <- which(LIST$op == "==" & LIST$user == 1L)
+        if(length(eq.idx) > 0L) {
+            LIST <- LIST[-eq.idx,]
+        }
+    }
+    if(remove.system.eq) {
+        eq.idx <- which(LIST$op == "==" & LIST$user != 1L)
         if(length(eq.idx) > 0L) {
             LIST <- LIST[-eq.idx,]
         }
@@ -1021,7 +1153,23 @@ parameterEstimates <- parameterestimates <- function(object,
         }
     }
 
-    class(LIST) <- c("lavaan.data.frame", "data.frame")
+    # remove LIST$user
+    LIST$user <- NULL
+
+    if(add.attributes) {
+        class(LIST) <- c("lavaan.parameterEstimates", "lavaan.data.frame",
+                         "data.frame")
+        attr(LIST, "information") <- object@Options$information
+        attr(LIST, "se") <- object@Options$se
+        attr(LIST, "group.label") <- object@Data@group.label
+        attr(LIST, "bootstrap") <- object@Options$bootstrap
+        attr(LIST, "bootstrap.successful") <- bootstrap.successful
+        # FIXME: add more!!
+    } else {
+        LIST$exo <- NULL
+        class(LIST) <- c("lavaan.data.frame", "data.frame")
+    }
+
     LIST
 }
 
@@ -1031,36 +1179,6 @@ parameterTable <- parametertable <- parTable <- partable <-
     # convert to data.frame
     out <- as.data.frame(object@ParTable, stringsAsFactors = FALSE)
 
-    # only to trick semTools
-    SYS <- as.character(sys.calls())
-    if(any(grepl("singleParamTest", SYS))) {
-        remove.auto.eq = TRUE
-        fake.eq.free = TRUE
-    } else {
-        remove.auto.eq <- FALSE
-        fake.eq.free <- FALSE
-    }
-    
-    # remove 'auto' equality constraints
-    # only as a temporary measure (for semTools)
-    if(remove.auto.eq) {
-        auto.eq <- which(out$user == 2L & out$op == "==")
-        if(length(auto.eq) > 0L) {
-            out <- out[-auto.eq,]    
-        }
-    }
-
-    # create the illusion that free column reflects simple equality
-    # constraints; only as a temporary measure (for semTools)
-    if(fake.eq.free) {
-        dup.label.idx <- which(nchar(out$label) > 0L & duplicated(out$label))
-        if(length(dup.label.idx) > 0L) {
-            out$free[ dup.label.idx ] <- 0L
-            non.zero.idx <- which(out$free > 0L)
-            out$free[non.zero.idx] <- seq_along(non.zero.idx)
-        }
-    }
-    
     class(out) <- c("lavaan.data.frame", "data.frame")
     out
 }

@@ -1,25 +1,37 @@
 # only when we have src code
 # useDynLib("lavaan")
 
-importFrom("stats", 
-           coef,
-           residuals, resid,
-           fitted.values, fitted,
-           predict,
-           update,
-           anova,
-           vcov)
-importFrom("graphics",
-           plot)
-importFrom("methods",
-           show)
+importFrom("graphics", 
+           "abline", "axis", "box", "hist", "pairs", "par",
+           # generics
+           "plot")
+
+importFrom("methods", 
+           "is", "new", "slot",
+           # generics,
+
+           "show")
+importFrom("stats", "as.formula", "complete.cases", "cor", "cov", "cov2cor",
+           "dnorm", "lm.fit", "na.omit", "nlminb", "optim", "pchisq", 
+           "plogis", "pnorm", "qchisq", "qnorm", "quantile", "rnorm", "runif", 
+           "sd", "terms", "uniroot", "var", "weighted.mean",
+           # generics
+           "coef", "residuals", "resid", "fitted.values", "fitted",
+           "predict", "update", "anova", "vcov")
+
+importFrom("utils", 
+           "combn", "modifyList", "packageDescription", "read.table",
+           "str", "write.table")
+
 importFrom("quadprog",
-           solve.QP)
+           "solve.QP")
+
 importFrom("mnormt",
-           dmnorm,
-           sadmvn)
+           "dmnorm",
+           "sadmvn")
+
 importFrom("pbivnorm",
-           pbivnorm)
+           "pbivnorm")
 
 # AIC and friends...
 if(getRversion() >= "2.13.0") {
@@ -55,7 +67,7 @@ export("lavaan", "cfa", "sem", "growth",
        "lavTables", 
        "lavTablesFitCp", "lavTablesFitCf", "lavTablesFitCm",
        "lavExport",
-       "lavTestLRT", "lavTestWald", # "lavTestScore",
+       "lavTestLRT", "lavTestWald", "lavTestScore",
        "lavMatrixRepresentation",
        "mplus2lavaan",
        #"prelav",
@@ -110,6 +122,9 @@ export("lavaan", "cfa", "sem", "growth",
        "lav_partable_df",
        "lav_partable_labels",
        "lav_partable_from_lm",
+       "lav_partable_complete",
+       "lav_partable_attributes",
+       "lav_partable_merge",
 
        # lav_constraints
        "lav_constraints_parse",
@@ -119,6 +134,12 @@ export("lavaan", "cfa", "sem", "growth",
        "lav_func_gradient_simple",
        "lav_func_jacobian_complex",
        "lav_func_jacobian_simple",    # used by semTools!
+
+       # lav_model
+       "lav_model_get_parameters",
+       "lav_model_set_parameters",
+       "lav_model_implied",
+       "lav_model_vcov_se",
 
        # deprecated functions
        "vech", "vech.reverse", "vechru", "vechru.reverse", "lower2full",
@@ -150,6 +171,7 @@ S3method(print, lavaan.data.frame)
 S3method(print, lavaan.matrix)
 S3method(print, lavaan.matrix.symmetric)
 S3method(print, lavaan.vector)
+S3method(print, lavaan.parameterEstimates)
 S3method(print, prelav)
 S3method(pairs, lavaan)
 S3method(print, InformativeTesting)

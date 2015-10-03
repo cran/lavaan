@@ -145,17 +145,22 @@ lav_model_nvcov_robust_sandwich <- function(lavmodel      = lavmodel,
                                    augmented      = TRUE,
                                    inverted       = TRUE)
 
+    # check if E.inv is ok
+    if(inherits(E.inv, "try-error")) {
+        return(E.inv)
+    }
+
     # outer product of case-wise scores
     B0 <- 
         lav_model_information_firstorder(lavmodel       = lavmodel,
-                                               lavsamplestats = lavsamplestats,
-                                               lavdata        = lavdata,
-                                               estimator      = estimator,
-                                               lavcache       = lavcache,
-                                               extra          = TRUE,
-                                               check.pd       = FALSE,
-                                               augmented      = FALSE,
-                                               inverted       = FALSE)
+                                         lavsamplestats = lavsamplestats,
+                                         lavdata        = lavdata,
+                                         estimator      = estimator,
+                                         lavcache       = lavcache,
+                                         extra          = TRUE,
+                                         check.pd       = FALSE,
+                                         augmented      = FALSE,
+                                         inverted       = FALSE)
 
     # compute sandwich estimator
     NVarCov <- E.inv %*% B0 %*% E.inv
@@ -251,11 +256,11 @@ lav_model_vcov <- function(lavmodel       = NULL,
             N <- lavsamplestats@ntotal - lavsamplestats@ngroups
         }
 
-        if(estimator %in% c("PML", "MML")) {
-            VarCov <- NVarCov
-        } else {
+        #if(estimator %in% c("PML", "MML")) {
+        #    VarCov <- NVarCov
+        #} else {
             VarCov <- 1/N * NVarCov
-        }
+        #}
 
     } else {
         warning("lavaan WARNING: could not compute standard errors!\n  lavaan NOTE: this may be a symptom that the model is not identified.\n")
@@ -265,4 +270,58 @@ lav_model_vcov <- function(lavmodel       = NULL,
     VarCov
 }
 
+lav_model_vcov_se <- function(lavmodel, lavpartable, VCOV = NULL,
+                              BOOT = NULL) {
 
+    x <- lav_model_get_parameters(lavmodel = lavmodel, type = "free")
+
+    se <- numeric( lavmodel@nx.user )
+
+    #if(is.null(VCOV) && !is.null(BOOT)) {
+    #    VCOV <- cov(BOOT)
+    #}
+
+    if(!is.null(VCOV)) {
+        # free parameters only
+        x.var <- diag(VCOV)
+        # check for negative values (what to do: NA or 0.0?)
+        x.var[x.var < 0] <- as.numeric(NA)
+        x.se <- sqrt( x.var )
+        GLIST <- lav_model_x2GLIST(lavmodel = lavmodel, x = x.se, type = "free")
+
+        # se for full parameter table, but with 0.0 entries for def/ceq/cin
+        # elements
+        se <- lav_model_get_parameters(lavmodel = lavmodel, GLIST = GLIST,
+                                       type = "user", extra = FALSE)
+        # fixed parameters -> se = 0.0
+        se[ which(lavpartable$free == 0L) ] <- 0.0
+
+        # defined parameters: 
+        def.idx <- which(lavpartable$op == ":=")
+        if(length(def.idx) > 0L) {
+            if(!is.null(BOOT)) {
+                BOOT.def <- apply(BOOT, 1L, lavmodel@def.function)
+                if(length(def.idx) == 1L) {
+                    BOOT.def <- as.matrix(BOOT.def)
+                } else {
+                    BOOT.def <- t(BOOT.def)
+                }
+                def.cov <- cov(BOOT.def )
+            } else {
+                # regular delta method
+                JAC <- try(lav_func_jacobian_complex(func = lavmodel@def.function, x = x),
+                           silent=TRUE)
+                if(inherits(JAC, "try-error")) { # eg. pnorm()
+                    JAC <- lav_func_jacobian_simple(func = lavmodel@def.function, x = x)
+                }
+                def.cov <- JAC %*% VCOV %*% t(JAC)
+            }
+            # check for negative se's
+            diag.def.cov <- diag(def.cov)
+            diag.def.cov[ diag.def.cov < 0 ] <- as.numeric(NA)
+            se[def.idx] <- sqrt(diag.def.cov)
+        }
+    }
+
+    se
+}

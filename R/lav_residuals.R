@@ -71,14 +71,14 @@ function(object, type="raw", labels=TRUE) {
             augUser$free[      idx ] <- max(augUser$free) + 1:length(idx) 
             #augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx) 
             augModel <- lav_model(lavpartable    = augUser,
-                                  start          = object@Fit@est,
                                   representation = object@Options$representation,
+                                  parameterization = object@Options$parameterization,
                                   link           = object@Options$link,
                                   debug          = object@Options$debug)
             VarCov <- lav_model_vcov(lavmodel       = augModel, 
                                      lavsamplestats = object@SampleStats,
                                      lavdata        = object@Data,
-                                     lavpartable    = object@Partable,
+                                     lavpartable    = object@ParTable,
                                      lavoptions     = object@Options)
             # set cov between free and fixed.x elements to zero
             ###
@@ -94,7 +94,7 @@ function(object, type="raw", labels=TRUE) {
         } else {
             VarCov <- lav_model_vcov(lavmodel       = object@Model,
                                      lavdata        = object@Data,
-                                     lavpartable    = object@Partable,
+                                     lavpartable    = object@ParTable,
                                      lavsamplestats = object@SampleStats,
                                      lavoptions     = object@Options)
             Delta  <- computeDelta(lavmodel = object@Model)
@@ -263,6 +263,12 @@ lav_residuals_casewise <- function(object, labels = labels) {
     ov.names <- object@Data@ov.names
 
     X <- object@Data@X
+    if(object@Model@categorical) {
+        # add 'eXo' columns to X
+        X <- lapply(seq_len(object@Data@ngroups), function(g) {
+                    ret <- cbind(X[[g]], object@Data@eXo[[g]])
+                    ret })
+    }
     M <- lav_predict_yhat(object)
     # Note: if M has already class lavaan.matrix, print goes crazy
     # with Error: C stack usage is too close to the limit
@@ -274,7 +280,7 @@ lav_residuals_casewise <- function(object, labels = labels) {
 
     if(labels) {
         for(g in 1:G) {
-            colnames(OUT[[g]]) <- object@Data@ov.names[[g]]
+            colnames(OUT[[g]]) <- object@pta$vnames$ov[[g]]
         }
     }
 

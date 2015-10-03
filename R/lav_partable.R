@@ -412,6 +412,9 @@ lavaanify <- lavParTable <- function(
 lavMatrixRepresentation <- function(partable, representation = "LISREL",
                                     as.data.frame. = TRUE) {
 
+    # check parameter table
+    partable <- lav_partable_complete(partable)
+
     # get model matrices
     if(representation == "LISREL") {
         REP <- representation.LISREL(partable, target=NULL, extra=FALSE)
@@ -779,13 +782,13 @@ lav_partable_full <- function(partable = NULL, group = NULL,
 
         eqs.names <- unique( c(partable$lhs[partable$op == "~"], 
                                partable$rhs[partable$op == "~"]) )
+
+        eqs.y <- eqs.names
         if(strict.exo) {
             x.idx <- which(eqs.names %in% ov.names.x)
             if(length(x.idx) > 0L) {
                 eqs.y <- eqs.names[-x.idx]
             }
-        } else {
-            eqs.y <- eqs.names
         }
         eqs.x <- eqs.names
 
@@ -920,8 +923,15 @@ lav_partable_flat <- function(FLAT = NULL,
         ov.names.ord2 <- as.character(varTable$name[ varTable$type == "ordered" ])
         # remove fixed.x variables
         idx <- which(ov.names.ord2 %in% ov.names.x)
-        if(length(idx) > 0L)
+        if(length(idx) > 0L) {
             ov.names.ord2 <- ov.names.ord2[-idx]
+        }
+
+        # remove those that do appear in the model syntax
+        idx <- which(!ov.names.ord2 %in% ov.names)
+        if(length(idx) > 0L) {
+            ov.names.ord2 <- ov.names.ord2[-idx]
+        }
     } else {
         ov.names.ord2 <- character(0)
     }
@@ -947,8 +957,10 @@ lav_partable_flat <- function(FLAT = NULL,
     lhs <- rhs <- character(0)
 
     # 1. THRESHOLDS (based on varTable)
-    #    NOTE: new in 0.5-18: ALWAYS include threshold parameters in partable,
-    #    but only free them if auto.th = TRUE
+    #    NOTE: - new in 0.5-18: ALWAYS include threshold parameters in partable,
+    #            but only free them if auto.th = TRUE
+    #          - only ov.names.ord2, because ov.names.ord1 are already in USER
+    #            and we only need to add 'default' parameters here
     nth <- 0L
     #if(auto.th && length(ov.names.ord2) > 0L) {
     if(length(ov.names.ord2) > 0L) {
@@ -1000,9 +1012,13 @@ lav_partable_flat <- function(FLAT = NULL,
     op <- rep("~~", length(lhs)); op[seq_len(nth)] <- "|"
 
     # LATENT RESPONSE SCALES (DELTA)
-    if(auto.delta && auto.th && length(ov.names.ord) > 0L && 
-       # length(lv.names) > 0L &&
-       (ngroups > 1L || any(FLAT$op == "~*~") || parameterization == "theta")) {
+    #    NOTE: - new in 0.5-19: ALWAYS include scaling parameters in partable,
+    #            but only free them if auto.delta = TRUE (and parameterization
+    #            is "delta"
+    #if(auto.delta && auto.th && length(ov.names.ord) > 0L && 
+    #   # length(lv.names) > 0L &&
+    #   (ngroups > 1L || any(FLAT$op == "~*~") || parameterization == "theta")) {
+    if(length(ov.names.ord) > 0L) {
         lhs <- c(lhs, ov.names.ord)
         rhs <- c(rhs, ov.names.ord)
          op <- c(op,  rep("~*~", length(ov.names.ord)))
@@ -1142,6 +1158,7 @@ lav_partable_flat <- function(FLAT = NULL,
           free[var.idx] <- 0L
     }
 
+
     # 1. fix metric of regular latent variables
     if(std.lv) {
         # fix metric by fixing the variance of the latent variable
@@ -1250,6 +1267,7 @@ lav_partable_flat <- function(FLAT = NULL,
     }
 
     # 5c latent response scales of ordinal variables?
+    #    by default, all fixed to 1.0
     if(length(ov.names.ord) > 0L) {
         delta.idx <- which(op == "~*~")
         ustart[delta.idx] <- 1.0
@@ -1303,7 +1321,7 @@ lav_partable_flat <- function(FLAT = NULL,
             }
 
             # latent response scaling
-            if(parameterization == "delta") {
+            if(auto.delta && parameterization == "delta") {
                 if(any(op == "~*~" & group == g) &&
                    ("thresholds" %in% group.equal)) {
                     delta.idx <- which(op == "~*~" & group == g)
@@ -1318,9 +1336,6 @@ lav_partable_flat <- function(FLAT = NULL,
                       free[ var.ord.idx ] <- 1L
                     ustart[ var.ord.idx ] <- as.numeric(NA)
                 }
-            } else {
-                stop("lavaan ERROR: parameterization ", parameterization,
-                     " not supported")
             }
 
             # group proportions
@@ -1349,10 +1364,10 @@ lav_partable_flat <- function(FLAT = NULL,
                         free        = free,
                         ustart      = ustart,
                         exo         = exo,
-                        label       = label    ,
+                        label       = label   # ,
                         # IF we add these, also change
-                        eq.id       = rep(0L,  length(lhs)),
-                        unco        = rep(0L,  length(lhs))
+                        #eq.id       = rep(0L,  length(lhs)),
+                        #unco        = rep(0L,  length(lhs))
                    )
     #                   stringsAsFactors=FALSE)
 

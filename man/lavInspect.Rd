@@ -141,6 +141,8 @@ Model-implied sample statistics and fit information:
         variables. Aliases: \code{"mu"}, \code{"mu.hat"}.}
     \item{\code{"cov.all"}:}{The model-implied variance-covariance matrix 
         of both the observed and latent variables.}
+    \item{\code{"cor.all"}:}{The model-implied correlation matrix
+        of both the observed and latent variables.}
     \item{\code{"th"}:}{The model-implied thresholds. 
         Alias: \code{"thresholds"}.}
     \item{\code{"wls.est"}:}{The model-implied sample statistics (covariance
@@ -151,15 +153,20 @@ Model-implied sample statistics and fit information:
         Aliases: \code{"r-square"}, \code{"r2"}.}
     \item{\code{"converged"}:}{Logical. \code{TRUE} if the optimizer has
         converged; \code{FALSE} otherwise.}
+    \item{\code{"iteratons"}:}{Integer. The number of iterations used by the
+        optimizer.}
     \item{\code{"meanstructure"}:}{Logical. \code{TRUE} if a meanstructure
         was included in the model.}
     \item{\code{"categorical"}:}{Logical. \code{TRUE} if categorical endogenous
         variables were part of the model.}
 }
 
-Hessian, observed, expected and first.order information matrices:
+Gradient, Hessian, observed, expected and first.order information matrices:
 
 \describe{
+    \item{\code{"gradient"}:}{Numeric vector containing the first derivatives
+        of the discrepancy function with respect to the (free) model
+        parameters.}
     \item{\code{"hessian"}:}{Matrix containing the second derivatives
         of the discrepancy function with respect to the (free) model
         parameters.}
@@ -231,6 +238,8 @@ Miscellaneous:
     \item{\code{"mi"}:}{The modification indices. Alias: \code{"modindices"},
         \code{"modification.indices"}. The same output as given
         by \code{modindices()}.}
+    \item{\code{"post.check"}:}{Post-fitting check if the solution is admissible. A warning is raised if negative variances are found, or if either \code{lavInspect(fit, "cov.lv")} or \code{lavInspect(fit, "theta")} return a non-positive
+definite matrix.}
 }
 
 }

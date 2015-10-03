@@ -40,6 +40,7 @@ lav_partable_vnames <- function(partable, type = NULL, group = NULL,
                    "ov.num",      # numeric observed variables
                    "ov.ord",      # ordinal observed variables
                    "ov.ind",      # observed indicators of latent variables
+                   "ov.orphan",   # lonely observed intercepts/variances
                    "th",          # thresholds ordinal only
                    "th.mean",     # thresholds ordinal + numeric variables
 
@@ -89,6 +90,7 @@ lav_partable_vnames <- function(partable, type = NULL, group = NULL,
     OUT$ov.num       <- vector("list", length=ngroups)
     OUT$ov.ord       <- vector("list", length=ngroups)
     OUT$ov.ind       <- vector("list", length=ngroups)
+    OUT$ov.orphan    <- vector("list", length=ngroups)
     OUT$th           <- vector("list", length=ngroups)
     OUT$th.mean      <- vector("list", length=ngroups)
 
@@ -193,8 +195,8 @@ lav_partable_vnames <- function(partable, type = NULL, group = NULL,
                                     !partable$lhs %in% lv.names ]
 
             ov.tmp <- c(ov.ind, ov.y, ov.x)
-            extra <- unique(c(ov.cov, ov.int))
-            ov.names <- c(ov.tmp, extra[ !extra %in% ov.tmp ])
+            ov.extra <- unique(c(ov.cov, ov.int))
+            ov.names <- c(ov.tmp, ov.extra[ !ov.extra %in% ov.tmp ])
         }
 
         # store ov?
@@ -251,8 +253,8 @@ lav_partable_vnames <- function(partable, type = NULL, group = NULL,
                 ov.int <- partable$lhs[ partable$group == g &
                                         partable$op == "~1" & 
                                         partable$exo == 1L ]
-                extra <- unique(c(ov.cov, ov.int))
-                ov.tmp.x <- c(ov.tmp.x, extra[ !extra %in% ov.tmp.x ])
+                ov.extra <- unique(c(ov.cov, ov.int))
+                ov.tmp.x <- c(ov.tmp.x, ov.extra[ !ov.extra %in% ov.tmp.x ])
             }
 
             ov.names.x <- ov.tmp.x
@@ -261,6 +263,11 @@ lav_partable_vnames <- function(partable, type = NULL, group = NULL,
         # store ov.x?
         if("ov.x" %in% type) {
             OUT$ov.x[[g]] <- ov.names.x
+        }
+
+        # story ov.orphan?
+        if("ov.orphan" %in% type) {
+            OUT$ov.orphan[[g]] <- ov.extra   
         }
 
         # ov's withouth ov.x
@@ -326,22 +333,23 @@ lav_partable_vnames <- function(partable, type = NULL, group = NULL,
         }
 
         if(any(c("th","th.mean") %in% type)) {
-            lhs <- partable$lhs[ partable$group == g &
-                                 partable$op == "|" ]
-            rhs <- partable$rhs[ partable$group == g &
-                                 partable$op == "|" ]
-            TH <- unique(paste(lhs, "|", rhs, sep=""))
+            TH.lhs <- partable$lhs[ partable$group == g &
+                                    partable$op == "|" ]
+            TH.rhs <- partable$rhs[ partable$group == g &
+                                    partable$op == "|" ]
         }
 
         # threshold
         if("th" %in% type) {
-            ## FIXME!! do some elegantly!
             if(length(ord.names) > 0L) {
-                # return in the right order
-                out <- unlist(lapply(ord.names, function(x) { 
-                    paste(x, "|t", 
-                          1:length(grep(paste("^",x,"\\|",sep=""),TH)), 
-                          sep="") }))
+                # return in the right order (following ord.names!)
+                out <- unlist(lapply(ord.names, function(x) {
+                                  idx <- which(x == TH.lhs)
+                                  TH <- unique(paste(TH.lhs[idx], "|", 
+                                                     TH.rhs[idx], sep=""))
+                                  # make sure the th's are in increasing order
+                                  sort(TH)
+                             }))
             } else {
                 out <- character(0L)
             }
@@ -350,18 +358,22 @@ lav_partable_vnames <- function(partable, type = NULL, group = NULL,
 
         # thresholds and mean/intercepts of numeric variables
         if("th.mean" %in% type) {
-            ## FIXME!! do some elegantly!
-            # return in the right order
-            out <- unlist(lapply(ov.names.nox,
-                          function(x) {
-                          if(x %in% ord.names) {
-                               paste(x, "|t", 
-                                 1:length(grep(paste("^",x,"\\|",sep=""),TH)), 
-                                 sep="")
-                          } else {
-                              x
-                          }
-                          }))
+            if(length(ov.names.nox) > 0L) {
+                # return in the right order (following ov.names.nox!)
+                out <- unlist(lapply(ov.names.nox, function(x) {
+                              if(x %in% ord.names) {
+                                  idx <- which(x == TH.lhs)
+                                  TH <- unique(paste(TH.lhs[idx], "|",
+                                                     TH.rhs[idx], sep=""))
+                                  # make sure the th's are in increasing order
+                                  sort(TH)
+                              } else {
+                                  x
+                              }
+                         }))
+            } else {
+                out <- character(0L)
+            }
             OUT$th.mean[[g]] <- out
         }
 
