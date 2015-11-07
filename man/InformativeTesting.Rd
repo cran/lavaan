@@ -54,6 +54,7 @@ InformativeTesting(model = NULL, data, constraints = NULL,
     method is available.}   
 %\seealso{}
 \examples{
+\dontrun{
 # Simple ANOVA model with 3 groups (N=20 per group) (artifical data)
 set.seed(1234)
 Y <- cbind(c(rnorm(20,0,1), rnorm(20,0.5,1), rnorm(20,1,1)))
@@ -73,6 +74,9 @@ Data.new <- data.frame(Y, X)
 # model
 model <- 'Y ~ 1 + a1*d1 + a2*d2'
 
+# fit without constraints
+fit <- sem(model, data = Data.new)
+
 # constraints syntax: mu1 < mu2 < mu3
 constraints <- ' a1 > 0
                  a1 < a2 '
@@ -81,10 +85,12 @@ constraints <- ' a1 > 0
 # you may wish to use a much higher number, say > 10.000. The double bootstrap
 # is not necessary in case of an univariate ANOVA model.
 example <- InformativeTesting(model = model, data = Data.new, 
+                              start = parTable(fit),
                               R = 10L, double.bootstrap = "no",
                               constraints = constraints)
 example
 # plot(example)
+}
 }
 
 \references{

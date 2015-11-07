@@ -15,6 +15,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                    meanstructure      = "default",
                    int.ov.free        = FALSE,
                    int.lv.free        = FALSE,
+                   conditional.x      = "default", # or FALSE?
                    fixed.x            = "default", # or FALSE?
                    orthogonal         = FALSE,
                    std.lv             = FALSE,
@@ -102,8 +103,31 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     } else if(is.character(model)) {
         FLAT <- lavParseModelString(model)
     } else if(is.list(model)) {
-        FLAT <- model
+        # two possibilities: either model is already lavaanified
+        # or it is something else...
+
+        # look for the bare minimum columns: lhs - op -
+        if(!is.null(model$lhs) && !is.null(model$op)  &&
+           !is.null(model$rhs) && !is.null(model$free)) {
+
+            # ok, we have something that looks like a parameter table
+            # FIXME: we need to check for redundant arguments 
+            # (but if cfa/sem was used, we can not trust the call)
+            # redundant <- c("meanstructure", "int.ov.free", "int.lv.free",
+            #        "fixed.x", "orthogonal", "std.lv", "parameterization",
+            #        "auto.fix.first", "auto.fix.single", "auto.var",
+            #        "auto.cov.lv.x", "auto.cov.y", "auto.th", "auto.delta")
+            FLAT <- model
+        } else {
+            bare.minimum <- c("lhs", "op", "rhs", "free")
+            missing.idx <- is.na(match(bare.minimum, names(model)))
+            missing.txt <- paste(bare.minimum[missing.idx], collapse = ", ")
+            stop("lavaan ERROR: model is a list, but not a parameterTable?",
+                 "\n  lavaan  NOTE: ", 
+                 "missing column(s) in parameter table: [", missing.txt, "]")
+        }
     }
+
     if(max(FLAT$group) < 2L) { # same model for all groups 
         ov.names   <- vnames(FLAT, type="ov")
         ov.names.y <- vnames(FLAT, type="ov.nox")
@@ -303,16 +327,11 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                       as.data.frame.   = FALSE)
 
     } else if(is.list(model)) {
-        # two possibilities: either model is already lavaanified
-        # or it is something else...
-        if(!is.null(model$lhs) && !is.null(model$op)  &&
-           !is.null(model$rhs) && !is.null(model$free)) {
-            lavpartable <- as.list(model)
-            # complete table
-            lavpartable <- lav_partable_complete(lavpartable)
-        } else if(is.character(model[[1]])) {
-            stop("lavaan ERROR: model is a list, but not a parameterTable?")
-        }
+        # we already checked this when creating FLAT
+        # but we may need to complete it
+        lavpartable <- as.list(model) # in case model is a data.frame
+        # complete table
+        lavpartable <- lav_partable_complete(lavpartable)
     } else {
         cat("model type: ", class(model), "\n")
         stop("lavaan ERROR: model is not of type character or list")
@@ -394,24 +413,51 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     # 4. compute some reasonable starting values 
     if(!is.null(slotModel)) {
         lavmodel <- slotModel
-        lavaanStart <- lav_model_get_parameters(lavmodel, type="user")
+        # FIXME
+        #lavaanStart <- lav_model_get_parameters(lavmodel, type="user")
         #lavpartable$start <- lavaanStart
         timing$Start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
         timing$Model <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
     } else {
-        lavaanStart <- 
-            lav_start(start.method = start,
-                      lavpartable     = lavpartable, 
-                      lavsamplestats  = lavsamplestats,
-                      model.type   = lavoptions$model.type,
-                      mimic        = lavoptions$mimic,
-                      debug        = lavoptions$debug)
+
+
+        # starting values
+
+        # check if we have provide a full parameter table as model= input
+        if(!is.null(lavpartable$est) && start == "default") {
+            # check if all 'est' values look ok
+            # this is not the case, eg, if partables have been merged eg, as
+            # in semTools' auxiliary() function
+
+            # check for zero free variances and NA values
+            zero.idx <- which(lavpartable$free > 0L &
+                              lavpartable$op == "~~" &
+                              lavpartable$lhs == lavpartable$rhs &
+                              lavpartable$est == 0)
+
+            if(length(zero.idx) > 0L || any(is.na(lavpartable$est))) {
+                lavpartable$start <- lav_start(start.method = start,
+                                           lavpartable     = lavpartable,
+                                           lavsamplestats  = lavsamplestats,
+                                           model.type   = lavoptions$model.type,
+                                           mimic        = lavoptions$mimic,
+                                           debug        = lavoptions$debug)
+            } else {
+                lavpartable$start <- lavpartable$est
+            }
+        } else {
+            lavpartable$start <- lav_start(start.method = start,
+                                           lavpartable     = lavpartable, 
+                                           lavsamplestats  = lavsamplestats,
+                                           model.type   = lavoptions$model.type,
+                                           mimic        = lavoptions$mimic,
+                                           debug        = lavoptions$debug)
+        }
         timing$Start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
 
-        lavpartable$start <- lavaanStart # since semTools 0.4-6 (lav 0.5-18)
 
         # 5. construct internal model (S4) representation
         lavmodel <- 
@@ -489,190 +535,14 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     x <- NULL
     if(do.fit && lavoptions$estimator != "none" && 
        lavmodel@nx.free > 0L) {
-        # catch simple linear regression models
-        if(lavdata@data.type == "full" &&
-           length(unique(lavpartable$lhs[lavpartable$op == "~"])) == 1L && 
-           length(vnames(lavpartable,   "lv")) == 0L &&
-           #FALSE && # to debug
-           sum(nchar(FLAT$fixed)) == 0 && # no fixed values in parTable
-                                          # this includes intercepts!!
-           # next one checks if we have exogenous variances/intercepts
-           # in model syntax
-           (length(vnames(lavpartable, "eqs.x")) == 
-            length(vnames(lavpartable, "ov.x"))) &&
-           !categorical &&
-           !lavmodel@eq.constraints &&
-           length(lavdata@X) > 0L &&
-           lavdata@ngroups == 1L &&
-           lavoptions$fixed &&
-           lavoptions$missing == "listwise") {
-            # simple univariate regression
-            ov.y.idx <- match(vnames(lavpartable, "ov.y"), 
-                              lavdata@ov.names[[1L]])
-            ov.x.idx <- match(vnames(lavpartable, "ov.x"), 
-                              lavdata@ov.names[[1L]])
-            if(length(ov.x.idx) == 0L) {
-                stop("lavaan ERROR: no exogenous variables; remove all variances, covariances and intercepts of exogenous variables from the model syntax, or use fixed.x = FALSE\n")
-            }
-            YX <- lavdata@X[[1L]]
-            #print(head(YX))
-            # constraints?
-            if(sum(length(lavmodel@x.ceq.idx) + 
-                   length(lavmodel@x.cin.idx)) == 0L) {
 
-                ## forced zero intercept?
-                #yvar <- vnames(lavpartable, "ov.y")
-                #int.y.idx <- which(lavpartable$lhs == yvar &
-                #                   lavpartable$op == "~1")
-                #if(length(int.y.idx) > 0L && 
-                #   !is.na(lavpartable$ustart[int.y.idx]) &&
-                #   lavpartable$ustart[int.y.idx] == 0) {
-                #    lm.intercept <- FALSE
-                #} else {
-                #    lm.intercept <- TRUE
-                #}
-                #if(lm.intercept) {
-                    out <- lm.fit(x=cbind(1,YX[,ov.x.idx]), 
-                                  y=YX[,ov.y.idx])
-                    x.beta <- out$coefficients
-                #} else {
-                #     out <- lm.fit(x=YX[,ov.x.idx], y=YX[,ov.y.idx])
-                #     x.beta <- c(0,out$coefficients)
-                #}
-                y.rvar <- sum(out$residuals*out$residuals)/length(out$residuals) #ML?
-                if(!lavoptions$meanstructure) {
-                    x <- numeric(1L + length(x.beta) - 1L)
-                    x[lavpartable$free[lavpartable$op == "~~" &
-                                          lavpartable$free]] <- y.rvar
-                    x[lavpartable$free[lavpartable$op == "~" &
-                                          lavpartable$free]] <- x.beta[-1L]
-                } else {
-                    x <- numeric(1L + length(x.beta))
-                    x[lavpartable$free[lavpartable$op == "~~" &
-                                          lavpartable$free]] <- y.rvar
-                    x[lavpartable$free[lavpartable$op == "~" &
-                                          lavpartable$free]] <- x.beta[-1L]
-                    x[lavpartable$free[lavpartable$op == "~1" &
-                                          lavpartable$free]] <- x.beta[1L]
-                }
-                lavmodel <- lav_model_set_parameters(lavmodel, x = x,
-                                           estimator=lavoptions$estimator)
-                attr(x, "iterations") <- 1L; attr(x, "converged") <- TRUE
-                attr(x, "control") <- control
-                FX <- try(lav_model_objective(lavmodel = lavmodel, 
-                                              lavsamplestats = lavsamplestats,
-                                              estimator = lavoptions$estimator),
-                          silent=TRUE)
-                if(inherits(FX, "try-error")) {
-                    # eg non-full rank design matrix
-                    FX <- as.numeric(NA)
-                    attr(FX, "fx.group") <- rep(as.numeric(NA), 
-                                                lavdata@ngroups)
-                    attr(x, "fx") <- as.numeric(NA)
-                } 
-                attr(x, "fx") <- FX
-            } else if(lav_constraints_check_linear(lavmodel) == TRUE) {
-
-                A.ceq <- A.cin <- matrix(0, lavmodel@nx.free, 0)
-                if(!is.null(body(lavmodel@ceq.function)))
-                    A.ceq <- t(lav_func_jacobian_complex(func=lavmodel@ceq.function, 
-                                            x=rep(0,lavmodel@nx.free)))
-                if(!is.null(body(lavmodel@cin.function)))
-                    A.cin <- t(lav_func_jacobian_complex(func=lavmodel@cin.function, 
-                                            x=rep(0,lavmodel@nx.free)))
-                A <- cbind(A.ceq, A.cin)
-                con.jac <- t(A)
-
-                # meanstructure?
-                rvar.idx <- lavpartable$free[lavpartable$op == "~~" &
-                                                lavpartable$free]
-                if(lavoptions$meanstructure) {
-                    # where is the intercept?
-                    int.idx <- lavpartable$free[lavpartable$op == "~1" &
-                                                   lavpartable$free]
-                    # first intercept, then coefficients, remove resvar
-                    A <- rbind(A[int.idx,,drop=FALSE], 
-                               A[-c(int.idx,rvar.idx),,drop=FALSE])
-                } else {
-                    # add intercept, then coefficients, remove resvar
-                    A <- rbind(rep(0,ncol(A)), A[-c(rvar.idx),,drop=FALSE])
-                }
-
-                ## forced zero intercept?
-                #yvar <- vnames(lavpartable, "ov.y")
-                #int.y.idx <- which(lavpartable$lhs == yvar &
-                #                   lavpartable$op == "~1")
-                #if(length(int.y.idx) > 0L &&
-                #   lavpartable$ustart[int.y.idx] == 0) {
-                #    lm.intercept <- FALSE
-                #} else {
-                #    lm.intercept <- TRUE
-                #}
-                X <- cbind(1,YX[,ov.x.idx])
-                Y <- YX[,ov.y.idx]; X.Y <- crossprod(X, Y)
-                #if(lm.intercept) {
-                    X <- cbind(1,YX[,ov.x.idx])
-                #} else {
-                #    X <- YX[,ov.x.idx]
-                #}
-                X.X <- crossprod(X)
-                out <- solve.QP(Dmat=X.X, dvec=X.Y, Amat=A, 
-                                bvec=rep(0, NCOL(A)), ### FIXME!!! always zero
-                                meq=length(lavmodel@x.ceq.idx))
-                x.beta <- out$solution
-                residuals <- Y - (X %*% x.beta)
-                y.rvar <- sum(residuals*residuals)/length(residuals) #ML?
-                if(!lavoptions$meanstructure) {
-                    x <- numeric(1L + length(x.beta) - 1L)
-                    x[lavpartable$free[lavpartable$op == "~~" &
-                                          lavpartable$free]] <- y.rvar
-                    x[lavpartable$free[lavpartable$op == "~" &
-                                          lavpartable$free]] <- x.beta[-1L]
-                } else {
-                    x <- numeric(1L + length(x.beta))
-                    x[lavpartable$free[lavpartable$op == "~~" &
-                                          lavpartable$free]] <- y.rvar
-                    x[lavpartable$free[lavpartable$op == "~" &
-                                          lavpartable$free]] <- x.beta[-1L]
-                    x[lavpartable$free[lavpartable$op == "~1" &
-                                          lavpartable$free]] <- x.beta[1L]
-                }
-                lavmodel <- lav_model_set_parameters(lavmodel, x = x,
-                                       estimator=lavoptions$estimator)
-                attr(x, "iterations") <- 1L; attr(x, "converged") <- TRUE
-                attr(x, "control") <- control
-                attr(x, "fx") <-
-                    lav_model_objective(lavmodel, 
-                                        lavsamplestats = lavsamplestats,
-                                        estimator = lavoptions$estimator)
-                # for VCOV
-                attr(con.jac, "inactive.idx") <- integer(0) # FIXME!!
-                attr(con.jac, "cin.idx") <- seq_len(ncol(A.cin)) + ncol(A.ceq)
-                attr(con.jac, "ceq.idx") <- seq_len(ncol(A.ceq))
-                attr(x, "con.jac") <- con.jac
-                con.lambda <- rep(1, nrow(con.jac)) # FIXME!
-                attr(x, "con.lambda") <- con.lambda
-            } else {
-                # regular estimation after all
-                x <- lav_model_estimate(lavmodel        = lavmodel,
-                                        lavsamplestats  = lavsamplestats,
-                                        lavdata         = lavdata,
-                                        lavoptions      = lavoptions,
-                                        lavcache        = lavcache)
-                lavmodel <- lav_model_set_parameters(lavmodel, x = x,
-                     estimator = lavoptions$estimator)
-            }
-        } else {
-            #cat("REGULAR\n")
-            # regular estimation
-            x <- lav_model_estimate(lavmodel        = lavmodel,
-                                    lavsamplestats  = lavsamplestats,
-                                    lavdata         = lavdata,
-                                    lavoptions      = lavoptions,
-                                    lavcache        = lavcache)
-            lavmodel <- lav_model_set_parameters(lavmodel, x = x,
-                estimator = lavoptions$estimator)
-        }
+        x <- lav_model_estimate(lavmodel        = lavmodel,
+                                lavsamplestats  = lavsamplestats,
+                                lavdata         = lavdata,
+                                lavoptions      = lavoptions,
+                                lavcache        = lavcache)
+        lavmodel <- lav_model_set_parameters(lavmodel, x = x,
+                                             estimator = lavoptions$estimator)
 
         # store parameters in @ParTable$est
         lavpartable$est <- lav_model_get_parameters(lavmodel = lavmodel,
@@ -699,7 +569,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     }
 
     # should we fake/force convergence? (eg. to enforce the
-    # computation of a test statistic
+    # computation of a test statistic)
     if(!is.null(control$optim.force.converged) &&
        control$optim.force.converged) {
         attr(x, "converged") <- TRUE
@@ -729,8 +599,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
     # 7. estimate vcov of free parameters (for standard errors)
     VCOV <- NULL
-    if(lavoptions$se != "none" && lavmodel@nx.free > 0L &&
-       attr(x, "converged")) {
+    if(lavoptions$se != "none" && lavoptions$se != "external" && 
+       lavmodel@nx.free > 0L && attr(x, "converged")) {
         if(verbose) cat("Computing VCOV for se =", lavoptions$se, "...")
         VCOV <- lav_model_vcov(lavmodel        = lavmodel,
                                lavsamplestats  = lavsamplestats,
@@ -754,12 +624,24 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     tmp.attr <- attributes(VCOV)
     VCOV1 <- VCOV
     attributes(VCOV1) <- tmp.attr["dim"]
-    lavvcov <- list(vcov = VCOV1)
+    lavvcov <- list(se = lavoptions$se, information = lavoptions$information,
+                    vcov = VCOV1)
 
     # store se in partable
-    SE <- lav_model_vcov_se(lavmodel = lavmodel, lavpartable = lavpartable,
-                            VCOV = VCOV, BOOT = lavboot$coef)
-    lavpartable$se <- SE
+    if(lavoptions$se != "external") {
+        lavpartable$se <- lav_model_vcov_se(lavmodel = lavmodel, 
+                                            lavpartable = lavpartable,
+                                            VCOV = VCOV, 
+                                            BOOT = lavboot$coef)
+    } else {
+        if(is.null(lavpartable$se)) {
+            lavpartable$se <- lav_model_vcov_se(lavmodel = lavmodel, 
+                                                lavpartable = lavpartable,
+                                                VCOV = NULL, BOOT = NULL)
+            warning("lavaan WARNING: se = \"external\" but parameter table does not contain a `se' column")
+        }
+    }
+
 
     timing$VCOV <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
@@ -834,7 +716,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
 # cfa + sem
 cfa <- sem <- function(model = NULL, data = NULL,
-    meanstructure = "default", fixed.x = "default",
+    meanstructure = "default", 
+    conditional.x = "default", fixed.x = "default",
     orthogonal = FALSE, std.lv = FALSE, 
     parameterization = "default", std.ov = FALSE,
     missing = "default", ordered = NULL, 
@@ -871,7 +754,7 @@ cfa <- sem <- function(model = NULL, data = NULL,
 
 # simple growth models
 growth <- function(model = NULL, data = NULL,
-    fixed.x = "default",
+    conditional.x = "default", fixed.x = "default",
     orthogonal = FALSE, std.lv = FALSE, 
     parameterization = "default", std.ov = FALSE,
     missing = "default", ordered = NULL, 

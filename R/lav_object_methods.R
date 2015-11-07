@@ -104,7 +104,7 @@ short.summary <- function(object) {
     if(object@Options$test %in% c("satorra.bentler", "yuan.bentler",
                                   "mean.var.adjusted",
                                   "scaled.shifted") &&
-       length(object@Fit@test) > 1L) {
+       length(object@test) > 1L) {
         scaled <- TRUE
         if(object@Options$test == "scaled.shifted")
             shifted <- TRUE
@@ -129,41 +129,41 @@ short.summary <- function(object) {
 
         # 1. chi-square values
         t0.txt <- sprintf("  %-40s", "Minimum Function Test Statistic")  
-        t1.txt <- sprintf("  %10.3f", object@Fit@test[[1]]$stat)
+        t1.txt <- sprintf("  %10.3f", object@test[[1]]$stat)
         t2.txt <- ifelse(scaled, 
-                  sprintf("  %10.3f", object@Fit@test[[2]]$stat), "")
+                  sprintf("  %10.3f", object@test[[2]]$stat), "")
         cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
 
         # 2. degrees of freedom
         t0.txt <- sprintf("  %-40s", "Degrees of freedom")
-        t1.txt <- sprintf("  %10i",   object@Fit@test[[1]]$df)
+        t1.txt <- sprintf("  %10i",   object@test[[1]]$df)
         t2.txt <- ifelse(scaled, 
-                         ifelse(round(object@Fit@test[[2]]$df) == 
-                                object@Fit@test[[2]]$df,
-                                sprintf("  %10i",   object@Fit@test[[2]]$df),
-                                sprintf("  %10.3f", object@Fit@test[[2]]$df)),
+                         ifelse(round(object@test[[2]]$df) == 
+                                object@test[[2]]$df,
+                                sprintf("  %10i",   object@test[[2]]$df),
+                                sprintf("  %10.3f", object@test[[2]]$df)),
                          "")
         cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
 
         # 3. P-value
-        if(is.na(object@Fit@test[[1]]$df)) {
+        if(is.na(object@test[[1]]$df)) {
             t0.txt <- sprintf("  %-40s", "P-value")
-            t1.txt <- sprintf("  %10.3f", object@Fit@test[[1]]$pvalue)
+            t1.txt <- sprintf("  %10.3f", object@test[[1]]$pvalue)
             t2.txt <- ifelse(scaled,
-                      sprintf("  %10.3f", object@Fit@test[[2]]$pvalue), "")
+                      sprintf("  %10.3f", object@test[[2]]$pvalue), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
-        } else if(object@Fit@test[[1]]$df > 0) {
-            if(object@Fit@test[[1]]$refdistr == "chisq") {
+        } else if(object@test[[1]]$df > 0) {
+            if(object@test[[1]]$refdistr == "chisq") {
                 t0.txt <- sprintf("  %-40s", "P-value (Chi-square)")
-            } else if(length(object@Fit@test) == 1L &&
-                      object@Fit@test[[1]]$refdistr == "unknown") {
+            } else if(length(object@test) == 1L &&
+                      object@test[[1]]$refdistr == "unknown") {
                 t0.txt <- sprintf("  %-40s", "P-value (Unknown)")
             } else {
                 t0.txt <- sprintf("  %-40s", "P-value")
             }
-            t1.txt <- sprintf("  %10.3f", object@Fit@test[[1]]$pvalue)
+            t1.txt <- sprintf("  %10.3f", object@test[[1]]$pvalue)
             t2.txt <- ifelse(scaled,
-                      sprintf("  %10.3f", object@Fit@test[[2]]$pvalue), "")
+                      sprintf("  %10.3f", object@test[[2]]$pvalue), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
         } else {
             # FIXME: should we do this? To warn that exact 0.0 was not obtained?
@@ -178,7 +178,7 @@ short.summary <- function(object) {
         # 3b. Do we have a Bollen-Stine p-value?
         if(object@Options$test == "bollen.stine") {
             t0.txt <- sprintf("  %-40s", "P-value (Bollen-Stine Bootstrap)")
-            t1.txt <- sprintf("  %10.3f", object@Fit@test[[2]]$pvalue)
+            t1.txt <- sprintf("  %10.3f", object@test[[2]]$pvalue)
             cat(t0.txt, t1.txt, "\n", sep="")
         }
 
@@ -186,7 +186,7 @@ short.summary <- function(object) {
         if(scaled) {
             t0.txt <- sprintf("  %-40s", "Scaling correction factor")
             t1.txt <- sprintf("  %10s", "")
-            t2.txt <- sprintf("  %10.3f", object@Fit@test[[2]]$scaling.factor)
+            t2.txt <- sprintf("  %10.3f", object@test[[2]]$scaling.factor)
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
             if(object@Options$test == "yuan.bentler") {
                 if(object@Options$mimic == "Mplus") {
@@ -229,7 +229,7 @@ short.summary <- function(object) {
                 t0.txt <- sprintf("  %-40s", "Shift parameter")
                 t1.txt <- sprintf("  %10s", "")
                 t2.txt <- sprintf("  %10.3f", 
-                                  object@Fit@test[[2]]$shift.parameter)
+                                  object@test[[2]]$shift.parameter)
                 cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
             } else { # multiple groups, multiple shift values!
                 cat("  Shift parameter for each group:\n")
@@ -237,7 +237,7 @@ short.summary <- function(object) {
                     t0.txt <- sprintf("    %-38s", object@Data@group.label[[g]])
                     t1.txt <- sprintf("  %10s", "")
                     t2.txt <- sprintf("  %10.3f",
-                                     object@Fit@test[[2]]$shift.parameter[g])
+                                     object@test[[2]]$shift.parameter[g])
                     cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
                 }
             }
@@ -254,9 +254,9 @@ short.summary <- function(object) {
             cat("Chi-square for each group:\n\n")
             for(g in 1:object@Data@ngroups) {
                 t0.txt <- sprintf("  %-40s", object@Data@group.label[[g]])
-                t1.txt <- sprintf("  %10.3f", object@Fit@test[[1]]$stat.group[g])
+                t1.txt <- sprintf("  %10.3f", object@test[[1]]$stat.group[g])
                 t2.txt <- ifelse(scaled, sprintf("  %10.3f", 
-                                 object@Fit@test[[2]]$stat.group[g]), "")
+                                 object@test[[2]]$stat.group[g]), "")
                 cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
             }
         } 
@@ -283,6 +283,7 @@ function(object, header       = TRUE,
                  fit.measures = FALSE, 
                  estimates    = TRUE,
                  ci           = FALSE, 
+                 fmi          = FALSE,
                  standardized = FALSE,
                  rsquare      = FALSE, 
                  std.nox      = FALSE, 
@@ -309,7 +310,7 @@ function(object, header       = TRUE,
 
     if(estimates) {
         PE <- parameterEstimates(object, ci = ci, standardized = standardized,
-                                 rsquare = rsquare,
+                                 rsquare = rsquare, fmi = fmi,
                                  remove.eq = FALSE, remove.system.eq = TRUE,
                                  remove.ineq = FALSE, remove.def = FALSE, 
                                  add.attributes = TRUE)
@@ -1268,7 +1269,7 @@ function(object, type = "moments", labels=TRUE) {
 
 
 setMethod("vcov", "lavaan",
-function(object, labels=TRUE, attributes.=FALSE) {
+function(object, labels = TRUE, remove.duplicated = FALSE) {
 
     # check for convergence first!
     if(object@Fit@npar > 0L && !object@Fit@converged)
@@ -1280,7 +1281,9 @@ function(object, labels=TRUE, attributes.=FALSE) {
 
     VarCov <- lav_object_inspect_vcov(lavobject = object,
                                       add.labels = labels,
-                                      add.class = TRUE)
+                                      add.class = TRUE,
+                                      remove.duplicated = remove.duplicated)
+
     VarCov
 })
 
