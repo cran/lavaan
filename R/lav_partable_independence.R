@@ -1,5 +1,5 @@
 # generate parameter table for an independence model
-lav_partable_independence <- function(lavobject        = NULL, 
+lav_partable_independence <- function(lavobject      = NULL, 
                                       lavdata        = NULL,
                                       lavoptions     = NULL,
                                       lavsamplestats = NULL,
@@ -18,16 +18,38 @@ lav_partable_independence <- function(lavobject        = NULL,
         lavsamplestats <- lavobject@SampleStats
     }
 
+    # conditional.x ? check res.cov[[1]] slot
+    conditional.x <- FALSE
+    if(!is.null(lavsamplestats) && !is.null(lavsamplestats@res.cov[[1]])) {
+        conditional.x <- TRUE
+    } else if(!is.null(lavoptions) && lavoptions$conditional.x) {
+        conditional.x <- TRUE
+    }
+
+
     # if user-based moments are given, use these
     if(is.null(sample.cov) && !is.null(lavsamplestats)) {
-        sample.cov <- lavsamplestats@cov
+        if(conditional.x) {
+            sample.cov <- lavsamplestats@res.cov
+        } else {
+            sample.cov <- lavsamplestats@cov
+        }
     }
     if(is.null(sample.mean) && !is.null(lavsamplestats)) {
-        sample.mean <- lavsamplestats@mean
+        if(conditional.x) {
+            sample.mean <- lavsamplestats@res.int
+        } else {
+            sample.mean <- lavsamplestats@mean
+        }
     }
     if(is.null(sample.th) && !is.null(lavsamplestats)) {
-         sample.th <- lavsamplestats@th
+         if(conditional.x) {
+             sample.th <- lavsamplestats@res.th
+         } else {
+             sample.th <- lavsamplestats@th
+         }
     }
+
     if(is.null(sample.th.idx) && !is.null(lavsamplestats)) {
          sample.th.idx <- lavsamplestats@th.idx
     }
@@ -53,10 +75,6 @@ lav_partable_independence <- function(lavobject        = NULL,
 
     ngroups <- length(ov.names)
 
-    # DO NOT USE: ov.names.nox <- lavobject@pta$vnames$ov.nox
-    # even if fixed.x = FALSE, we need to make a distinction
-    ov.names.nox <- lapply(seq_len(ngroups), function(g)
-                ov.names[[g]][ !ov.names[[g]] %in% ov.names.x[[g]] ])
 
     lhs <- rhs <- op <- character(0)
     group <- free <- exo <- integer(0)
@@ -66,19 +84,18 @@ lav_partable_independence <- function(lavobject        = NULL,
 
     for(g in 1:ngroups) {
 
-        # a) VARIANCES (all ov's, except exo's)
-        nvar  <- length(ov.names.nox[[g]])
-        lhs   <- c(lhs, ov.names.nox[[g]])
+        # a) VARIANCES (all ov's, if !conditional.x, also exo's)
+        nvar  <- length(ov.names[[g]])
+        lhs   <- c(lhs, ov.names[[g]])
          op   <- c(op, rep("~~", nvar))
-            rhs   <- c(rhs, ov.names.nox[[g]])
+            rhs   <- c(rhs, ov.names[[g]])
         group <- c(group, rep(g,  nvar))
         free  <- c(free,  rep(1L, nvar))
         exo   <- c(exo,   rep(0L, nvar))
 
         # starting values
         if(!is.null(sample.cov)) {
-            sample.var.idx <- match(ov.names.nox[[g]], ov.names[[g]])
-            ustart <- c(ustart, diag(sample.cov[[g]])[sample.var.idx])
+            ustart <- c(ustart, diag(sample.cov[[g]]))
         } else {
             ustart <- c(ustart, rep(as.numeric(NA), nvar))
         }
@@ -123,7 +140,7 @@ lav_partable_independence <- function(lavobject        = NULL,
                 # add delta
                 if(parameterization == "theta") {
                    lhs.delta <- character(0); rhs.delta <- character(0)
-                   lhs.delta <- ov.names.nox[[g]]
+                   lhs.delta <- ov.names[[g]]
                    nel   <- length(lhs.delta)
                    lhs   <- c(lhs, lhs.delta)
                    rhs   <- c(rhs, lhs.delta)
@@ -149,10 +166,11 @@ lav_partable_independence <- function(lavobject        = NULL,
                ustart <- c(ustart, int.start)
             }
         }
+
         # meanstructure?
         if(meanstructure) {
             # auto-remove ordinal variables
-            ov.int <- ov.names.nox[[g]]
+            ov.int <- ov.names[[g]]
             idx <- which(ov.int %in% ord.names)
             if(length(idx)) ov.int <- ov.int[-idx]
 
@@ -173,51 +191,75 @@ lav_partable_independence <- function(lavobject        = NULL,
         }
 
         # fixed.x exogenous variables?
-        if(!categorical && (nx <- length(ov.names.x[[g]])) > 0L) {
-            idx <- lower.tri(matrix(0, nx, nx), diag=TRUE)
-            nel <- sum(idx)
-            lhs    <- c(lhs, rep(ov.names.x[[g]],  each=nx)[idx]) # upper.tri
-             op    <- c(op, rep("~~", nel))
-            rhs    <- c(rhs, rep(ov.names.x[[g]], times=nx)[idx])
+        if(!conditional.x && (nx <- length(ov.names.x[[g]])) > 0L) {
+            # fix variances
+            exo.idx <- which(rhs %in% ov.names.x[[g]] &
+                             lhs %in% ov.names.x[[g]] &
+                             op == "~~" & group == g)
             if(fixed.x) {
-                free   <- c(free,  rep(0L, nel))
-            } else {
-                free   <- c(free,  rep(1L, nel))
+                exo[exo.idx] <- 1L
+                free[exo.idx] <- 0L
             }
-            exo    <- c(exo,   rep(1L, nel))
-            group  <- c(group, rep(g,  nel))
-            ustart <- c(ustart, rep(as.numeric(NA), nel))
 
-            # meanstructure?
-            if(meanstructure) {
-                lhs    <- c(lhs,    ov.names.x[[g]])
-                 op    <- c(op,     rep("~1", nx))
-                rhs    <- c(rhs,    rep("", nx))
-                group  <- c(group,  rep(g,  nx))
+            # fix means
+            exo.idx <- which(lhs %in% ov.names.x[[g]] &
+                             op == "~1" & group == g)
+            if(fixed.x) {
+                exo[exo.idx] <- 1L
+                free[exo.idx] <- 0L
+            }
+
+            # add covariances
+            pstar <- nx*(nx-1)/2
+            if(pstar > 0L) { # only if more than 1 variable
+                tmp <- utils::combn(ov.names.x[[g]], 2)
+                lhs <- c(lhs, tmp[1,]) # to fill upper.tri
+                 op <- c(op,   rep("~~", pstar))
+                rhs <- c(rhs, tmp[2,])
+                group <- c(group, rep(g,  pstar))
                 if(fixed.x) {
-                    free   <- c(free,   rep(0L, nx))
+                    free  <- c(free,  rep(0L, pstar))
+                    exo   <- c(exo,   rep(1L, pstar))
                 } else {
-                    free   <- c(free,   rep(1L, nx))
+                    free  <- c(free,  rep(1L, pstar))
+                    exo   <- c(exo,   rep(0L, pstar))
                 }
-                exo    <- c(exo,    rep(1L, nx))
-                ustart <- c(ustart, rep(as.numeric(NA), nx))
+
+                # starting values
+                if(!is.null(sample.cov)) {
+                    rhs.idx <- match(tmp[1,], ov.names[[g]])
+                    lhs.idx <- match(tmp[2,], ov.names[[g]])
+                    ustart <- c(ustart, 
+                                sample.cov[[g]][ cbind(rhs.idx, lhs.idx) ])
+                } else {
+                    ustart <- c(ustart, rep(as.numeric(NA), pstar))
+                }
             }
         }
 
-        if(categorical && (nx <- length(ov.names.x[[g]])) > 0L) {
+        if(conditional.x && (nx <- length(ov.names.x[[g]])) > 0L) {
             # add regressions
             lhs <- c(lhs, rep("dummy", nx))
              op <- c( op, rep("~", nx))
             rhs <- c(rhs, ov.names.x[[g]])
-            # add 3 dummy lines
-            lhs <- c(lhs, "dummy"); op <- c(op, "=~"); rhs <- c(rhs, "dummy")
-            lhs <- c(lhs, "dummy"); op <- c(op, "~~"); rhs <- c(rhs, "dummy")
-            lhs <- c(lhs, "dummy"); op <- c(op, "~1"); rhs <- c(rhs, "")
 
-            exo    <- c(exo,   rep(0L, nx + 3L))
-            group  <- c(group, rep(g,  nx + 3L))
-            free   <- c(free,  rep(0L, nx + 3L))
-            ustart <- c(ustart, rep(0, nx)); ustart <- c(ustart, c(0,1,0))
+            # add dummy latent
+            lhs <- c(lhs,"dummy"); op <- c(op, "=~"); rhs <- c(rhs, "dummy")
+            lhs <- c(lhs,"dummy"); op <- c(op, "~~"); rhs <- c(rhs, "dummy") 
+
+            exo <- c(exo,    rep(1L, nx)); exo <- c(exo,   c(0L,0L))
+          group <- c(group,  rep(g,  nx + 2L))
+           free <- c(free,   rep(0L, nx + 2L))
+         ustart <- c(ustart, rep(0,  nx + 2L))
+
+            if(meanstructure) {
+                lhs <- c(lhs,"dummy"); op <- c(op, "~1"); rhs <- c(rhs, "")
+
+                exo    <- c(exo,    0L)
+                group  <- c(group,  g)
+                free   <- c(free,   0L)
+                ustart <- c(ustart, 0)
+            }
         }
 
     } # ngroups

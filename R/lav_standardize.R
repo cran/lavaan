@@ -226,9 +226,9 @@ standardize.est.all <- function(lavobject, partable=NULL, est=NULL, est.std=NULL
     out <- est.std; N <- length(est.std)
     stopifnot(N == length(partable$lhs))
 
-    VY <- computeVY(lavmodel = lavobject@Model,
-                    GLIST = GLIST,
-                    lavsamplestats = lavobject@SampleStats)
+    VY <- computeVY(lavmodel = lavobject@Model, GLIST = GLIST,
+                    lavsamplestats = lavobject@SampleStats, 
+                    diagonal.only = TRUE)
 
     for(g in 1:lavobject@Data@ngroups) {
 
@@ -237,7 +237,7 @@ standardize.est.all <- function(lavobject, partable=NULL, est=NULL, est.std=NULL
 
         OV  <- sqrt(VY[[g]])
 
-        if(lavobject@Model@categorical) {
+        if(lavobject@Model@conditional.x) {
             # extend OV with ov.names.x
             ov.names.x <- vnames(lavobject@ParTable, "ov.x", group=g)
             ov.names <- c(ov.names, ov.names.x)
@@ -390,9 +390,9 @@ standardize.est.all.nox <- function(lavobject, partable=NULL, est=NULL,
     out <- est.std; N <- length(est.std)
     stopifnot(N == length(partable$lhs))
 
-    VY <- computeVY(lavmodel       = lavobject@Model,
-                    GLIST          = GLIST,
-                    lavsamplestats = lavobject@SampleStats)
+    VY <- computeVY(lavmodel = lavobject@Model, GLIST = GLIST,
+                    lavsamplestats = lavobject@SampleStats,
+                    diagonal.only = TRUE)
 
     for(g in 1:lavobject@Data@ngroups) {
 
@@ -403,7 +403,7 @@ standardize.est.all.nox <- function(lavobject, partable=NULL, est=NULL,
 
         OV  <- sqrt(VY[[g]])
 
-        if(lavobject@Model@categorical) {
+        if(lavobject@Model@conditional.x) {
             # extend OV with ov.names.x
             ov.names.x <- vnames(lavobject@ParTable, "ov.x", group=g)
             ov.names <- c(ov.names, ov.names.x)
@@ -557,7 +557,20 @@ unstandardize.est.ov <- function(partable, ov.var=NULL, cov.std=TRUE) {
     stopifnot(!any(is.na(partable$ustart)))
     est <- out <- partable$ustart
     N <- length(est)
-    ngroups <- max(partable$group)
+
+    # ngroup
+    if(is.null(partable$group)) {
+        partable$group <- rep(1L, length(partable$lhs))
+        ngroups <- 1L
+    } else {
+        if(is.character(partable$group)) {
+            group.label <- unique(partable$group)
+            group.label <- group.label[ nchar(group.label) > 0L ]
+            ngroups <- length(group.label)
+        } else {
+            ngroups <- max(partable$group)
+        }
+    }
 
     # if ov.var is NOT a list, make a list
     if(!is.list(ov.var)) {

@@ -14,7 +14,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                              baseline.model = NULL) {
 
     # has the model converged?
-    if(object@Fit@npar > 0L && !object@Fit@converged) {
+    if(object@optim$npar > 0L && !object@optim$converged) {
         stop("lavaan ERROR: fit measures not available if model did not converge")
     }
 
@@ -24,11 +24,11 @@ lav_fit_measures <- function(object, fit.measures="all",
     if(TEST[[1]]$test == "none") {
 
         # to deal with semTools 0.4-9, we need to check the @Fit@test slot
-        if(object@Fit@test[[1]]$test != "none") {
-            TEST <- object@Fit@test
-        } else {
+        #if(object@Fit@test[[1]]$test != "none") {
+        #    TEST <- object@Fit@test
+        #} else {
             stop("lavaan ERROR: please refit the model with test=\"standard\"")
-        }
+        #}
     }
 
     if("all" %in% fit.measures) {
@@ -52,7 +52,7 @@ lav_fit_measures <- function(object, fit.measures="all",
 
     # Change 0.5-13: take into account explicit equality constraints!!
     # reported by Mark L. Taper (affects AIC and BIC)
-    npar <- object@Fit@npar
+    npar <- object@optim$npar
     if(nrow(object@Model@con.jac) > 0L) {
         ceq.idx <- attr(object@Model@con.jac, "ceq.idx")
         if(length(ceq.idx) > 0L) {
@@ -61,8 +61,8 @@ lav_fit_measures <- function(object, fit.measures="all",
         }
     }
 
-    fx <- object@Fit@fx
-    fx.group <- object@Fit@fx.group
+    fx <- object@optim$fx
+    fx.group <- object@optim$fx.group
     meanstructure <- object@Model@meanstructure
     categorical   <- object@Model@categorical
     multigroup    <- object@Data@ngroups > 1L
@@ -117,7 +117,8 @@ lav_fit_measures <- function(object, fit.measures="all",
     # cfi/tli
     fit.cfi.tli <- c("cfi", "tli")
     if(scaled) {
-        fit.cfi.tli <- c(fit.cfi.tli, "cfi.scaled", "tli.scaled")
+        fit.cfi.tli <- c(fit.cfi.tli, "cfi.scaled", "tli.scaled",
+                                      "cfi.robust", "tli.robust")
     }
 
     # more incremental fit indices
@@ -125,8 +126,10 @@ lav_fit_measures <- function(object, fit.measures="all",
                          "ifi", "rni")
     if(scaled) { 
         fit.incremental <- c(fit.incremental, "cfi.scaled", "tli.scaled", 
-                             "nnfi.scaled", "rfi.scaled", "nfi.scaled", 
-                             "ifi.scaled", "rni.scaled")
+                             "cfi.robust", "tli.robust",
+                             "nnfi.scaled", "nnfi.robust",
+                             "rfi.scaled", "nfi.scaled",
+                             "ifi.scaled", "rni.scaled", "rni.robust")
     }
     
     # likelihood based measures
@@ -143,14 +146,20 @@ lav_fit_measures <- function(object, fit.measures="all",
     # rmsea
     fit.rmsea <- c("rmsea", "rmsea.ci.lower", "rmsea.ci.upper", "rmsea.pvalue")
     if(scaled) {
-        fit.rmsea <- c(fit.rmsea, "rmsea.scaled", "rmsea.ci.lower.scaled", 
-                       "rmsea.ci.upper.scaled", "rmsea.pvalue.scaled")
+        fit.rmsea <- c(fit.rmsea, "rmsea.scaled", "rmsea.ci.lower.scaled",
+                       "rmsea.ci.upper.scaled", "rmsea.pvalue.scaled",
+                       "rmsea.robust", "rmsea.ci.lower.robust",
+                       "rmsea.ci.upper.robust", "rmsea.pvalue.robust")
     }
 
     # srmr
     if(categorical) {
-        fit.srmr <- c("wrmr")
-        fit.srmr2 <- c("wrmr")
+        fit.srmr <- c("srmr", "wrmr")
+        fit.srmr2 <- c("rmr", "rmr_nomean",
+                       "srmr", # per default equal to srmr_bentler_nomean
+                       "srmr_bentler", "srmr_bentler_nomean",
+                       "srmr_bollen", "srmr_bollen_nomean",
+                       "srmr_mplus", "srmr_mplus_nomean")
     } else {
         fit.srmr <- c("srmr")
         fit.srmr2 <- c("rmr", "rmr_nomean", 
@@ -242,10 +251,12 @@ lav_fit_measures <- function(object, fit.measures="all",
     }
 
 
-    if(any(c("cfi", "cfi.scaled", "tli", "tli.scaled",
-             "nnfi", "nnfi.scaled", "pnfi", "pnfi.scaled",
+    if(any(c("cfi", "cfi.scaled", "cfi.robust", 
+             "tli", "tli.scaled", "tli.robust",
+             "nnfi", "nnfi.scaled", "nnfi.robust", 
+             "pnfi", "pnfi.scaled",
              "rfi", "rfi.scaled", "nfi", "nfi.scaled",
-             "ifi", "ifi.scaled", "rni", "rni.scaled",
+             "ifi", "ifi.scaled", "rni", "rni.scaled", "rni.robust",
              "baseline.chisq", "baseline.chisq.scaled",
              "baseline.pvalue", "baseline.pvalue.scaled") %in% fit.measures)) {
         
@@ -316,7 +327,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 t1 <- max( c(X2.scaled - df.scaled, 0) )
                 t2 <- max( c(X2.scaled - df.scaled,
                              X2.null.scaled - df.null.scaled, 0) )
-                if(is.na(t1) || is.na(t2)){
+                if(is.na(t1) || is.na(t2)) {
                     indices["cfi.scaled"] <- NA
                 } else if(t1 == 0 && t2 == 0) {
                     indices["cfi.scaled"] <- 1
@@ -324,41 +335,150 @@ lav_fit_measures <- function(object, fit.measures="all",
                     indices["cfi.scaled"] <- 1 - t1/t2
                 }
             }
+            if("cfi.robust" %in% fit.measures) {
+                # see Brosseau-Liard & Savalei MBR 2014, equation 15
+
+                # what to do if X2 = 0 and df = 0? in this case,
+                # the scaling factor (ch) will be NA, and we get NA 
+                # (instead of 1)
+                if(X2 < .Machine$double.eps && df == 0) {
+                    ch <- 0
+                } else {
+                    ch <- TEST[[2]]$scaling.factor
+                }
+                cb <- fit.indep@test[[2]]$scaling.factor
+
+                t1 <- max( c(X2 - (ch*df), 0) )
+                t2 <- max( c(X2 - (ch*df), X2.null - (cb*df.null), 0) )
+                if(is.na(t1) || is.na(t2)) {
+                    indices["cfi.robust"] <- NA
+                } else if(t1 == 0 && t2 == 0) {
+                    indices["cfi.robust"] <- 1
+                } else {
+                    indices["cfi.robust"] <- 1 - t1/t2
+                }
+            }
+
+            # RNI - relative noncentrality index (McDonald & Marsh, 1990)
+            # same as CFI, but without the max(0,)
+            if("rni" %in% fit.measures) {
+                t1 <- X2 - df
+                t2 <- X2.null - df.null
+                if(t2 == 0) {
+                    RNI <- NA
+                } else {
+                    RNI <- 1 - t1/t2
+                }
+                indices["rni"] <- RNI
+            }
+            if("rni.scaled" %in% fit.measures) {
+                t1 <- X2.scaled - df.scaled
+                t2 <- X2.null.scaled - df.null.scaled
+                t2 <- X2.null - df.null
+                if(is.na(t1) || is.na(t2)) {
+                    RNI <- NA
+                } else if(t2 == 0) {
+                    RNI <- NA
+                } else {
+                    RNI <- 1 - t1/t2
+                }
+                indices["rni.scaled"] <- RNI
+            }
+            if("rni.robust" %in% fit.measures) {
+                # see Brosseau-Liard & Savalei MBR 2014, equation 15
+
+                # what to do if X2 = 0 and df = 0? in this case,
+                # the scaling factor (ch) will be NA, and we get NA 
+                # (instead of 1)
+                if(X2 < .Machine$double.eps && df == 0) {
+                    ch <- 0
+                } else {
+                    ch <- TEST[[2]]$scaling.factor
+                }
+                cb <- fit.indep@test[[2]]$scaling.factor
+
+                t1 <- X2 - ch*df
+                t2 <- X2.null - cb*df.null
+                if(is.na(t1) || is.na(t2)) {
+                    RNI <- NA
+                } else if(t2 == 0) {
+                    RNI <- NA
+                } else {
+                    RNI <- 1 - t1/t2
+                }
+                indices["rni.robust"] <- RNI
+            }
 
             # TLI - Tucker-Lewis index (Tucker & Lewis, 1973)
             # same as
             # NNFI - nonnormed fit index (NNFI, Bentler & Bonett, 1980)
             if("tli" %in% fit.measures || "nnfi" %in% fit.measures) {
+                # note: formula in lavaan <= 0.5-20:
+                # t1 <- X2.null/df.null - X2/df
+                # t2 <- X2.null/df.null - 1
+                # if(t1 < 0 && t2 < 0) {
+                #    TLI <- 1
+                #} else {
+                #    TLI <- t1/t2
+                #}
+                # note: TLI original formula was in terms of fx/df, not X2/df
+                # then, t1 <- fx_0/df.null - fx/df
+                #       t2 <- fx_0/df.null - 1/N (or N-1 for wishart)
+                
+                # note: in lavaan 0.5-21, we use the alternative formula:
+                # TLI <- 1 - ((X2 - df)/(X2.null - df.null) * df.null/df)
+                # - this one has the advantage that a 'robust' version
+                #   can be derived; this seems non-trivial for the original one
+                # - unlike cfi, we do not use 'max(0, )' for t1 and t2
+                #   therefore, t1 can go negative, and TLI can be > 1
+                t1 <- (X2 - df)*df.null
+                t2 <- (X2.null - df.null)*df
                 if(df > 0) {
-                    t1 <- X2.null/df.null - X2/df
-                    t2 <- X2.null/df.null - 1 
-                    # note: TLI original formula was in terms of fx/df, not X2/df
-                    # then, t1 <- fx_0/df.null - fx/df
-                    #       t2 <- fx_0/df.null - 1/N (or N-1 for wishart)
-                    if(t1 < 0 && t2 < 0) {
-                        TLI <- 1
-                    } else {
-                        TLI <- t1/t2
-                    }
+                    indices["tli"] <- indices["nnfi"] <- 1 - t1/t2
                 } else {
-                   TLI <- 1
+                    indices["tli"] <- indices["nnfi"] <- 1
                 }
-                indices["tli"] <- indices["nnfi"] <- TLI
             }
-            if("tli.scaled" %in% fit.measures || "nnfi.scaled" %in% fit.measures) {
-                if(df > 0) {
-                    t1 <- X2.null.scaled/df.null.scaled - X2.scaled/df.scaled
-                    t2 <- X2.null.scaled/df.null.scaled - 1
-                    if(t1 < 0 && t2 < 0) {
-                        TLI <- 1
-                    } else {
-                        TLI <- t1/t2
-                    }
+
+            if("tli.scaled" %in% fit.measures || 
+               "nnfi.scaled" %in% fit.measures) {
+
+                t1 <- (X2.scaled - df.scaled)*df.null.scaled
+                t2 <- (X2.null.scaled - df.null.scaled)*df.scaled
+                if(is.na(t1) || is.na(t2)) {
+                    indices["tli.scaled"] <- indices["nnfi.scaled"] <- NA
+                } else if(df > 0 && t2 != 0) { 
+                    indices["tli.scaled"] <- indices["nnfi.scaled"] <- 1 - t1/t2
                 } else {
-                    TLI <- 1
+                    indices["tli.scaled"] <- indices["nnfi.scaled"] <- 1
                 }
-                indices["tli.scaled"] <- indices["nnfi.scaled"] <- TLI
             }
+
+            if("tli.robust" %in% fit.measures || 
+               "nnfi.robust" %in% fit.measures) {
+                #  see Brosseau-Liard & Savalei MBR 2014, equation 16
+
+                # what to do if X2 = 0 and df = 0? in this case,
+                # the scaling factor (ch) will be NA, and we get NA 
+                # (instead of 1)
+                if(X2 < .Machine$double.eps && df == 0) {
+                    ch <- 0
+                } else {
+                    ch <- TEST[[2]]$scaling.factor
+                }
+                cb <- fit.indep@test[[2]]$scaling.factor
+ 
+                t1 <- (X2 - ch*df)*df.null
+                t2 <- (X2.null - cb*df.null)*df
+                if(is.na(t1) || is.na(t2)) {
+                    indices["tli.robust"] <- indices["nnfi.robust"] <- NA
+                } else if(df > 0 && t2 != 0) {
+                    indices["tli.robust"] <- indices["nnfi.robust"] <- 1 - t1/t2
+                } else {
+                    indices["tli.robust"] <- indices["nnfi.robust"] <- 1
+                }
+            }
+            
     
     
             # RFI - relative fit index (Bollen, 1986; Joreskog & Sorbom 1993)
@@ -448,38 +568,14 @@ lav_fit_measures <- function(object, fit.measures="all",
                 }
                 indices["ifi.scaled"] <- IFI
             }
- 
-            # RNI - relative noncentrality index (McDonald & Marsh, 1990)
-            if("rni" %in% fit.measures) {
-                t1 <- X2 - df
-                t2 <- X2.null - df.null
-                if(t1 < 0 || t2 < 0) {
-                    RNI <- 1
-                } else {
-                    RNI <- 1 - t1/t2
-                }
-                indices["rni"] <- RNI
-            }
-            if("rni.scaled" %in% fit.measures) {
-                t1 <- X2.scaled - df.scaled
-                t2 <- X2.null.scaled - df.null.scaled
-                t2 <- X2.null - df.null
-                if(is.na(t1) || is.na(t2)) {
-                    RNI <- NA
-                } else if(t1 < 0 || t2 < 0) {
-                    RNI <- 1
-                } else {
-                    RNI <- 1 - t1/t2
-                }
-                indices["rni.scaled"] <- RNI
-            }
         }
     }
 
     if("logl" %in% fit.measures ||
        "unrestricted.logl" %in% fit.measures ||
        "aic" %in% fit.measures ||
-       "bic" %in% fit.measures) {
+       "bic" %in% fit.measures ||
+       "bic2" %in% fit.measures) {
 
         if(estimator == "ML" || estimator == "MML") {
 
@@ -507,18 +603,27 @@ lav_fit_measures <- function(object, fit.measures="all",
 
             if(logl.ok) {
                 for(g in 1:G) {
-                    nvar <- ncol(object@SampleStats@cov[[g]])
                     if(!object@SampleStats@missing.flag) {
-                        Ng <- object@SampleStats@nobs[[g]]
-                        c <- Ng*nvar/2 * log(2 * pi)
-                        logl.H1.group[g] <- ( -c -(Ng/2) *
-                                          object@SampleStats@cov.log.det[[g]]
-                                          - (Ng/2)*nvar )
+                        if(object@Model@conditional.x) {
+                            nvar <- ncol(object@SampleStats@res.cov[[g]])
+                            Ng <- object@SampleStats@nobs[[g]]
+                            c <- Ng*nvar/2 * log(2 * pi)
+                            logl.H1.group[g] <- ( -c -(Ng/2) *
+                                        object@SampleStats@res.cov.log.det[[g]]
+                                              - (Ng/2)*nvar )
+                        } else {
+                            nvar <- ncol(object@SampleStats@cov[[g]])
+                            Ng <- object@SampleStats@nobs[[g]]
+                            c <- Ng*nvar/2 * log(2 * pi)
+                            logl.H1.group[g] <- ( -c -(Ng/2) *
+                                            object@SampleStats@cov.log.det[[g]]
+                                              - (Ng/2)*nvar )
+                        }
                     } else { # missing patterns case
                         pat <- object@Data@Mp[[g]]$pat
                         Ng <- object@Data@nobs[[g]]
                         ni <- as.numeric(apply(pat, 1, sum) %*% 
-                                          as.integer(rownames(pat)))
+                                         object@Data@Mp[[g]]$freq)
                         fx.full <- object@SampleStats@missing.h1[[g]]$h1
                         logl.H1.group[g] <- - (ni/2 * log(2 * pi)) - 
                                                   (Ng/2 * fx.full)
@@ -568,7 +673,8 @@ lav_fit_measures <- function(object, fit.measures="all",
             }
 
             # BIC
-            if("bic" %in% fit.measures) {
+            if("bic" %in% fit.measures ||
+               "bic2" %in% fit.measures) {
                 BIC <- -2*logl.H0 + npar*log(N)
                 indices["bic"] <- BIC
 
@@ -600,41 +706,56 @@ lav_fit_measures <- function(object, fit.measures="all",
             if("bic" %in% fit.measures) {
                 indices["bic"] <- as.numeric(NA)
             }
+            if("bic2" %in% fit.measures) {
+                indices["bic2"] <- as.numeric(NA)
+            }
         }
     }
 
     N.RMSEA <- max(N, X2*4) # FIXME: good strategy??
-    if(any(c("rmsea","rmsea.scaled") %in% fit.measures)) {
+    if(any(c("rmsea","rmsea.scaled","rmsea.robust") %in% fit.measures)) {
         # RMSEA
+        # - RMSEA.scaled replaces X2 by X2.scaled (which is not ok)
+        # - RMSEA.robust uses the formula from Broseau-Liard, Savalei & Li 
+        #   (2012) paper (see eq 8)
         if(is.na(X2) || is.na(df)) {
-            RMSEA <- RMSEA.scaled <- as.numeric(NA)
+            RMSEA <- RMSEA.scaled <- RMSEA.robust <- as.numeric(NA)
         } else if(df > 0) {
             if(scaled) {
                 d <- sum(TEST[[2]]$trace.UGamma)
                 if(is.na(d) || d==0) d <- NA
+
+                # scaling factor
+                c.hat <- TEST[[2]]$scaling.factor
             } 
             if(object@Options$mimic %in% c("Mplus", "lavaan")) {
-                GG <- 0
-                RMSEA <- sqrt( max( c((X2/N)/df - 1/(N-GG), 0) ) ) * sqrt(G)
+                RMSEA <- sqrt( max( c((X2/N)/df - 1/N, 0) ) ) * sqrt(G)
                 if(scaled && test != "scaled.shifted") {
                     RMSEA.scaled <- 
-                         sqrt( max( c((X2/N)/d - 1/(N-GG), 0) ) ) * sqrt(G)
+                         sqrt( max( c((X2/N)/d - 1/N, 0) ) ) * sqrt(G)
+                    RMSEA.robust <-
+                         sqrt( max( c((X2/N)/df - c.hat/N, 0) ) ) * sqrt(G)
                 } else if(test == "scaled.shifted") {
                     RMSEA.scaled <-
-                         sqrt( max(c((X2.scaled/N)/df - 1/(N-GG), 0))) * sqrt(G)
+                         sqrt( max( c((X2.scaled/N)/df - 1/N, 0))) * sqrt(G)
+                    RMSEA.robust <-
+                         sqrt( max( c((X2/N)/df - c.hat/N, 0) ) ) * sqrt(G)
                 }
             } else {
+                # no multiple group correction
                 RMSEA <- sqrt( max( c((X2/N)/df - 1/N, 0) ) )
                 if(scaled) {
                     RMSEA.scaled <- sqrt( max( c((X2/N)/d - 1/N, 0) ) )
+                    RMSEA.robust <- sqrt( max( c((X2/N)/df - c.hat/N, 0) ) )
                 }
             }
         } else {
-            RMSEA <- RMSEA.scaled <- 0
+            RMSEA <- RMSEA.scaled <- RMSEA.robust <- 0
         }
         indices["rmsea"] <- RMSEA
         if(scaled) {
             indices["rmsea.scaled"] <- RMSEA.scaled
+            indices["rmsea.robust"] <- RMSEA.robust
         }
     }
 
@@ -660,7 +781,8 @@ lav_fit_measures <- function(object, fit.measures="all",
         }
     }
 
-    if("rmsea.ci.lower.scaled" %in% fit.measures) {
+    if("rmsea.ci.lower.scaled" %in% fit.measures ||
+       "rmsea.ci.lower.robust" %in% fit.measures) {
         if(test == "scaled.shifted") {
             XX2 <- X2.scaled
             df2 <- df
@@ -672,19 +794,40 @@ lav_fit_measures <- function(object, fit.measures="all",
             (pchisq(XX2, df=df2, ncp=lambda) - 0.95)
         }
         if(is.na(XX2) || is.na(df2)) {
-            indices["rmsea.ci.lower.scaled"] <- NA
+            indices["rmsea.ci.lower.scaled"] <- 
+            indices["rmsea.ci.lower.robust"] <- NA
         } else if(df < 1 || df2 < 1 || lower.lambda(0) < 0.0) {
-            indices["rmsea.ci.lower.scaled"] <- 0
+            indices["rmsea.ci.lower.scaled"] <-
+            indices["rmsea.ci.lower.robust"] <- 0
         } else {
+            # 'scaled'
             lambda.l <- try(uniroot(f=lower.lambda, lower=0, upper=XX2)$root,
                             silent=TRUE)
             if(inherits(lambda.l, "try-error")) { lambda.l <- NA }
             if(object@Options$mimic %in% c("lavaan", "Mplus")) {
-                GG <- 0
                 indices["rmsea.ci.lower.scaled"] <- 
-                    sqrt( lambda.l/((N-GG)*df2) ) * sqrt(G)
+                        sqrt( lambda.l/(N*df2) ) * sqrt(G)
             } else {
+                # no multiple group correction
                 indices["rmsea.ci.lower.scaled"] <- sqrt( lambda.l/(N*df2) )
+            }
+
+            # robust
+            XX2 <- X2.scaled
+            df2 <- df
+            # scaling factor
+            c.hat <- TEST[[2]]$scaling.factor
+
+            lambda.l <- try(uniroot(f=lower.lambda, lower=0, upper=XX2)$root,
+                            silent=TRUE)
+            if(inherits(lambda.l, "try-error")) { lambda.l <- NA }
+            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+                indices["rmsea.ci.lower.robust"] <-
+                        sqrt( (c.hat*lambda.l)/(N*df2) ) * sqrt(G)
+            } else {
+                # no multiple group correction
+                indices["rmsea.ci.lower.robust"] <- 
+                    sqrt( (c.hat*lambda.l)/(N*df2) )
             }
         }
     }
@@ -711,7 +854,8 @@ lav_fit_measures <- function(object, fit.measures="all",
         }
     }
 
-    if("rmsea.ci.upper.scaled" %in% fit.measures) {
+    if("rmsea.ci.upper.scaled" %in% fit.measures ||
+       "rmsea.ci.upper.robust" %in% fit.measures) {
         if(test == "scaled.shifted") {
             XX2 <- X2.scaled
             df2 <- df
@@ -723,21 +867,42 @@ lav_fit_measures <- function(object, fit.measures="all",
             (pchisq(XX2, df=df2, ncp=lambda) - 0.05)
         }
         if(is.na(XX2) || is.na(df2)) {
-            indices["rmsea.ci.upper.scaled"] <- NA
+            indices["rmsea.ci.upper.scaled"] <- 
+            indices["rmsea.ci.upper.robust"] <- NA
         } else if(df < 1 || df2 < 1 || upper.lambda(N.RMSEA) > 0 || 
                                        upper.lambda(0) < 0) {
-            indices["rmsea.ci.upper.scaled"] <- 0
+            indices["rmsea.ci.upper.scaled"] <- 
+            indices["rmsea.ci.upper.robust"] <- 0
         } else {
+            # 'scaled'
             lambda.u <- try(uniroot(f=upper.lambda, lower=0,upper=N.RMSEA)$root,
                             silent=TRUE)
             if(inherits(lambda.u, "try-error")) { lambda.u <- NA }
             if(object@Options$mimic %in% c("lavaan", "Mplus")) {
-                GG <- 0
-                indices["rmsea.ci.upper.scaled"] <- 
-                    sqrt( lambda.u/((N-GG)*df2) ) * sqrt(G)
+                indices["rmsea.ci.upper.scaled"] <-
+                    sqrt( lambda.u/(N*df2) ) * sqrt(G)
             } else {
-                indices["rmsea.ci.upper.scaled"] <- 
+                # no multiple group correction
+                indices["rmsea.ci.upper.scaled"] <-
                     sqrt( lambda.u/(N*df2) )
+            }
+
+            # robust
+            XX2 <- X2.scaled
+            df2 <- df
+            # scaling factor
+            c.hat <- TEST[[2]]$scaling.factor
+
+            lambda.u <- try(uniroot(f=upper.lambda, lower=0,upper=N.RMSEA)$root,
+                            silent=TRUE)
+            if(inherits(lambda.u, "try-error")) { lambda.u <- NA }
+            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+                indices["rmsea.ci.upper.robust"] <- 
+                    sqrt( (c.hat*lambda.u)/(N*df2) ) * sqrt(G)
+            } else {
+                # no multiple group correction
+                indices["rmsea.ci.upper.robust"] <-
+                    sqrt( (c.hat*lambda.u)/(N*df2) )
             }
         }
     }    
@@ -747,8 +912,7 @@ lav_fit_measures <- function(object, fit.measures="all",
             indices["rmsea.pvalue"] <- as.numeric(NA)
         } else if(df > 0) {
             if(object@Options$mimic %in% c("lavaan","Mplus")) {
-                GG <- 0
-                ncp <- (N-GG)*df*0.05^2/G
+                ncp <- N*df*0.05^2/G
                 indices["rmsea.pvalue"] <- 
                     1 - pchisq(X2, df=df, ncp=ncp)
             } else {
@@ -756,11 +920,12 @@ lav_fit_measures <- function(object, fit.measures="all",
                     1 - pchisq(X2, df=df, ncp=(N*df*0.05^2))
             }
         } else {
-            indices["rmsea.pvalue"] <- 1
+            indices["rmsea.pvalue"] <- NA # used to be 1 in < 0.5-21
         }
     }
 
-    if("rmsea.pvalue.scaled" %in% fit.measures) {
+    if("rmsea.pvalue.scaled" %in% fit.measures ||
+       "rmsea.pvalue.robust" %in% fit.measures) {
         if(test == "scaled.shifted") {
             XX2 <- X2.scaled
             df2 <- df
@@ -769,19 +934,36 @@ lav_fit_measures <- function(object, fit.measures="all",
             df2 <- sum(TEST[[2]]$trace.UGamma)
         }
         if(is.na(XX2) || is.na(df2)) {
-            indices["rmsea.pvalue.scaled"] <- as.numeric(NA)
+            indices["rmsea.pvalue.scaled"] <- 
+            indices["rmsea.pvalue.robust"] <- as.numeric(NA)
         } else if(df > 0) {
+            # scaled
             if(object@Options$mimic %in% c("lavaan", "Mplus")) {
-                GG <- 0
-                ncp <- (N-GG)*df2*0.05^2/G
+                ncp <- N*df2*0.05^2/G
                 indices["rmsea.pvalue.scaled"] <- 
                     1 - pchisq(XX2, df=df2, ncp=ncp)
             } else {
                 indices["rmsea.pvalue.scaled"] <-
                     1 - pchisq(XX2, df=df2, ncp=(N*df2*0.05^2))
             }
+
+            # robust
+            XX2 <- X2.scaled
+            df2 <- df
+            # scaling factor
+            c.hat <- TEST[[2]]$scaling.factor
+
+            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+                ncp <- N*(df2/c.hat)*0.05^2/G
+                indices["rmsea.pvalue.robust"] <-
+                    1 - pchisq(XX2, df=df2, ncp=ncp)
+            } else {
+                indices["rmsea.pvalue.robust"] <-
+                    1 - pchisq(XX2, df=df2, ncp=(N*(df2/c.hat)*0.05^2))
+            }
         } else {
-            indices["rmsea.pvalue.scaled"] <- 1
+            indices["rmsea.pvalue.scaled"] <- 
+            indices["rmsea.pvalue.robust"] <- NA # used to be 1 in < 0.5-21
         }
     }
 
@@ -795,11 +977,17 @@ lav_fit_measures <- function(object, fit.measures="all",
         srmr_bollen_nomean.group <- numeric(G)
         srmr_mplus.group <- numeric(G)
         srmr_mplus_nomean.group <- numeric(G)
+
         for(g in 1:G) {
             # observed
             if(!object@SampleStats@missing.flag) {
-                S <- object@SampleStats@cov[[g]]
-                M <- object@SampleStats@mean[[g]]
+                if(object@Model@conditional.x) {
+                    S <- object@SampleStats@res.cov[[g]]
+                    M <- object@SampleStats@res.int[[g]]
+                } else {
+                    S <- object@SampleStats@cov[[g]]
+                    M <- object@SampleStats@mean[[g]]
+                }
             } else {
                 # EM estimates
                 S <- object@SampleStats@missing.h1[[g]]$sigma
@@ -808,8 +996,8 @@ lav_fit_measures <- function(object, fit.measures="all",
             nvar <- ncol(S)
 
             # estimated
-            Sigma.hat <- object@Fit@Sigma.hat[[g]]
-            Mu.hat    <- object@Fit@Mu.hat[[g]]
+            Sigma.hat <- object@implied$cov[[g]]
+            Mu.hat    <- object@implied$mean[[g]]
 
             # unstandardized residuals
             RR <- (S - Sigma.hat)
@@ -895,7 +1083,11 @@ lav_fit_measures <- function(object, fit.measures="all",
 
         # the default!
         if(object@Options$mimic == "lavaan") {
-            indices["srmr"] <- SRMR_BENTLER
+            if(categorical) {
+                indices["srmr"] <- SRMR_BENTLER_NOMEAN
+            } else {
+                indices["srmr"] <- SRMR_BENTLER
+            }
         } else if(object@Options$mimic == "EQS") {
             indices["srmr"] <- SRMR_BENTLER
         } else if(object@Options$mimic == "Mplus") {
@@ -913,13 +1105,23 @@ lav_fit_measures <- function(object, fit.measures="all",
         indices["srmr_bollen_nomean"]  <- SRMR_BOLLEN_NOMEAN
         indices["srmr_mplus"]          <- SRMR_MPLUS
         indices["srmr_mplus_nomean"]   <- SRMR_MPLUS_NOMEAN
-        indices["rmr"]                 <- RMR
+        if(categorical) {
+            indices["rmr"]             <- RMR
+        } else {
+            indices["rmr"]             <- RMR_NOMEAN
+        }
         indices["rmr_nomean"]          <- RMR_NOMEAN
     }
 
     if(any(c("cn_05", "cn_01") %in% fit.measures)) {
-        CN_05 <- qchisq(p=0.95, df=df)/(X2/N) + 1
-        CN_01 <- qchisq(p=0.99, df=df)/(X2/N) + 1
+        # catch df=0, X2=0
+        if(df == 0 && X2 == 0) {
+            CN_05 <- as.numeric(NA)
+            CN_01 <- as.numeric(NA)
+        } else {
+            CN_05 <- qchisq(p=0.95, df=df)/(X2/N) + 1
+            CN_01 <- qchisq(p=0.99, df=df)/(X2/N) + 1
+        }
         indices["cn_05"] <- CN_05
         indices["cn_01"] <- CN_01
     }
@@ -1156,21 +1358,24 @@ print.fit.measures <- function(x) {
         if("cfi" %in% names.x) {
             t0.txt <- sprintf("  %-40s", "Comparative Fit Index (CFI)")
             t1.txt <- sprintf("  %10.3f", x["cfi"])
-            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["cfi.scaled"]), "")
+            #t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["cfi.scaled"]), "")
+            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["cfi.robust"]), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
         }
 
         if("tli" %in% names.x) {
             t0.txt <- sprintf("  %-40s", "Tucker-Lewis Index (TLI)")
             t1.txt <- sprintf("  %10.3f", x["tli"])
-            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["tli.scaled"]), "")
+            #t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["tli.scaled"]), "")
+            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["tli.robust"]), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
         }
 
         if("nnfi" %in% names.x) {
             t0.txt <- sprintf("  %-42s", "Bentler-Bonett Non-normed Fit Index (NNFI)")
             t1.txt <- sprintf("  %8.3f", x["nnfi"])
-            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["nnfi.scaled"]), "")
+            #t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["nnfi.scaled"]), "")
+            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["nnfi.robust"]), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
         }
  
@@ -1205,7 +1410,8 @@ print.fit.measures <- function(x) {
         if("rni" %in% names.x) {
             t0.txt <- sprintf("  %-40s", "Relative Noncentrality Index (RNI)")
             t1.txt <- sprintf("  %10.3f", x["rni"])
-            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["rni.scaled"]), "")
+            #t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["rni.scaled"]), "")
+            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["rni.robust"]), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
         }
     }
@@ -1277,22 +1483,26 @@ print.fit.measures <- function(x) {
        t0.txt <- sprintf("  %-40s", "RMSEA")
        t1.txt <- sprintf("  %10.3f", x["rmsea"])
        t2.txt <- ifelse(scaled,
-                 sprintf("  %10.3f", x["rmsea.scaled"]), "")
+                 #sprintf("  %10.3f", x["rmsea.scaled"]), "")
+                 sprintf("  %10.3f", x["rmsea.robust"]), "")
        cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
        if("rmsea.ci.lower" %in% names.x) {
            t0.txt <- sprintf("  %-38s", "90 Percent Confidence Interval")
            t1.txt <- sprintf("  %5.3f", x["rmsea.ci.lower"])
            t2.txt <- sprintf("  %5.3f", x["rmsea.ci.upper"])
            t3.txt <- ifelse(scaled,
-                     sprintf("       %5.3f  %5.3f", x["rmsea.ci.lower.scaled"],
-                                               x["rmsea.ci.upper.scaled"]), "")
+                     #sprintf("       %5.3f  %5.3f", x["rmsea.ci.lower.scaled"],
+                     #                          x["rmsea.ci.upper.scaled"]), "")
+                     sprintf("       %5.3f  %5.3f", x["rmsea.ci.lower.robust"],
+                                               x["rmsea.ci.upper.robust"]), "")
            cat(t0.txt, t1.txt, t2.txt, t3.txt, "\n", sep="")
        }
        if("rmsea.pvalue" %in% names.x) {
            t0.txt <- sprintf("  %-40s", "P-value RMSEA <= 0.05")
            t1.txt <- sprintf("  %10.3f", x["rmsea.pvalue"])
            t2.txt <- ifelse(scaled,
-                 sprintf("  %10.3f", x["rmsea.pvalue.scaled"]), "")
+                 #sprintf("  %10.3f", x["rmsea.pvalue.scaled"]), "")
+                 sprintf("  %10.3f", x["rmsea.pvalue.robust"]), "")
            cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
        }
    }

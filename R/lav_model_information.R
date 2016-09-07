@@ -14,7 +14,8 @@ lav_model_information <- function(lavmodel       = NULL,
                                   information    = "observed",
                                   extra          = FALSE,
                                   augmented      = FALSE,
-                                  inverted       = FALSE) {
+                                  inverted       = FALSE,
+                                  use.ginv       = FALSE) {
 
     # compute information matrix
     if(information == "observed") {
@@ -27,12 +28,12 @@ lav_model_information <- function(lavmodel       = NULL,
             lavsamplestats = lavsamplestats, lavdata = lavdata,
             lavcache = lavcache, estimator = estimator,
             group.weight = group.weight,
-            augmented = augmented, inverted = inverted)
+            augmented = augmented, inverted = inverted, use.ginv = use.ginv)
     } else {
         E <- lav_model_information_expected(lavmodel = lavmodel,
             lavsamplestats = lavsamplestats, lavdata = lavdata,
             lavcache = lavcache, estimator = estimator, extra = extra,
-            augmented = augmented, inverted = inverted)
+            augmented = augmented, inverted = inverted, use.ginv = use.ginv)
     }
 
     # information, augmented information, or inverted information
@@ -48,7 +49,8 @@ lav_model_information_expected <- function(lavmodel       = NULL,
                                            lavcache       = NULL,
                                            extra          = FALSE,
                                            augmented      = FALSE,
-                                           inverted       = FALSE) {
+                                           inverted       = FALSE,
+                                           use.ginv       = FALSE) {
 
     if(inverted) {
         augmented <- TRUE
@@ -98,7 +100,8 @@ lav_model_information_expected <- function(lavmodel       = NULL,
         Information <- 
             lav_model_information_augment_invert(lavmodel    = lavmodel,
                                                  information = Information,
-                                                 inverted    = inverted)
+                                                 inverted    = inverted,
+                                                 use.ginv    = use.ginv)
     }
 
     if(extra) {
@@ -116,7 +119,8 @@ lav_model_information_expected_MLM <- function(lavmodel       = NULL,
                                                Delta          = NULL,
                                                extra          = FALSE,
                                                augmented      = FALSE,
-                                               inverted       = FALSE) {
+                                               inverted       = FALSE,
+                                               use.ginv       = FALSE) {
 
     if(inverted) {
         augmented <- TRUE
@@ -132,15 +136,15 @@ lav_model_information_expected_MLM <- function(lavmodel       = NULL,
         GW <- unlist(computeGW(lavmodel = lavmodel))
     }
     for(g in 1:lavsamplestats@ngroups) {
-        WLS.V[[g]] <- compute.A1.sample(lavsamplestats=lavsamplestats, group=g,
-                                        meanstructure=lavmodel@meanstructure,
-                                        information="expected")
+        WLS.V[[g]] <- lav_mvnorm_h1_information_expected(
+                          sample.cov     = lavsamplestats@cov[[g]],
+                          sample.cov.inv = lavsamplestats@icov[[g]])
         # the same as GLS... (except for the N/N-1 scaling)
         if(lavmodel@group.w.free) {
             # unweight!!
             a <- exp(GW[g]) / lavsamplestats@nobs[[g]]
             # a <- exp(GW[g]) * lavsamplestats@ntotal / lavsamplestats@nobs[[g]]
-            WLS.V[[g]] <- bdiag( matrix(a,1,1), WLS.V[[g]])
+            WLS.V[[g]] <- lav_matrix_bdiag( matrix(a,1,1), WLS.V[[g]])
         }
     }
 
@@ -165,7 +169,8 @@ lav_model_information_expected_MLM <- function(lavmodel       = NULL,
         Information <-
             lav_model_information_augment_invert(lavmodel    = lavmodel,
                                                  information = Information,
-                                                 inverted    = inverted)
+                                                 inverted    = inverted,
+                                                 use.ginv    = use.ginv)
     }
 
     if(extra) {
@@ -183,7 +188,8 @@ lav_model_information_observed <- function(lavmodel       = NULL,
                                                  lavcache       = NULL,
                                                  group.weight   = TRUE,
                                                  augmented      = FALSE,
-                                                 inverted       = FALSE) {
+                                                 inverted       = FALSE,
+                                                 use.ginv       = FALSE) {
 
     if(inverted) {
         augmented <- TRUE
@@ -213,7 +219,8 @@ lav_model_information_observed <- function(lavmodel       = NULL,
         Information <-
             lav_model_information_augment_invert(lavmodel    = lavmodel,
                                                  information = Information,
-                                                 inverted    = inverted)
+                                                 inverted    = inverted,
+                                                 use.ginv    = use.ginv)
     }
 
     Information
@@ -228,7 +235,8 @@ lav_model_information_firstorder <- function(lavmodel       = NULL,
                                              extra          = FALSE,
                                              check.pd       = FALSE,
                                              augmented      = FALSE,
-                                             inverted       = FALSE) {
+                                             inverted       = FALSE,
+                                             use.ginv       = FALSE) {
     if(inverted) {
         augmented <- TRUE
     }
@@ -239,6 +247,11 @@ lav_model_information_firstorder <- function(lavmodel       = NULL,
         Delta <- computeDelta(lavmodel = lavmodel)
         Sigma.hat <- computeSigmaHat(lavmodel = lavmodel)
         TH <- computeTH(lavmodel = lavmodel)
+        if(lavmodel@nexo > 0L) {
+            PI <- computePI(lavmodel = lavmodel)
+        } else {
+            PI <- vector("list", length = lavsamplestats@ngroups)
+        }
     } else {
         Sigma.hat <- computeSigmaHat(lavmodel = lavmodel)
         Mu.hat <- computeMuHat(lavmodel = lavmodel)
@@ -248,14 +261,17 @@ lav_model_information_firstorder <- function(lavmodel       = NULL,
     for(g in 1:lavsamplestats@ngroups) {
         if(estimator == "PML") {
             # slow approach: compute outer product of case-wise scores
-            SC <- pml_deriv1(Sigma.hat = Sigma.hat[[g]],
-                             TH        = TH[[g]],
-                             th.idx    = lavmodel@th.idx[[g]],
-                             num.idx   = lavmodel@num.idx[[g]],
-                             X         = lavdata@X[[g]],
-                             lavcache  = lavcache[[g]],
-                             scores    = TRUE,
-                             negative  = FALSE)
+            SC <- pml_deriv1(Sigma.hat  = Sigma.hat[[g]],
+                             TH         = TH[[g]],
+                             th.idx     = lavmodel@th.idx[[g]],
+                             num.idx    = lavmodel@num.idx[[g]],
+                             X          = lavdata@X[[g]],
+                             eXo        = lavdata@eXo[[g]],
+                             PI         = PI[[g]],
+                             lavcache   = lavcache[[g]],
+                             missing    = lavdata@missing,
+                             scores     = TRUE,
+                             negative   = FALSE)
 
             # chain rule
             group.SC <- SC %*% Delta[[g]]
@@ -264,11 +280,23 @@ lav_model_information_firstorder <- function(lavmodel       = NULL,
             B0.group[[g]] <- crossprod(group.SC)
 
         } else {
-            B1 <- compute.Bbeta(Sigma.hat=Sigma.hat[[g]],
-                                Mu.hat=Mu.hat[[g]],
-                                lavsamplestats=lavsamplestats,
-                                lavdata=lavdata, group=g)
-
+            if(lavsamplestats@missing.flag) {
+                B1 <- 
+                  lav_mvnorm_missing_information_firstorder(Y = lavdata@X[[g]],
+                      Mp = lavdata@Mp[[g]], Mu = Mu.hat[[g]], 
+                      Sigma = Sigma.hat[[g]])
+            } else {
+                if(lavmodel@meanstructure) {
+                    B1 <- lav_mvnorm_information_firstorder(Y = lavdata@X[[g]],
+                              Mu = Mu.hat[[g]], Sigma = Sigma.hat[[g]],
+                              meanstructure = lavmodel@meanstructure)
+                } else {
+                    B1 <- lav_mvnorm_information_firstorder(Y = lavdata@X[[g]],
+                              Mu = lavsamplestats@mean[[g]],  # saturated
+                              Sigma = Sigma.hat[[g]],
+                              meanstructure = lavmodel@meanstructure)
+                }
+            }        
             B0.group[[g]] <- t(Delta[[g]]) %*% B1 %*% Delta[[g]]
         }
     } # g
@@ -300,7 +328,8 @@ lav_model_information_firstorder <- function(lavmodel       = NULL,
             lav_model_information_augment_invert(lavmodel    = lavmodel,
                                                  information = Information,
                                                  check.pd    = check.pd,
-                                                 inverted    = inverted)
+                                                 inverted    = inverted,
+                                                 use.ginv    = use.ginv)
     }
 
     if(extra) {
@@ -316,7 +345,8 @@ lav_model_information_firstorder <- function(lavmodel       = NULL,
 lav_model_information_augment_invert <- function(lavmodel    = NULL,
                                                  information = NULL,
                                                  inverted    = FALSE,
-                                                 check.pd    = FALSE) {
+                                                 check.pd    = FALSE,
+                                                 use.ginv    = FALSE) {
 
     npar <- nrow(information)
     is.augmented <- FALSE
@@ -363,7 +393,13 @@ lav_model_information_augment_invert <- function(lavmodel    = NULL,
                                                                  drop = FALSE],
                      silent = TRUE )
         } else {
-            information <- try( solve(information), silent = TRUE )
+            if(use.ginv) {
+                information <- try( MASS::ginv(information,
+                                               tol = .Machine$double.eps^(3/4)),
+                                    silent = TRUE )
+            } else {
+                information <- try( solve(information), silent = TRUE )
+            }
         }
     }
 

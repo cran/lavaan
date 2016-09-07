@@ -8,6 +8,7 @@
 # construct MATRIX representation of the model
 lav_model <- function(lavpartable      = NULL,
                       representation   = "LISREL",
+                      conditional.x    = FALSE,
                       th.idx           = list(),
                       parameterization = "delta",
                       link             = "logit",
@@ -91,7 +92,7 @@ lav_model <- function(lavpartable      = NULL,
         ov.names.x <- vnames(lavpartable, "ov.x", group=g)
         nexo[g] <- length(ov.names.x)
         ov.num <- vnames(lavpartable, "ov.num", group=g)
-        if(categorical) {
+        if(conditional.x) {
             nvar[g] <- length(ov.names.nox)
         } else {
             nvar[g] <- length(ov.names)
@@ -214,7 +215,6 @@ lav_model <- function(lavpartable      = NULL,
     if(categorical) {
         fixed.x <- TRUE
     }
-    
 
 
     Model <- new("Model",
@@ -265,16 +265,19 @@ lav_model <- function(lavpartable      = NULL,
                  cin.linear.idx      = CON$cin.linear.idx,
                  cin.nonlinear.idx   = CON$cin.nonlinear.idx,
 
-                 con.jac=con.jac,
-                 con.lambda=con.lambda,
+                 con.jac             = con.jac,
+                 con.lambda          = con.lambda,
 
-                 nexo=nexo,
-                 fixed.x=fixed.x,
-                 parameterization=parameterization,
-                 ov.x.dummy.ov.idx=ov.x.dummy.ov.idx,
-                 ov.x.dummy.lv.idx=ov.x.dummy.lv.idx,
-                 ov.y.dummy.ov.idx=ov.y.dummy.ov.idx,
-                 ov.y.dummy.lv.idx=ov.y.dummy.lv.idx)
+                 nexo                = nexo,
+                 fixed.x             = fixed.x,
+                 conditional.x       = conditional.x,
+                 #x.idx               = x.idx,
+                 parameterization    = parameterization,
+
+                 ov.x.dummy.ov.idx   = ov.x.dummy.ov.idx,
+                 ov.x.dummy.lv.idx   = ov.x.dummy.lv.idx,
+                 ov.y.dummy.ov.idx   = ov.y.dummy.ov.idx,
+                 ov.y.dummy.lv.idx   = ov.y.dummy.lv.idx)
 
     if(debug) {
          cat("lavaan DEBUG: lavaanModel\n")

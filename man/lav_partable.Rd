@@ -19,8 +19,8 @@ lav_partable_npar(partable)
 lav_partable_attributes(partable, pta = NULL)
 
 # generate parameter labels
-lav_partable_labels(partable, group.equal = "", group.partial = "", 
-                    type = "user")
+lav_partable_labels(partable, blocks = "group", group.equal = "", 
+                    group.partial = "", type = "user")
 
 # generate parameter table for specific models
 lav_partable_independence(lavobject = NULL, lavdata = NULL, lavoptions = NULL, 
@@ -29,7 +29,7 @@ lav_partable_independence(lavobject = NULL, lavdata = NULL, lavoptions = NULL,
 
 lav_partable_unrestricted(lavobject = NULL, lavdata = NULL, lavoptions = NULL, 
     lavsamplestats = NULL, sample.cov = NULL, sample.mean = NULL, 
-    sample.th = NULL, sample.th.idx = NULL)
+    sample.slopes = NULL, sample.th = NULL, sample.th.idx = NULL)
 
 lav_partable_from_lm(object, est = FALSE, label = FALSE, as.data.frame. = FALSE)
 
@@ -44,6 +44,9 @@ lav_partable_merge(pt1 = NULL, pt2 = NULL, remove.duplicated = FALSE,
 \item{partable}{A parameter table. see \code{\link{lavParTable}} 
 for more information.}
 \item{group}{Integer. If non-null, only consider this group.}
+\item{blocks}{Character vector. Which columns in the parameter table should be
+  taken to distinguish between different blocks/groups of parameters (and hence
+  be given different labels)?}
 \item{group.equal}{The same options can be used here as in the fitting functions. Parameters that are constrained to be equal across groups will be given the
 same label.}
 \item{group.partial}{A vector of character strings containing the labels
@@ -62,6 +65,10 @@ Each list element contains a sample variance-covariance matrix for this group.
 If provided, these values will be used as starting values.}
 \item{sample.mean}{Optional list of numeric vectors. 
 Each list element contains a sample mean vector for this group. 
+If provided, these values will be used as starting values.}
+\item{sample.slopes}{Optional list of numeric matrices.
+Each list element contains the sample slopes for this group (only used
+when \code{conditional.x = TRUE}).
 If provided, these values will be used as starting values.}
 \item{sample.th}{Optional list of numeric vectors. 
 Each list element contains a vector of sample thresholds for this group.

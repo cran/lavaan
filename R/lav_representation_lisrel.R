@@ -21,10 +21,30 @@ representation.LISREL <- function(partable=NULL, target=NULL,
     meanstructure <- any(partable$op == "~1")
     categorical   <- any(partable$op == "|")
     group.w.free  <- any(partable$lhs == "group" & partable$op == "%")
-    gamma <- categorical
+
+    # gamma?
+    if(categorical) {
+        gamma <- TRUE
+    } else if(any(partable$op == "~" & partable$exo == 1L)) {
+        gamma <- TRUE
+    } else {
+        gamma <- FALSE
+    }
 
     # number of groups
-    ngroups <- max(partable$group)
+    if(is.null(partable$group)) {
+        partable$group <- rep(1L, length(partable$lhs))
+        ngroups <- 1L
+    } else {
+        if(is.character(partable$group)) {
+            group.label <- unique(partable$group)
+            group.label <- group.label[ nchar(group.label) > 0L ]
+            ngroups <- length(group.label)
+        } else {
+            ngroups <- max(partable$group)
+        }
+    }
+
     ov.dummy.names.nox <- vector("list", ngroups)
     ov.dummy.names.x   <- vector("list", ngroups)
     if(extra) {
@@ -52,10 +72,10 @@ representation.LISREL <- function(partable=NULL, target=NULL,
 
         # in this representation, we need to create 'phantom/dummy' latent 
         # variables for all `x' and `y' variables not in lv.names
-        # (only y if categorical)
+        # (only y if conditional.x = TRUE)
 
         # regression dummys
-        if(categorical) {
+        if(gamma) {
             tmp.names <-
                 unique( partable$lhs[(partable$op == "~" | 
                                         partable$op == "<~") &
@@ -70,11 +90,16 @@ representation.LISREL <- function(partable=NULL, target=NULL,
                                         partable$group == g]) )
         }
         dummy.names1 <- tmp.names[ !tmp.names %in% lv.names ]
-
         # covariances involving dummys
         dummy.cov.idx <- which(partable$op == "~~" & partable$group == g &
                                (partable$lhs %in% dummy.names1 |
                                 partable$rhs %in% dummy.names1))
+        # new in 0.5-21: also include covariances involving these covariances...
+        dummy.cov.idx1 <- which(partable$op == "~~" & partable$group == g &
+                                (partable$lhs %in% partable$lhs[dummy.cov.idx] |
+                                 partable$rhs %in% partable$rhs[dummy.cov.idx]))
+        dummy.cov.idx <- unique(c(dummy.cov.idx, dummy.cov.idx1))
+
         dummy.names2 <- unique( c(partable$lhs[dummy.cov.idx],
                                   partable$rhs[dummy.cov.idx]) )
         # collect all dummy variables
@@ -125,7 +150,7 @@ representation.LISREL <- function(partable=NULL, target=NULL,
         tmp.col[idx] <- match(target$lhs[idx], lv.names)
     
         # 2. "~" regressions
-        if(categorical) {
+        if(gamma) {
             # gamma
             idx <- which(target$rhs %in% ov.names.x &
                          target$group == g & (target$op == "~" |
@@ -826,11 +851,11 @@ computeEYetax3.LISREL <- function(MLIST             = NULL,
 }
 
 # 4) VY
-# compute the *un*conditional variance of y: V(Y) or V(Y*)
-# 'unconditional' model-implied variances
-#  - same as diag(Sigma.hat) if all Y are continuous
-#  - 1.0 (or delta^2) if categorical
-#  - if also Gamma, cov.x is used (only if categorical)
+# compute the *un*conditional variance/covariance of y: V(Y) or V(Y*)
+# 'unconditional' model-implied (co)variances
+#  - same as Sigma.hat if all Y are continuous
+#  - diagonal is 1.0 (or delta^2) if categorical
+#  - if also Gamma, cov.x is used (only if conditional.x)
 #    only in THIS case, VY is different from diag(VYx)
 #
 # V(Y) = LAMBDA V(ETA) t(LAMBDA) + THETA
@@ -841,9 +866,7 @@ computeVY.LISREL <- function(MLIST=NULL, cov.x=NULL) {
  
     VETA <- computeVETA.LISREL(MLIST = MLIST, cov.x = cov.x)
     VY <- tcrossprod(LAMBDA %*% VETA, LAMBDA) + THETA
-
-    # variances only
-    diag(VY)
+    VY
 }
 
 # 5) VYx
@@ -1493,7 +1516,7 @@ computeCOV.LISREL <- function(MLIST=NULL, cov.x=NULL, delta=TRUE) {
 
     # 'extend' matrices
     LAMBDA2 <- rbind(LAMBDA, diag(nlat))
-    THETA2  <- bdiag(THETA,  matrix(0,nlat,nlat))
+    THETA2  <- lav_matrix_bdiag(THETA,  matrix(0,nlat,nlat))
 
 
     # beta?
@@ -1636,7 +1659,7 @@ derivative.F.LISREL <- function(MLIST=NULL, Omega=NULL, Omega.mu=NULL) {
 # note:
 # we avoid using the duplication and elimination matrices
 # for now (perhaps until we'll use the Matrix package)
-derivative.sigma.LISREL <- function(m="lambda", 
+derivative.sigma.LISREL_OLD <- function(m="lambda", 
                                     # all model matrix elements, or only a few?
                                     # NOTE: for symmetric matrices, 
                                     # we assume that the have full size 
@@ -1674,7 +1697,7 @@ derivative.sigma.LISREL <- function(m="lambda",
     } 
 
     # pre
-    if(m == "lambda" || m == "beta" || m == "delta") 
+    if(m == "lambda" || m == "beta") 
         IK <- diag(nvar*nvar) + lav_matrix_commutation(nvar, nvar)
     if(m == "lambda" || m == "beta") {
         IB.inv..PSI..tIB.inv..tLAMBDA <-
@@ -1692,6 +1715,7 @@ derivative.sigma.LISREL <- function(m="lambda",
     } else if(m == "beta") {
         DX <- IK %*% ( t(IB.inv..PSI..tIB.inv..tLAMBDA) %x% LAMBDA..IB.inv )
         # this is not really needed (because we select idx=m.el.idx)
+        # but just in case we need all elements of beta...
         DX[,lav_matrix_diag_idx(nfac)] <- 0.0
         if(delta.flag) 
              DX <- DX * as.vector(DELTA %x% DELTA)
@@ -1727,11 +1751,112 @@ derivative.sigma.LISREL <- function(m="lambda",
         A <- DD.Omega %x% diag(nvar); B <- diag(nvar) %x% DD.Omega
         DX <- A[,lav_matrix_diag_idx(nvar),drop=FALSE] + 
               B[,lav_matrix_diag_idx(nvar),drop=FALSE]
+        
     } else {
         stop("wrong model matrix names: ", m, "\n")
     }
 
     DX <- DX[v.idx, idx, drop=FALSE]
+    DX
+}
+
+# dSigma/dx -- per model matrix
+derivative.sigma.LISREL <- function(m     = "lambda", 
+                                    # all model matrix elements, or only a few?
+                                    # NOTE: for symmetric matrices, 
+                                    # we assume that the have full size 
+                                    # (nvar*nvar) (but already correct for 
+                                    # symmetry)
+                                    idx   = seq_len(length(MLIST[[m]])),
+                                    MLIST = NULL,
+                                    vech  = TRUE,
+                                    delta = TRUE) {
+
+    LAMBDA <- MLIST$lambda; nvar <- nrow(LAMBDA); nfac <- ncol(LAMBDA)
+    PSI    <- MLIST$psi
+ 
+    # only lower.tri part of sigma (not same order as elimination matrix?)
+    v.idx <- lav_matrix_vech_idx( nvar ); pstar <- nvar*(nvar+1)/2
+
+    # shortcut for gamma, nu, alpha and tau: empty matrix
+    if(m == "nu" || m == "alpha" || m == "tau" || m == "gamma" || m == "gw") {
+        return( matrix(0.0, nrow=pstar, ncol=length(idx)) )
+    }
+
+    # Delta?
+    delta.flag <- FALSE
+    if(delta && !is.null(MLIST$delta)) {
+        DELTA <- MLIST$delta
+        delta.flag <- TRUE
+    } else if(m == "delta") { # modindices?
+        return( matrix(0.0, nrow=pstar, ncol=length(idx)) )
+    }
+
+    # beta?
+    if(!is.null(MLIST$ibeta.inv)) {
+        IB.inv <- MLIST$ibeta.inv
+    } else {
+        IB.inv <- .internal_get_IB.inv(MLIST = MLIST)
+    } 
+
+    # pre
+    #if(m == "lambda" || m == "beta") 
+    #    IK <- diag(nvar*nvar) + lav_matrix_commutation(nvar, nvar)
+    if(m == "lambda" || m == "beta") {
+        L1 <- LAMBDA %*% IB.inv %*% PSI %*% t(IB.inv)
+    }
+    if(m == "beta" || m == "psi") {
+        LAMBDA..IB.inv <- LAMBDA %*% IB.inv
+    }
+
+    # here we go:
+    if(m == "lambda") {
+        KOL.idx <- matrix(1:(nvar*nfac), nvar, nfac, byrow = TRUE)[idx]
+        DX <- (L1 %x% diag(nvar))[,idx, drop = FALSE] + 
+              (diag(nvar) %x% L1)[,KOL.idx, drop = FALSE]
+    } else if(m == "beta") {
+        KOL.idx <- matrix(1:(nfac*nfac), nfac, nfac, byrow = TRUE)[idx]
+        DX <- (L1 %x% LAMBDA..IB.inv)[,idx, drop = FALSE] +
+              (LAMBDA..IB.inv %x% L1)[, KOL.idx, drop = FALSE]
+        # this is not really needed (because we select idx=m.el.idx)
+        # but just in case we need all elements of beta...
+        DX[, which(idx %in% lav_matrix_diag_idx(nfac))] <- 0.0
+    } else if(m == "psi") {
+        DX <- (LAMBDA..IB.inv %x% LAMBDA..IB.inv) 
+        # symmetry correction, but keeping all duplicated elements
+        # since we depend on idx=m.el.idx
+        lower.idx <- lav_matrix_vech_idx(nfac, diagonal = FALSE)
+        upper.idx <- lav_matrix_vechru_idx(nfac, diagonal = FALSE)
+        offdiagSum <- DX[,lower.idx] + DX[,upper.idx]
+        DX[,c(lower.idx, upper.idx)] <- cbind(offdiagSum, offdiagSum)
+        DX <- DX[,idx, drop = FALSE]
+    } else if(m == "theta") {
+        #DX <- diag(nvar*nvar) # very sparse...
+        DX <- matrix(0, nvar*nvar, length(idx))
+        DX[cbind(idx,seq_along(idx))] <- 1
+        # symmetry correction not needed, since all off-diagonal elements
+        # are zero?
+    } else if(m == "delta") {
+        Omega <- computeSigmaHat.LISREL(MLIST, delta=FALSE)
+        DD <- diag(DELTA[,1], nvar, nvar)
+        DD.Omega <- (DD %*% Omega)
+        A <- DD.Omega %x% diag(nvar); B <- diag(nvar) %x% DD.Omega
+        DX <- A[,lav_matrix_diag_idx(nvar),drop=FALSE] + 
+              B[,lav_matrix_diag_idx(nvar),drop=FALSE]
+        DX <- DX[,idx, drop = FALSE]
+    } else {
+        stop("wrong model matrix names: ", m, "\n")
+    }
+
+    if(delta.flag && !m == "delta") {
+        DX <- DX * as.vector(DELTA %x% DELTA)
+    }
+
+    # vech?
+    if(vech) {
+        DX <- DX[v.idx,, drop=FALSE]
+    }
+
     DX
 }
 
@@ -2288,8 +2413,10 @@ TESTING_derivatives.LISREL <- function(MLIST = NULL,
             print(zapsmall(DX1)); cat("\n")
             cat("[SIGMA] mm = ", sprintf("%-8s:", mm), "DX2 (analytical):\n");
             print(DX2); cat("\n")
-            cat("[SIGMA] mm = ", sprintf("%-8s:", mm), "DX3 (analytical):\n");
-            print(DX3); cat("\n")
+            if(theta) {
+                cat("[SIGMA] mm = ", sprintf("%-8s:", mm), "DX3 (analytical):\n");
+                print(DX3); cat("\n")
+            }
         }
         cat("[SIGMA] mm = ", sprintf("%-8s:", mm), "sum delta = ",
             sprintf("%12.9f", sum(DX1-DX2)), "  max delta = ",

@@ -125,6 +125,8 @@ lav_options_set <- function(opt = formals(lavaan)) {
         # nothing to do
     } else if(opt$missing == "available.cases") {
         # nothing to do, or warn if not categorical?
+    } else if(opt$missing == "available_cases") {
+        opt$missing <- "available.cases"
     } else {
         stop("unknown value for `missing' argument: ", opt$missing, "\n")
     }
@@ -176,9 +178,18 @@ lav_options_set <- function(opt = formals(lavaan)) {
     }
  
     # check missing
+    if(opt$missing == "ml" && opt$se == "robust.sem") {
+        warning("lavaan WARNING: missing will be set to ",
+                    dQuote("listwise"), " for se = ",
+                    dQuote(opt$se) )
+        opt$missing <- "listwise"
+    }
     if(opt$missing == "ml" && 
        opt$test %in% c("satorra.bentler", 
                        "mean.var.adjusted", "scaled.shifted")) {
+        warning("lavaan WARNING: missing will be set to ",
+                    dQuote("listwise"), " for test = ",
+                    dQuote(opt$test) )
         opt$missing <- "listwise"
     }
 
@@ -247,6 +258,7 @@ lav_options_set <- function(opt = formals(lavaan)) {
     } else if(opt$estimator == "mlm"   || 
               opt$estimator == "mlmv"  || 
               opt$estimator == "mlmvs") {
+        est.orig <- opt$estimator
         if(opt$test != "none") {
             if(opt$estimator == "mlm") {
                 opt$test <- "satorra.bentler"
@@ -257,10 +269,15 @@ lav_options_set <- function(opt = formals(lavaan)) {
             }
         }
         opt$estimator <- "ML"
-        opt$information <- "expected"
         opt$meanstructure <- TRUE
         if(opt$se == "bootstrap") stop("use ML estimator for bootstrap")
         if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
+        if(!(opt$information %in% c("expected", "default"))) {
+            warning("lavaan WARNING: information will be set to ",
+                    dQuote("expected"), " for estimator = ", 
+                    dQuote(toupper(est.orig)) )
+        }
+        opt$information <- "expected"
         opt$missing <- "listwise"
     } else if(opt$estimator == "mlf") {
         opt$estimator <- "ML"
@@ -290,6 +307,23 @@ lav_options_set <- function(opt = formals(lavaan)) {
                  opt$test, "\n")
         }
         opt$missing <- "listwise"       
+    } else if(opt$estimator == "ntrls") {
+        opt$estimator <- "NTRLS"
+        if(opt$se == "default" || opt$se == "standard") {
+            opt$se <- "standard"
+        } else if(opt$se == "none" ||
+                  opt$se == "bootstrap" ||
+                  opt$se == "external") {
+            # nothing to do
+        } else {
+            stop("invalid value for `se' argument when estimator is NTRLS: ",
+                 opt$se, "\n")
+        }
+        if(!opt$test %in% c("standard","none")) {
+            stop("invalid value for `test' argument when estimator is NTRLS: ",
+                 opt$test, "\n")
+        }
+        opt$missing <- "listwise"
     } else if(opt$estimator == "wls") {
         opt$estimator <- "WLS"
         if(opt$se == "default" || opt$se == "standard") {
@@ -358,7 +392,7 @@ lav_options_set <- function(opt = formals(lavaan)) {
             opt$se <- "standard"
         } else if(opt$se == "none" || 
                   opt$se == "bootstrap" || 
-                  opt$se != "external") {
+                  opt$se == "external") {
             # nothing to do
         } else if(opt$se == "robust.sem") {
             # nothing to do
@@ -447,8 +481,26 @@ lav_options_set <- function(opt = formals(lavaan)) {
         stop("unknown value for `estimator' argument: ", opt$estimator, "\n")
     }
 
+
+    # special stuff for categorical
+    if(opt$categorical) {
+        opt$meanstructure <- TRUE # Mplus style
+        if(opt$estimator == "ML") {
+            stop("lavaan ERROR: estimator ML for ordered data is not supported yet. Use WLSMV instead.")
+        }
+    }
+
+    # link
+    if(opt$link == "logit") {
+        if(opt$estimator != "mml") {
+             warning("lavaan WARNING: link will be set to ",
+                    dQuote("probit"), " for estimator = ",
+                    dQuote(opt$estimator) )
+        }
+    }
+
     # likelihood approach (wishart or normal) + sample.cov.rescale
-    if(!opt$estimator %in% c("ML", "REML", "PML", "FML")) {
+    if(!opt$estimator %in% c("ML", "REML", "PML", "FML","NTRLS")) {
         if(opt$likelihood != "default") {
             stop("likelihood argument is only relevant if estimator = ML")
         }
@@ -502,21 +554,49 @@ lav_options_set <- function(opt = formals(lavaan)) {
         stop("information must be either \"expected\" or \"observed\"\n")
     }
 
+    # check information if se == "robust.sem"
+    if(opt$se == "robust.sem" && opt$information == "observed") {
+        warning("lavaan WARNING: information will be set to ",
+                dQuote("expected"), " for se = ", dQuote(opt$se))
+        opt$information <- "expected"
+    }
+
+    # conditional.x
+    if(is.logical(opt$conditional.x)) {
+    } else if(opt$conditional.x == "default") {
+        if(opt$estimator == "ML" && (opt$mimic == "Mplus" ||
+                                     opt$mimic == "lavaan")) {
+            opt$conditional.x <- FALSE
+        } else if(opt$categorical) {
+            opt$conditional.x <- TRUE
+        } else {
+            opt$conditional.x <- FALSE
+        }
+    } else {
+        stop("lavaan ERROR: conditional.x must be TRUE, FALSE or \"default\"\n")
+    }
+ 
+    # if conditional.x, always use a meanstructure
+    if(opt$conditional.x) {
+        opt$meanstructure <- TRUE
+    }
+
     # fixed.x
     if(is.logical(opt$fixed.x)) {
-        if(opt$estimator == "DWLS" && opt$fixed.x == FALSE)
-            stop("lavaan ERROR: fixed.x=FALSE is not supported for estimator DWLS")
+        if(opt$conditional.x && opt$fixed.x == FALSE) {
+            stop("lavaan ERROR: fixed.x = FALSE is not supported when conditional.x = TRUE.")
+        }
     } else if(opt$fixed.x == "default") {
-        if(opt$estimator == "ML" && (opt$mimic == "Mplus" || 
+        if(opt$estimator == "ML" && (opt$mimic == "Mplus" ||
                                      opt$mimic == "lavaan")) {
             opt$fixed.x <- TRUE
-        } else if(opt$categorical) {
+        } else if(opt$conditional.x) {
             opt$fixed.x <- TRUE
         } else {
             opt$fixed.x <- FALSE
         }
     } else {
-        stop("fixed.x must be TRUE, FALSE or \"default\"\n")
+        stop("lavaan ERROR: fixed.x must be TRUE, FALSE or \"default\"\n")
     }
 
 

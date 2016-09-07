@@ -1,6 +1,6 @@
 # prelav
 #
-# a program not unlike prelis
+# a program not unlike prelis (unfinished)
 #
 # YR 19 Sept 2013
 
@@ -46,6 +46,7 @@ prelav <- function(object = NULL, ordered = NULL, ov.names.x = NULL,
                                            estimator     = "ML",
                                            mimic         = mimic,
                                            meanstructure = TRUE,
+                                           conditional.x = FALSE,
                                            group.w.free  = FALSE,
                                            missing.h1    = FALSE,
                                            WLS.V         = NULL,

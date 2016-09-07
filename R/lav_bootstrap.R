@@ -29,6 +29,7 @@ bootstrapLavaan <- function(object,
                             parallel    = c("no", "multicore", "snow"),
                             ncpus       = 1L,
                             cl          = NULL,
+                            iseed       = NULL,
                             h0.rmsea    = NULL,
                             ...) {
 
@@ -47,6 +48,11 @@ bootstrapLavaan <- function(object,
     if(object@Options$test == "bollen.stine")
         stop("lavaan ERROR: test == \"bollen.stine\"; please refit model with another option for \"test\"")
 
+    # check for conditional.x = TRUE
+    if(object@Model@conditional.x) {
+        stop("lavaan ERROR: this function is not (yet) available if conditional.x = TRUE")
+    }
+
     bootstrap.internal(object          = object,
                        lavdata.        = NULL,
                        lavmodel.       = NULL,
@@ -62,6 +68,7 @@ bootstrapLavaan <- function(object,
                        parallel        = parallel,
                        ncpus           = ncpus,
                        cl              = cl,
+                       iseed           = iseed,
                        h0.rmsea        = h0.rmsea,
                        ...)
 }
@@ -83,6 +90,7 @@ bootstrap.internal <- function(object          = NULL,
                                parallel        = c("no", "multicore", "snow"),
                                ncpus           = 1L,
                                cl              = NULL,
+                               iseed           = NULL,
                                h0.rmsea        = NULL,
                                ...) {
 
@@ -181,18 +189,30 @@ bootstrap.internal <- function(object          = NULL,
     if(type == "yuan") {
         # page numbers refer to Yuan et al, 2007      
         # Define a function to find appropriate value of a
-        # (p. 272)
-        g.a <- function(a, Sigmahat, Sigmahat.inv, S, tau.hat, p){
-            S.a <- a*S + (1-a)*Sigmahat
-            tmp.term <- S.a %*% Sigmahat.inv
-            res1 <- (sum(diag(tmp.term)) - log(det(tmp.term)) - p) - tau.hat
-            res <- res1*res1
-            # From p 272
-            #attr(res, "gradient") <- sum(diag((S - Sigmahat) %*%
-            #                         (Sigmahat.inv - chol2inv(chol(S.a)))))
-            res
+        # (p. 272); code supplied 16 jun 2016 by Cheng & Wu
+        search.a <- function(F0, d, p) {
+            if (F0 == 0) {
+                a0 <- 0
+                return(a0)
+            }
+            max.a <- 1 / (1 - min(d)) - 1e-3
+            # starting value; Yuan p. 272
+            a0 <- min(sqrt(2 * F0 / sum((d - 1)^2)), max.a)
+
+            # See Yuan p. 280
+            for (i in 1:50) {
+                dia <- a0 * d + (1 - a0)
+                g1 <- -sum(log(dia)) + sum(dia) - p
+                dif <- g1 - F0
+                if(abs(dif) < 1e-6) return(a0)
+                g2 <- a0 * sum((d - 1)^2 / dia)
+                a0 <- min(max(a0 - dif/g2, 0), max.a)
+            }
+            # if search fails to converge in 50 iterations
+            warning("lavaan WARNING: yuan bootstrap search for `a` did not converge. h0.rmsea may be too large.")
+            a0
         }
-      
+
         # Now use g.a within each group
         for(g in 1:lavsamplestats@ngroups) {
             S <- lavsamplestats@cov[[g]]
@@ -200,7 +220,6 @@ bootstrap.internal <- function(object          = NULL,
             ghat <- object@test[[1]]$stat.group[[g]]
             df <- object@test[[1]]$df
             Sigmahat <- Sigma.hat[[g]]
-            Sigmahat.inv <- inv.chol(Sigmahat)
             nmv <- nrow(Sigmahat)
             n <- lavdata@nobs[[g]]
 
@@ -211,15 +230,17 @@ bootstrap.internal <- function(object          = NULL,
               tau.hat <- (ghat - df)/(n-1),  # middle p 267
               tau.hat <- df*(h0.rmsea*h0.rmsea))    # middle p 273
 
-            if (tau.hat >= 0){
-              # Find a to minimize g.a
-              a <- optimize(g.a, c(0,1), Sigmahat, Sigmahat.inv,
-                            S, tau.hat, nmv)$minimum
-
-              # Calculate S_a (p. 267)
-              S.a <- a*S + (1-a)*Sigmahat
+            if (tau.hat >= 0) {
+                # from Cheng and Wu
+                EL <- t(chol(Sigmahat))
+                ESE <- forwardsolve(EL, t(forwardsolve(EL, S)))
+                d <- eigen(ESE, symmetric = TRUE, only.values = TRUE)$values
+                # Find a to minimize g.a
+                a <- search.a(tau.hat, d, nmv)
+                # Calculate S_a (p. 267)
+                S.a <- a*S + (1 - a)*Sigmahat
             } else {
-              S.a <- Sigmahat
+                S.a <- Sigmahat
             }
 
             # Transform the data (p. 263)
@@ -270,6 +291,7 @@ bootstrap.internal <- function(object          = NULL,
                                estimator     = lavoptions$estimator,
                                mimic         = lavoptions$mimic,
                                meanstructure = lavoptions$meanstructure,
+                               conditional.x = lavoptions$conditional.x,
                                group.w.free  = lavoptions$group.w.free,
                                #missing.h1    = (FUN != "coef"), # not if fixed.x, otherwise starting values fails!
                                missing.h1    = TRUE,
@@ -303,7 +325,7 @@ bootstrap.internal <- function(object          = NULL,
                            slotModel       = model.boot,
                            slotSampleStats = bootSampleStats,
                            slotData        = lavdata)
-        if(!fit.boot@Fit@converged) {
+        if(!fit.boot@optim$converged) {
             if(verbose) cat("     FAILED: no convergence\n")
             options(old_options)
             return(NULL)
@@ -312,11 +334,11 @@ bootstrap.internal <- function(object          = NULL,
         # extract information we need
         if(is.null(object)) { # internal use only!
             if(FUN == "coef") {
-                out <- fit.boot@Fit@x
+                out <- fit.boot@optim$x
             } else if(FUN == "test") { 
                 out <- fit.boot@test[[1L]]$stat
             } else if(FUN == "coeftest") { 
-                out <- c(fit.boot@Fit@x, fit.boot@test[[1L]]$stat)
+                out <- c(fit.boot@optim$x, fit.boot@test[[1L]]$stat)
             } 
         } else { # general use
             out <- try(FUN(fit.boot, ...), silent=TRUE)
@@ -327,8 +349,8 @@ bootstrap.internal <- function(object          = NULL,
             return(NULL)
         } 
         if(verbose) cat("   OK -- niter = ", 
-                        sprintf("%3d", fit.boot@Fit@iterations), " fx = ",
-                        sprintf("%13.9f", fit.boot@Fit@fx), "\n")
+                        sprintf("%3d", fit.boot@optim$iterations), " fx = ",
+                        sprintf("%13.9f", fit.boot@optim$fx), "\n")
         out
     }
 
@@ -342,7 +364,7 @@ bootstrap.internal <- function(object          = NULL,
             if (is.null(cl)) {
                 cl <- parallel::makePSOCKcluster(rep("localhost", ncpus))
                 if(RNGkind()[1L] == "L'Ecuyer-CMRG")
-                    parallel::clusterSetRNGStream(cl)
+                    parallel::clusterSetRNGStream(cl, iseed = iseed)
                 res <- parallel::parLapply(cl, seq_len(RR), fn)
                 parallel::stopCluster(cl)
                 res

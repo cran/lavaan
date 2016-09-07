@@ -6,8 +6,6 @@
 \alias{lavPartable}
 \alias{parseModelString}
 \alias{lavParseModelString}
-\alias{lavaanNames}
-\alias{lavNames}
 \title{The Lavaan Model Syntax}
 \description{
 The lavaan model syntax describes a latent variable model. The 
@@ -16,7 +14,7 @@ model as specified by the user. We refer to this table as the parameter table.}
 \usage{
 lavaanify(model = NULL, meanstructure = FALSE, int.ov.free = FALSE, 
     int.lv.free = FALSE, orthogonal = FALSE, std.lv = FALSE, 
-    fixed.x = TRUE, parameterization = "delta", 
+    conditional.x = FALSE, fixed.x = TRUE, parameterization = "delta", 
     constraints = NULL, auto = FALSE, model.type = "sem", 
     auto.fix.first = FALSE, auto.fix.single = FALSE, auto.var = FALSE, 
     auto.cov.lv.x = FALSE, auto.cov.y = FALSE, auto.th = FALSE, 
@@ -26,7 +24,7 @@ lavaanify(model = NULL, meanstructure = FALSE, int.ov.free = FALSE,
 
 lavParTable(model = NULL, meanstructure = FALSE, int.ov.free = FALSE,
     int.lv.free = FALSE, orthogonal = FALSE, std.lv = FALSE,
-    fixed.x = TRUE, parameterization = "delta", 
+    conditional.x = FALSE, fixed.x = TRUE, parameterization = "delta", 
     constraints = NULL, auto = FALSE, model.type = "sem",
     auto.fix.first = FALSE, auto.fix.single = FALSE, auto.var = FALSE,
     auto.cov.lv.x = FALSE, auto.cov.y = FALSE, auto.th = FALSE,
@@ -36,7 +34,6 @@ lavParTable(model = NULL, meanstructure = FALSE, int.ov.free = FALSE,
 
 lavParseModelString(model.syntax = '', as.data.frame.=FALSE, warn=TRUE, debug=FALSE)
 
-lavNames(object, type = "ov", group = NULL)
 }
 \arguments{
 \item{model}{A description of the user-specified model. Typically, the model
@@ -57,6 +54,11 @@ the model both for both observed and latent variables.}
     determined by fixing their variances to 1.0. If \code{FALSE}, the metric
     of each latent variable is determined by fixing the factor loading of the
     first indicator to 1.0.}
+\item{conditional.x}{If \code{TRUE}, we set up the model conditional on
+    the exogenous `x' covariates; the model-implied sample statistics
+    only include the non-x variables. If \code{FALSE}, the exogenous `x'
+    variables are modeled jointly with the other variables, and the
+    model-implied statistics refect both sets of variables.}
 \item{fixed.x}{If \code{TRUE}, the exogenous `x' covariates are considered
     fixed variables and the means, variances and covariances of these variables
     are fixed to their sample values. If \code{FALSE}, they are considered
@@ -107,21 +109,6 @@ the model both for both observed and latent variables.}
 \item{as.data.frame.}{If \code{TRUE}, return the list of model parameters
 as a \code{data.frame}.}
 \item{debug}{If \code{TRUE}, debugging information is printed out.}
-\item{object}{Either a list containing the parameter table, as 
-returned by \code{lavaanify} or \code{lavParseModelString}, or an 
-object of class \code{\linkS4class{lavaan}}.}
-\item{type}{Only used in the function \code{lavNames}. If type contains 
-\code{"ov"}, only observed variable names are returned. If type contains
-\code{"lv"}, only latent variable names are returned. The \code{"ov.x"}
-and \code{"lv.x"} types return exogenous variables only. The \code{"ov.y"}
-and \code{"lv.y"} types return dependent variables only (in the regression
-sense, excluding the indicators of latent variables). The
-\code{"ov.nox"} type returns all observed variables, except the exogenous
-ones.}
-\item{group}{Only used in the function \code{lavNames}. If \code{NULL},
-all groups (if any) are used. If an integer (vector), only names from those
-groups are extracted. The group numbers are found in the \code{group}
-column of the parameter table.}
 }
 \details{
 The model syntax consists of one or more formula-like expressions, each one

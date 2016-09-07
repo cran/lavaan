@@ -3,7 +3,7 @@
 #
 # YR 17 Sept 2013
 # 
-# - YR 26 Nov 2013: big change - make it wrapper around lavaan()
+# - YR 26 Nov 2013: big change - make it a wrapper around lavaan()
 #                   estimator = "none" means two.step (starting values)
 
 lavCor <- function(object, 
@@ -71,8 +71,12 @@ lavCor <- function(object,
     # extract partable options from dots
     dots <- list(...)
     meanstructure <- FALSE; fixed.x <- FALSE; mimic <- "lavaan"
+    conditional.x <- FALSE
     if(!is.null(dots$meanstructure)) {
         meanstructure <- dots$meanstructure
+    } 
+    if(categorical) {
+        meanstructure <- TRUE
     }
     if(!is.null(dots$fixed.x)) {
         fixed.x <- dots$fixed.x
@@ -80,13 +84,17 @@ lavCor <- function(object,
     if(!is.null(dots$mimic)) {
         mimic <- dots$mimic
     }
+    if(!is.null(dots$conditional.x)) {
+        conditional.x <- dots$conditional.x
+    }
 
     # generate partable for unrestricted model
     PT.un <- 
         lav_partable_unrestricted(lavobject     = NULL,
                                   lavdata       = lav.data,
                                   lavoptions    = list(meanstructure = meanstructure,
-                                                       fixed.x = fixed.x, 
+                                                       fixed.x = fixed.x,
+                                                       conditional.x = conditional.x,
                                                        mimic = mimic),
                                   sample.cov    = NULL,
                                   sample.mean   = NULL,

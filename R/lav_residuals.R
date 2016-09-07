@@ -15,8 +15,14 @@ function(object, type="raw", labels=TRUE) {
         if(object@Options$estimator != "ML") {
             stop("standardized and normalized residuals only availabe if estimator = ML (or MLF, MLR, MLM\n")
         }
-        if(object@Fit@npar > 0L && !object@Fit@converged) {
+        if(object@optim$npar > 0L && !object@optim$converged) {
             stop("lavaan ERROR: model dit not converge")
+        }
+        if(object@Model@conditional.x && type == "standardized") {
+            stop("lavaan ERROR: resid + standardized + conditional.x not supported yet")
+        }
+        if(object@Model@conditional.x && type == "normalized") {
+            stop("lavaan ERROR: resid + normalized + conditional.x not supported yet")
         }
     }
     # NOTE: for some reason, Mplus does not compute the normalized/standardized
@@ -41,7 +47,7 @@ function(object, type="raw", labels=TRUE) {
 
     # check for 0 parameters if type == standardized
     if(type == "standardized" &&
-       object@Fit@npar == 0) {
+       object@optim$npar == 0) {
         stop("lavaan ERROR: can not compute standardized residuals if there are no free parameters in the model")
     }
 
@@ -51,6 +57,7 @@ function(object, type="raw", labels=TRUE) {
 
     # if type == standardized, we need VarCov and Delta
     if(type == "standardized") {
+
         # fixed.x idx?
         x.idx <- integer(0)
         if(object@Options$fixed.x) {
@@ -71,10 +78,11 @@ function(object, type="raw", labels=TRUE) {
             augUser$free[      idx ] <- max(augUser$free) + 1:length(idx) 
             #augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx) 
             augModel <- lav_model(lavpartable    = augUser,
-                                  representation = object@Options$representation,
-                                  parameterization = object@Options$parameterization,
-                                  link           = object@Options$link,
-                                  debug          = object@Options$debug)
+                            representation = object@Options$representation,
+                            conditional.x  = object@Options$conditional.x,
+                            parameterization = object@Options$parameterization,
+                            link           = object@Options$link,
+                            debug          = object@Options$debug)
             VarCov <- lav_model_vcov(lavmodel       = augModel, 
                                      lavsamplestats = object@SampleStats,
                                      lavdata        = object@Data,
@@ -109,8 +117,13 @@ function(object, type="raw", labels=TRUE) {
 
         # sample moments
         if(!object@SampleStats@missing.flag) {
-            S <- object@SampleStats@cov[[g]]
-            M <- object@SampleStats@mean[[g]]
+            if(object@Model@conditional.x) {
+                S <- object@SampleStats@res.cov[[g]]
+                M <- object@SampleStats@res.int[[g]]
+            } else {
+                S <- object@SampleStats@cov[[g]]
+                M <- object@SampleStats@mean[[g]]
+            }
         } else {
             S <- object@SampleStats@missing.h1[[g]]$sigma
             M <- object@SampleStats@missing.h1[[g]]$mu
@@ -122,27 +135,40 @@ function(object, type="raw", labels=TRUE) {
 
         # residuals (for this group)
         if(type == "cor.bollen") {
-            R[[g]]$cov  <- cov2cor(S) - cov2cor(object@Fit@Sigma.hat[[g]])
+            R[[g]]$cov  <- cov2cor(S) - cov2cor(object@implied$cov[[g]])
             R[[g]]$mean <- ( M/sqrt(diag(S)) -
-                object@Fit@Mu.hat[[g]]/sqrt(diag(object@Fit@Sigma.hat[[g]])) )
+                object@implied$mean[[g]]/sqrt(diag(object@implied$cov[[g]])) )
         } else if(type == "cor.bentler" || type == "cor.eqs") {
             # Bentler EQS manual: divide by (sqrt of) OBSERVED variances
             delta <- 1/sqrt(diag(S))
             DELTA <- diag(delta, nrow=nvar, ncol=nvar)
-            R[[g]]$cov  <- DELTA %*% (S - object@Fit@Sigma.hat[[g]]) %*% DELTA
-            R[[g]]$mean <- (M - object@Fit@Mu.hat[[g]])/sqrt(diag(S))
+            R[[g]]$cov  <- DELTA %*% (S - object@implied$cov[[g]]) %*% DELTA
+            R[[g]]$mean <- (M - object@implied$mean[[g]])/sqrt(diag(S))
         } else {
             # covariance/raw residuals
-            R[[g]]$cov  <- S - object@Fit@Sigma.hat[[g]]
-            R[[g]]$mean <- M - object@Fit@Mu.hat[[g]]
+            R[[g]]$cov  <- S - object@implied$cov[[g]]
+            R[[g]]$mean <- M - object@implied$mean[[g]]
         }
         if(labels) {
             rownames(R[[g]]$cov) <- colnames(R[[g]]$cov) <- ov.names[[g]]
         }
+        if(object@Model@conditional.x) {
+            R[[g]]$slopes <- ( object@SampleStats@res.slopes[[g]] -
+                               object@implied$slopes[[g]] )
+            if(labels) {
+                rownames(R[[g]]$slopes) <- ov.names[[g]]
+                colnames(R[[g]]$slopes) <- object@Data@ov.names.x[[g]]
+            }
+        }
         if(object@Model@categorical) {
-            R[[g]]$th <- object@SampleStats@th[[g]] - object@Fit@TH[[g]]
+            if(object@Model@conditional.x) {
+                R[[g]]$th <- object@SampleStats@res.th[[g]] - object@implied$th[[g]]
+            } else {
+                R[[g]]$th <- object@SampleStats@th[[g]] - object@implied$th[[g]]
+            }
             if(length(object@Model@num.idx[[g]]) > 0L) {
-                R[[g]]$th <- R[[g]]$th[-object@Model@num.idx[[g]]]
+                NUM.idx <- which(object@Model@th.idx[[g]] == 0)
+                R[[g]]$th <- R[[g]]$th[ -NUM.idx ]
             }
             if(labels) {
                 names(R[[g]]$th) <- vnames(object@ParTable, type="th", group=g)
@@ -163,20 +189,61 @@ function(object, type="raw", labels=TRUE) {
                 # this is identical to solve(A1)/N for complete data!!
             } else if(object@Options$se == "robust.huber.white" ||
                       object@Options$se == "robust.sem") {
-                A1 <- compute.A1.sample(lavsamplestats = object@SampleStats, 
-                                        group = g, 
-                                        meanstructure = meanstructure,
-                                        information = object@Options$information)
-                B1 <- compute.B1.sample(lavsamplestats = object@SampleStats, 
-                                        lavdata = object@Data, group = g,
-                                        meanstructure = meanstructure)
+
+                lavdata <- object@Data
+                lavsamplestats <- object@SampleStats
+
+                if(lavsamplestats@missing.flag) {
+                    if(object@Options$information == "expected") {
+                        A1 <- lav_mvnorm_missing_information_expected(
+                          Y     = lavdata@X[[g]],
+                          Mp    = lavdata@Mp[[g]],
+                          Mu    = lavsamplestats@missing.h1[[g]]$mu,
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+                    } else {
+                        A1 <- lav_mvnorm_missing_information_observed_samplestats(
+                          Yp    = lavsamplestats@missing[[g]],
+                          Mu    = lavsamplestats@missing.h1[[g]]$mu,
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+                    }
+                } else {
+                    # data complete, under h1, expected == observed
+                    A1 <- lav_mvnorm_h1_information_observed_samplestats(
+                      sample.cov     = lavsamplestats@cov[[g]],
+                      sample.cov.inv = lavsamplestats@icov[[g]])
+                }
+
+                if(lavsamplestats@missing.flag) {
+                    B1 <- lav_mvnorm_missing_information_firstorder(
+                          Y     = lavdata@X[[g]],
+                          Mp    = lavdata@Mp[[g]],
+                          Mu    = lavsamplestats@missing.h1[[g]]$mu,
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+                } else {
+                    B1 <- lav_mvnorm_h1_information_firstorder(
+                          Y     = lavdata@X[[g]],
+                          Gamma = lavsamplestats@NACOV[[g]],
+                          sample.cov = lavsamplestats@cov[[g]],
+                          sample.cov.inv = lavsamplestats@icov[[g]])
+                }
+
                 Info <- (solve(A1) %*% B1 %*% solve(A1)) / N
                 Var.mean <- Var.sample.mean <- diag(Info)[idx.mean]
                 Var.cov  <- Var.sample.cov  <- lav_matrix_vech_reverse(diag(Info)[-idx.mean])
             } else if(object@Options$se == "first.order") {
-                B1 <- compute.B1.sample(lavsamplestats = object@SampleStats, 
-                                        lavdata = object@Data, group=g,
-                                        meanstructure=meanstructure)
+                if(lavsamplestats@missing.flag) {
+                    B1 <- lav_mvnorm_missing_information_firstorder(
+                          Y     = lavdata@X[[g]],
+                          Mp    = lavdata@Mp[[g]],
+                          Mu    = lavsamplestats@missing.h1[[g]]$mu,
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+                } else {
+                    B1 <- lav_mvnorm_h1_information_firstorder(
+                          Y     = lavdata@X[[g]],
+                          Gamma = lavsamplestats@NACOV[[g]],
+                          sample.cov = lavsamplestats@cov[[g]],
+                          sample.cov.inv = lavsamplestats@icov[[g]])
+                }
                 Info <- solve(B1) / N
                 Var.mean <- Var.sample.mean <- diag(Info)[idx.mean]
                 Var.cov  <- Var.sample.cov  <- lav_matrix_vech_reverse(diag(Info)[-idx.mean])
@@ -227,6 +294,9 @@ function(object, type="raw", labels=TRUE) {
         if(labels) names(R[[g]]$mean) <- ov.names[[g]]
         class(R[[g]]$mean) <- c("lavaan.vector", "numeric")
         class(R[[g]]$cov) <- c("lavaan.matrix.symmetric", "matrix")
+        if(object@Model@conditional.x) {
+            class(R[[g]]$slopes) <- c("lavaan.matrix", "matrix")
+        }
     }
 
     # replace 'cov' by 'cor' if type == "cor"

@@ -20,6 +20,24 @@ print.lavaan.data.frame <- function(x, ..., nd=3) {
     invisible(x)
 }
 
+print.lavaan.list <- function(x, ...) {
+
+    y <- unclass(x)
+    attr(y, "header") <- NULL
+
+    header <- attr(x, "header")
+    if(!is.null(header)) {
+        if(is.character(header)) {
+            cat("\n", header, "\n\n", sep = "")
+        } else {
+            print(header); cat("\n")
+        }
+    }
+
+    print(y, ...)
+    invisible(x)
+}
+
 
 # prints only lower triangle of a symmetric matrix
 print.lavaan.matrix.symmetric <- function(x, ..., nd=3) {
@@ -82,33 +100,34 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
 
     cat("\nParameter Estimates:\n\n")
 
-    # header
+    # info about standard errors (if we have x$se only)
     # 1. information
     # 2. se
     # 3. bootstrap requested/successful draws
-
-    # 1.
-    t0.txt <- sprintf("  %-40s", "Information")
-    tmp.txt <- attr(x, "information")
-    t1.txt <- sprintf("  %10s", paste(toupper(substring(tmp.txt,1,1)),
-                     substring(tmp.txt,2), sep=""))
-    cat(t0.txt, t1.txt, "\n", sep="")
-
-    # 2.
-    t0.txt <- sprintf("  %-31s", "Standard Errors")
-    tmp.txt <- attr(x, "se")
-    t1.txt <- sprintf("  %19s", paste(toupper(substring(tmp.txt,1,1)),
-                                      substring(tmp.txt,2), sep=""))
-    cat(t0.txt, t1.txt, "\n", sep="")
-
-    # 3.
-    if(attr(x, "se") == "bootstrap" && !is.null(attr(x, "bootstrap"))) {
-        t0.txt <- sprintf("  %-40s", "Number of requested bootstrap draws")
-        t1.txt <- sprintf("  %10i", attr(x, "bootstrap"))
+    if(!is.null(x$se)) { 
+        # 1.
+        t0.txt <- sprintf("  %-40s", "Information")
+        tmp.txt <- attr(x, "information")
+        t1.txt <- sprintf("  %10s", paste(toupper(substring(tmp.txt,1,1)),
+                         substring(tmp.txt,2), sep=""))
         cat(t0.txt, t1.txt, "\n", sep="")
-        t0.txt <- sprintf("  %-40s", "Number of successful bootstrap draws")
-        t1.txt <- sprintf("  %10i", attr(x, "bootstrap.successful"))
+
+        # 2.
+        t0.txt <- sprintf("  %-31s", "Standard Errors")
+        tmp.txt <- attr(x, "se")
+        t1.txt <- sprintf("  %19s", paste(toupper(substring(tmp.txt,1,1)),
+                                          substring(tmp.txt,2), sep=""))
         cat(t0.txt, t1.txt, "\n", sep="")
+    
+        # 3.
+        if(attr(x, "se") == "bootstrap" && !is.null(attr(x, "bootstrap"))) {
+            t0.txt <- sprintf("  %-40s", "Number of requested bootstrap draws")
+            t1.txt <- sprintf("  %10i", attr(x, "bootstrap"))
+            cat(t0.txt, t1.txt, "\n", sep="")
+            t0.txt <- sprintf("  %-40s", "Number of successful bootstrap draws")
+            t1.txt <- sprintf("  %10i", attr(x, "bootstrap.successful"))
+            cat(t0.txt, t1.txt, "\n", sep="")
+        }
     }
     
     # number of groups
@@ -214,7 +233,7 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     colnames(m)[ colnames(m) ==    "rhs" ] <- ""
     colnames(m)[ colnames(m) ==    "est" ] <- "Estimate"
     colnames(m)[ colnames(m) ==     "se" ] <- "Std.Err"
-    colnames(m)[ colnames(m) ==      "z" ] <- "Z-value"
+    colnames(m)[ colnames(m) ==      "z" ] <- "z-value"
     colnames(m)[ colnames(m) == "pvalue" ] <- "P(>|z|)"
     colnames(m)[ colnames(m) == "std.lv" ] <- "Std.lv"
     colnames(m)[ colnames(m) == "std.all"] <- "Std.all"
@@ -284,11 +303,25 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                 row.idx <- which(x$op == "~~" & x$lhs != x$rhs & !x$exo &
                                  x$group == g)
                 if(length(row.idx) == 0L) next
-                m[row.idx,1] <- .makeNames(x$rhs[row.idx], x$label[row.idx])
+                # make distinction between residual and plain
+                y.names <- unique( c(lavNames(x, "eqs.y"),
+                                     lavNames(x, "ov.ind")) )
+                PREFIX <- rep("", length(row.idx))
+                PREFIX[ x$rhs[row.idx] %in% y.names ] <- "  ."
+                m[row.idx,1] <- .makeNames(x$rhs[row.idx], x$label[row.idx],
+                                           PREFIX = PREFIX)
+                #m[row.idx,1] <- .makeNames(x$rhs[row.idx], x$label[row.idx])
             } else if(s == "Intercepts") {
                 row.idx <- which(x$op == "~1" & !x$exo & x$group == g)
                 if(length(row.idx) == 0L) next
-                m[row.idx,1] <- .makeNames(x$lhs[row.idx], x$label[row.idx])
+                # make distinction between intercepts and means
+                y.names <- unique( c(lavNames(x, "eqs.y"),
+                                     lavNames(x, "ov.ind")) )
+                PREFIX <- rep("", length(row.idx))
+                PREFIX[ x$lhs[row.idx] %in% y.names ] <- "  ."
+                m[row.idx,1] <- .makeNames(x$lhs[row.idx], x$label[row.idx],
+                                           PREFIX = PREFIX)
+                #m[row.idx,1] <- .makeNames(x$lhs[row.idx], x$label[row.idx])
             } else if(s == "Thresholds") {
                 row.idx <- which(x$op == "|" & x$group == g)
                 if(length(row.idx) == 0L) next
@@ -298,7 +331,13 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                 row.idx <- which(x$op == "~~" & x$lhs == x$rhs & !x$exo &
                                  x$group == g)
                 if(length(row.idx) == 0L) next
-                m[row.idx,1] <- .makeNames(x$rhs[row.idx], x$label[row.idx])
+                # make distinction between residual and plain
+                y.names <- unique( c(lavNames(x, "eqs.y"),
+                                     lavNames(x, "ov.ind")) )
+                PREFIX <- rep("", length(row.idx))
+                PREFIX[ x$rhs[row.idx] %in% y.names ] <- "  ."
+                m[row.idx,1] <- .makeNames(x$rhs[row.idx], x$label[row.idx],
+                                           PREFIX = PREFIX)
             } else if(s == "Scales y*") {
                 row.idx <- which(x$op == "~*~" & x$group == g)
                 if(length(row.idx) == 0L) next
@@ -333,7 +372,16 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                 LHS <- paste(x$lhs[row.idx], x$op[row.idx])
                 lhs.idx <- seq(1, nel*2L, 2L)
                 rhs.idx <- seq(1, nel*2L, 2L) + 1L
-                M[lhs.idx, 1] <- sprintf(" %-15s", LHS)
+                if(s == "Covariances") {
+                    # make distinction between residual and plain
+                    y.names <- unique( c(lavNames(x, "eqs.y"),
+                                         lavNames(x, "ov.ind")) )
+                    PREFIX <- rep("", length(row.idx))
+                    PREFIX[ x$lhs[row.idx] %in% y.names ] <- "."
+                } else {
+                    PREFIX <- rep("", length(LHS))
+                }
+                M[lhs.idx, 1] <- sprintf("%1s%-15s", PREFIX, LHS)
                 M[rhs.idx,  ] <- m[row.idx,]
                 # avoid duplicated LHS labels
                 if(nel > 1L) {
@@ -413,9 +461,12 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     invisible(m)
 }
 
-.makeNames <- function(NAMES, LABELS) {
+.makeNames <- function(NAMES, LABELS, PREFIX = NULL) {
 
     W <- 14
+    if(is.null(PREFIX)) {
+        PREFIX <- rep("", length(NAMES))
+    }
 
     multiB <- FALSE
     if(any(nchar(NAMES) != nchar(NAMES, "bytes")))
@@ -445,8 +496,8 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
         }
     }
 
-    char.format <- paste("   %-", W, "s", sep = "")
-    sprintf(char.format, NAMES)
+    char.format <- paste("%3s%-", W, "s", sep = "")
+    sprintf(char.format, PREFIX, NAMES)
 }
 
 .makeConNames <- function(lhs, op, rhs, nd) {

@@ -17,7 +17,7 @@ lavTestScore <- function(object, add = NULL, release = NULL,
     stopifnot(inherits(object, "lavaan"))
     lavoptions <- object@Options
 
-    if(object@Fit@npar > 0L && !object@Fit@converged) {
+    if(object@optim$npar > 0L && !object@optim$converged) {
         stop("lavaan ERROR: model did not converge")
     }
 
@@ -49,7 +49,7 @@ lavTestScore <- function(object, add = NULL, release = NULL,
         nadd <- FIT@Model@nx.free - npar
 
         # R
-        R.model <- object@Model@con.jac[,]
+        R.model <- object@Model@con.jac[,,drop = FALSE]
         if(nrow(R.model) > 0L) {
             R.model <- cbind(R.model, matrix(0, nrow(R.model), ncol = nadd))
             R.add   <- cbind(matrix(0, nrow = nadd, ncol = npar), diag(nadd))
@@ -77,7 +77,7 @@ lavTestScore <- function(object, add = NULL, release = NULL,
     } else {
     # MODE 2: releasing constraints
 
-        R <- object@Model@con.jac[,]
+        R <- object@Model@con.jac[,,drop = FALSE]
         if(nrow(R) == 0L) {
             stop("lavaan ERROR: no equality constraints found in model.")
         }
@@ -85,7 +85,7 @@ lavTestScore <- function(object, add = NULL, release = NULL,
         score <- lavTech(object, "gradient")
         information <- lavTech(object, "information.expected")
         J.inv <- MASS::ginv(information)
-        R <- object@Model@con.jac[,]
+        #R <- object@Model@con.jac[,]
 
         if(is.null(release)) {
             # ALL constraints
@@ -140,7 +140,7 @@ lavTestScore <- function(object, add = NULL, release = NULL,
 
     # compute df, taking into account that some of the constraints may
     # be needed to identify the model (and hence information is singular)
-    information.plus <- information + crossprod(R)
+    # information.plus <- information + crossprod(R)
     #df <- qr(R[r.idx,,drop = FALSE])$rank + 
     #          ( qr(information)$rank - qr(information.plus)$rank )
     df <- nrow( R[r.idx,,drop = FALSE] )

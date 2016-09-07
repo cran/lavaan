@@ -19,7 +19,7 @@ modindices <- function(object,
                        op = NULL) {
 
     # check if model has converged
-    if(object@Fit@npar > 0L && !object@Fit@converged) {
+    if(object@optim$npar > 0L && !object@optim$converged) {
         warning("lavaan WARNING: model did not converge")
     }
 
@@ -81,6 +81,10 @@ modindices <- function(object,
 
     # ALWAYS use *expected* information (for now)
     I22.inv <- lavTech(object, "inverted.information.expected")
+    # just in case...
+    if(inherits(I22.inv, "try-error")) {
+        stop("lavaan ERROR: could not compute modification indices; information matrix is singular")
+    }
 
     V <- I11 - I12 %*% I22.inv %*% I21
     V.diag <- diag(V)

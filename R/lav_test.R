@@ -1,7 +1,7 @@
 testStatisticSatorraBentler <- function(lavsamplestats=lavsamplestats, 
                                         E.inv, Delta, WLS.V,
                                         x.idx=list(integer(0)),
-                                        test.UGamma.eigvals = TRUE) {
+                                        test.UGamma.eigvals = FALSE) {
 
     # UG = Gamma %*% [V - V %*% Delta %*% E.inv %*% tDelta %*% V]
     #    = Gamma %*% V  - Gamma %*% V %*% Delta %*% E.inv %*% tDelta %*% V
@@ -44,6 +44,9 @@ testStatisticSatorraBentler <- function(lavsamplestats=lavsamplestats,
         # mask independent 'fixed-x' variables
         # note: this only affects the saturated H1 model
         if(length(x.idx[[g]]) > 0L) {
+
+            # we should not be here if we have conditional.x = TRUE
+
             nvar <- ncol(lavsamplestats@cov[[g]])
             idx <- eliminate.pstar.idx(nvar=nvar, el.idx=x.idx[[g]],
                                        meanstructure=TRUE, type="all")
@@ -58,7 +61,11 @@ testStatisticSatorraBentler <- function(lavsamplestats=lavsamplestats,
 
 
         if(diagonal) {
-            tmp <- t((1/a1) * B1) - (B1 %*% Delta.g %*% tcrossprod(E.inv, Delta.g))
+            a1.inv <- 1/a1
+            # if fixed.x = TRUE
+            zero.idx <- which(a1 == 0.0)
+            a1.inv[zero.idx] <- 0.0
+            tmp <- t(a1.inv * B1) - (B1 %*% Delta.g %*% tcrossprod(E.inv, Delta.g))
         } else {
             A1.inv <- solve(A1)
             tmp <- (B1 %*% A1.inv) - (B1 %*% Delta.g %*% tcrossprod(E.inv, Delta.g))
@@ -101,9 +108,8 @@ testStatisticSatorraBentler <- function(lavsamplestats=lavsamplestats,
     # attr(trace.UGamma, "trace.UGamma3") <- trace.UGamma3
 
     # eigen values
-    # this is for the lavaan.survey pval.pFsum() function
-    # but for large problems, this can take a loooong time; perhaps
-    # we should make this optional?
+    # this was for the lavaan.survey pval.pFsum() function
+    # but for large problems, this can take a loooong time; not needed anymore
     if(test.UGamma.eigvals) {
         attr(trace.UGamma, "eigenvalues") <-  
             Re(eigen(UG, only.values=TRUE)$values)
@@ -177,11 +183,39 @@ testStatisticYuanBentler.Mplus <- function(lavsamplestats=lavsamplestats,
 
     for(g in 1:lavsamplestats@ngroups) {
         # if lavdata is complete, A1.22 is simply 0.5*D'(S.inv x S.inv)D
-        A1 <- compute.A1.sample(lavsamplestats=lavsamplestats, group=g,
-                                meanstructure=meanstructure,
-                                information=information)
-        B1 <- compute.B1.sample(lavsamplestats=lavsamplestats, 
-                                lavdata=lavdata, group=g)
+        if(lavsamplestats@missing.flag) {
+            if(information == "expected") {
+                A1 <- lav_mvnorm_missing_information_expected(
+                          Y     = lavdata@X[[g]],
+                          Mp    = lavdata@Mp[[g]], 
+                          Mu    = lavsamplestats@missing.h1[[g]]$mu,
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+            } else {
+                A1 <- lav_mvnorm_missing_information_observed_samplestats(
+                          Yp    = lavsamplestats@missing[[g]],
+                          Mu    = lavsamplestats@missing.h1[[g]]$mu,
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+            }
+        } else {
+            # data complete, under h1, expected == observed
+            A1 <- lav_mvnorm_h1_information_observed_samplestats(
+                      sample.cov     = lavsamplestats@cov[[g]],
+                      sample.cov.inv = lavsamplestats@icov[[g]])
+        }     
+
+        if(lavsamplestats@missing.flag) {
+            B1 <- lav_mvnorm_missing_information_firstorder(
+                          Y     = lavdata@X[[g]],
+                          Mp    = lavdata@Mp[[g]],
+                          Mu    = lavsamplestats@missing.h1[[g]]$mu,
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+        } else {
+            B1 <- lav_mvnorm_h1_information_firstorder(
+                          Y     = lavdata@X[[g]],
+                          Gamma = lavsamplestats@NACOV[[g]],
+                          sample.cov = lavsamplestats@cov[[g]],
+                          sample.cov.inv = lavsamplestats@icov[[g]])
+        }
 
         # mask independent 'fixed-x' variables
         # note: this only affects the saturated H1 model
@@ -220,7 +254,7 @@ lav_model_test <- function(lavmodel       = NULL,
                            VCOV           = NULL, 
                            lavcache       = NULL,
                            lavdata        = NULL,
-                           test.UGamma.eigvals = TRUE,
+                           test.UGamma.eigvals = FALSE,
                            control        = list()) {
 
 
@@ -358,12 +392,11 @@ lav_model_test <- function(lavmodel       = NULL,
     }
 
     # fixed.x idx
-    x.idx <- vector("list", length=lavsamplestats@ngroups)
-    for(g in 1:lavsamplestats@ngroups) {
-        if(lavoptions$fixed.x && estimator == "ML") {
-            x.idx[[g]] <- match(vnames(lavpartable, "ov.x", group=g), 
-                                lavdata@ov.names[[g]])
-        } else {
+    if(lavmodel@fixed.x && estimator == "ML" && !lavmodel@conditional.x) {
+        x.idx <- lavsamplestats@x.idx
+    } else {
+        x.idx <- vector("list", length=lavsamplestats@ngroups)
+        for(g in 1:lavsamplestats@ngroups) {
             x.idx[[g]] <- integer(0L)
         }
     }
@@ -433,8 +466,8 @@ lav_model_test <- function(lavmodel       = NULL,
 #                augUser$free[      idx ] <- max(augUser$free) + 1:length(idx)
 #                augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx)
 #                augModel <- lav_model(lavpartable       = augUser,
-#                                  start          = lav_model_get_parameters(object, type="user"),
 #                                  representation = lavmodel@representation,
+#                                  conditional.x  = lavoptions$conditional.x,
 #                                  link           = lavmodel@link,
 #                                  debug          = FALSE)
 #
@@ -579,20 +612,29 @@ lav_model_test <- function(lavmodel       = NULL,
             B1.group <- vector("list", length=lavsamplestats@ngroups)
             for(g in 1:lavsamplestats@ngroups) {
                 if(lavsamplestats@missing.flag) {
-                    X <- NULL
-                    M <- lavsamplestats@missing[[g]]
+                    out <- lav_mvnorm_missing_information_both(
+                               Y = lavdata@X[[g]],
+                               Mp = lavdata@Mp[[g]],
+                               Mu = Mu.hat[[g]], Sigma = Sigma.hat[[g]],
+                               information = information)
+                    A1.group[[g]] <- out$Abeta
+                    B1.group[[g]] <- out$Bbeta
                 } else {
-                    X <- lavdata@X[[g]]
-                    M <- NULL
+                    if(information == "expected") {
+                        A1.group[[g]] <- lav_mvnorm_information_expected(
+                            Y = lavdata@X[[g]],
+                            Mu = Mu.hat[[g]], Sigma = Sigma.hat[[g]])
+                    } else {
+                        A1.group[[g]] <- 
+                            lav_mvnorm_information_observed_samplestats(
+                                sample.mean = lavsamplestats@mean[[g]],
+                                sample.cov = lavsamplestats@cov[[g]],
+                                Mu = Mu.hat[[g]], Sigma = Sigma.hat[[g]])
+                    }
+                    B1.group[[g]] <- lav_mvnorm_information_firstorder(
+                            Y = lavdata@X[[g]],
+                            Mu = Mu.hat[[g]], Sigma = Sigma.hat[[g]])
                 }
-                out <- compute.Abeta.Bbeta(Sigma.hat=Sigma.hat[[g]], 
-                                           Mu.hat=Mu.hat[[g]], 
-                                           X=X,
-                                           M=M,
-                                           Abeta=TRUE, Bbeta=TRUE, 
-                                           information=information)
-                A1.group[[g]] <- out$Abeta
-                B1.group[[g]] <- out$Bbeta
             }
             trace.UGamma <-
                 testStatisticYuanBentler(lavsamplestats=lavsamplestats,

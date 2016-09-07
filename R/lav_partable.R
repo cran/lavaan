@@ -11,6 +11,7 @@
 #                                   a model (but no matrix representation)
 # - 14 Jan 2014: merge 02lavaanUser.R with lav_partable.R
 #                move syntax-based code to lav_syntax.R
+# - 26 April 2016: handle multiple 'blocks' (levels, classes, groups, ...)
 
 lavaanify <- lavParTable <- function(
 
@@ -20,6 +21,7 @@ lavaanify <- lavParTable <- function(
                       int.lv.free      = FALSE,
                       orthogonal       = FALSE, 
                       std.lv           = FALSE,
+                      conditional.x    = FALSE,
                       fixed.x          = TRUE,
                       parameterization = "delta",
                       constraints      = NULL,
@@ -117,46 +119,122 @@ lavaanify <- lavParTable <- function(
     # check for meanstructure
     if(any(FLAT$op == "~1")) meanstructure <- TRUE
 
-    # check for group identifiers in the syntax (op = ":")
-    n.group.flat <- length(which(FLAT$op == ":"))
-    if(n.group.flat > 0L && n.group.flat != ngroups) {
-        stop("lavaan ERROR: syntax defines ", n.group.flat, " groups; ",
-             "data suggests ", ngroups, " groups")
-    }
+    # check for block identifiers in the syntax (op = ":")
+    n.block.flat <- length(which(FLAT$op == ":"))
 
-    # for each `group' in n.group.flat, produce a USER
-    if(n.group.flat > 0L) {
-        # split the FLAT data.frame per `group', create LIST
-        # for each `group', and bind them together
-        FLAT <- as.data.frame(FLAT, stringsAsFactors=FALSE)
-        group.op.idx <- c(which(FLAT$op == ":"), nrow(FLAT)+1L)
-        for(g in 1:n.group.flat) {
-            FLAT.group <- FLAT[(group.op.idx[g]+1L):(group.op.idx[g+1]-1L),]    
-            LIST.group <- lav_partable_flat(FLAT.group, meanstructure = meanstructure, 
+    # for each non-empty `block' in n.block.flat, produce a USER
+    if(n.block.flat > 0L) {
+
+        # what are the block lhs labels?
+        BLOCKS <- tolower(FLAT$lhs[FLAT$op == ":"])
+        BLOCK.lhs <- unique(BLOCKS)
+  
+        # block op == ":" indices
+        BLOCK.op.idx <- which(FLAT$op == ":")
+
+        # check for wrong spelled 'group' lhs
+        if(length(grep("group", BLOCK.lhs)) > 1L) {
+            warning("lavaan WARNING: ambiguous block identifiers for group:",
+                    "\n\t\t  ", paste(BLOCK.lhs[grep("group", BLOCK.lhs)], 
+                                      collapse = ", "))
+        }
+
+        # if multiple blocks, and ":rhs" is missing, fill in integers 
+        # but only if there is just one type of block!
+        #if(length(BLOCK.lhs) == 1L) {
+        #    block.idx <- which(FLAT$op == ":" & FLAT$lhs == BLOCK.lhs[1])
+        #    FLAT$rhs[block.idx][nchar(FLAT$rhs[block.idx]) == 0L] <- 
+        #        seq_along(block.idx)
+        #} else {
+            # no empty :rhs fields allowed!
+            if( any( nchar(FLAT$rhs[BLOCK.op.idx]) == 0L ) ) {
+                empty.idx <- nchar(FLAT$rhs[BLOCK.op.idx]) == 0L
+                txt <- paste(FLAT$lhs[BLOCK.op.idx][empty.idx], ":")
+                stop("lavaan ERROR: syntax contains block identifiers with ",
+                     "missing numbers/labels:\n\t\t", txt)
+            }
+        #}
+
+
+        # check for 'group'
+        if("group" %in% BLOCK.lhs) {
+            # how many group blocks?
+            group.block.idx <- FLAT$op == ":" & FLAT$lhs == "group"
+            n.group.flat <- length( unique(FLAT$rhs[group.block.idx]) )
+
+            if(n.group.flat > 0L && n.group.flat != ngroups) {
+                stop("lavaan ERROR: syntax defines ", n.group.flat, " groups; ",
+                     "data (or argument ngroups) suggests ", ngroups, " groups")
+            }
+        }
+
+        # split the FLAT data.frame per `block', create LIST
+        # for each `block', and rbind them together, adding block columns
+        FLAT <- as.data.frame(FLAT, stringsAsFactors = FALSE)
+        BLOCK.op.idx <- c(BLOCK.op.idx, nrow(FLAT) + 1L)
+        BLOCK.rhs <- rep("0", length(BLOCK.lhs))
+
+        for(g in seq_len(n.block.flat)) {
+
+            # fill BLOC.rhs value
+            block.lhs <- FLAT$lhs[BLOCK.op.idx[g]]
+            block.rhs <- FLAT$rhs[BLOCK.op.idx[g]]
+            BLOCK.rhs[ which(block.lhs == BLOCK.lhs) ] <- block.rhs
+
+            # another block identifier?
+            if(BLOCK.op.idx[g+1] - BLOCK.op.idx[g] == 1L) {
+                next
+            }
+
+            FLAT.block <- FLAT[(BLOCK.op.idx[g]+1L):(BLOCK.op.idx[g+1]-1L),]
+            LIST.block <- lav_partable_flat(FLAT.block, blocks = BLOCK.lhs,
+                meanstructure = meanstructure,
                 int.ov.free = int.ov.free, int.lv.free = int.lv.free,
-                orthogonal = orthogonal, std.lv = std.lv, fixed.x = fixed.x,
+                orthogonal = orthogonal, std.lv = std.lv,
+                conditional.x = conditional.x, fixed.x = fixed.x,
                 parameterization = parameterization,
-                auto.fix.first = auto.fix.first, 
+                auto.fix.first = auto.fix.first,
                 auto.fix.single = auto.fix.single,
                 auto.var = auto.var, auto.cov.lv.x = auto.cov.lv.x,
-                auto.cov.y = auto.cov.y, auto.th = auto.th, 
-                auto.delta = auto.delta, 
-                varTable = varTable, group.equal = NULL, 
+                auto.cov.y = auto.cov.y, auto.th = auto.th,
+                auto.delta = auto.delta,
+                varTable = varTable, group.equal = NULL,
                 group.w.free = group.w.free, ngroups = 1L)
-            LIST.group <- as.data.frame(LIST.group, stringsAsFactors=FALSE)
-            if(g == 1L) {
-                LIST <- LIST.group
+            LIST.block <- as.data.frame(LIST.block, stringsAsFactors = FALSE)
+ 
+            # add block columns with current values in BLOCK.rhs 
+            for(b in seq_len(length(BLOCK.lhs))) {
+                block.lhs <- BLOCK.lhs[b]
+                block.rhs <- BLOCK.rhs[b]
+                LIST.block[block.lhs] <- rep(block.rhs, length(LIST.block$lhs))
+            }
+
+            if(!exists("LIST")) {
+                LIST <- LIST.block
             } else {
-                LIST.group$group <- rep(g, length(LIST.group$lhs))
-                LIST.group$id <- LIST.group$id + max(LIST$id)
-                LIST <- rbind(LIST, LIST.group)
+                LIST.block$id <- LIST.block$id + max(LIST$id)
+                LIST <- rbind(LIST, LIST.block)
             }
         }
         LIST <- as.list(LIST)
+
+        # convert block columns to integers if possible
+        for(b in seq_len(length(BLOCK.lhs))) {
+            block.lhs <- BLOCK.lhs[b]
+            block.rhs <- BLOCK.rhs[b]
+            tmp <- try(scan(text = LIST[[block.lhs]], what = integer(), 
+                       quiet = TRUE), silent = TRUE)
+            if(class(tmp) == "integer") {
+                 LIST[[block.lhs]] <- tmp
+            }
+        }
+
     } else {
-        LIST <- lav_partable_flat(FLAT, meanstructure = meanstructure, 
+        LIST <- lav_partable_flat(FLAT, blocks = "group", 
+            meanstructure = meanstructure, 
             int.ov.free = int.ov.free, int.lv.free = int.lv.free,
-            orthogonal = orthogonal, std.lv = std.lv, fixed.x = fixed.x,
+            orthogonal = orthogonal, std.lv = std.lv, 
+            conditional.x = conditional.x, fixed.x = fixed.x,
             parameterization = parameterization,
             auto.fix.first = auto.fix.first, auto.fix.single = auto.fix.single,
             auto.var = auto.var, auto.cov.lv.x = auto.cov.lv.x,
@@ -175,6 +253,13 @@ lavaanify <- lavParTable <- function(
     if(length(MOD)) {
         for(el in 1:length(MOD)) {
             idx <- which(LIST$mod.idx == el) # for each group
+
+            # 0.5-21: check is idx exists
+            # perhaps the corresponding element was duplicated, and removed
+            if(length(idx) == 0L) {
+                next
+            } 
+
             MOD.fixed <- MOD[[el]]$fixed  
             MOD.start <- MOD[[el]]$start
             MOD.label <- MOD[[el]]$label 
@@ -249,8 +334,15 @@ lavaanify <- lavParTable <- function(
     }
 
     # get 'virtual' parameter labels
-    LABEL <- lav_partable_labels(partable=LIST, group.equal=group.equal,
-                                group.partial=group.partial)
+    if(n.block.flat > 1L) {
+        blocks <- BLOCK.lhs
+    } else {
+        blocks <- "group"
+    }
+    LABEL <- lav_partable_labels(partable = LIST, 
+                                 blocks = blocks,
+                                 group.equal = group.equal,
+                                 group.partial = group.partial)
 
     if(debug) {
         cat("[lavaan DEBUG]: parameter LIST with LABELS:\n")
@@ -349,34 +441,46 @@ lavaanify <- lavParTable <- function(
     #idx.unco <- which(LIST$free > 0)
     #LIST$unco[idx.unco] <- seq_along(idx.unco)
 
-
     # handle constraints (if any) (NOT per group, but overall - 0.4-11)
     if(length(CON) > 0L) {
         #cat("DEBUG:\n"); print(CON)
-        lhs  = unlist(lapply(CON, "[[", "lhs"))
-         op  = unlist(lapply(CON, "[[",  "op"))
-        rhs  = unlist(lapply(CON, "[[", "rhs"))
-        user = unlist(lapply(CON, "[[", "user"))
-        LIST$id         <- c(LIST$id,         length(LIST$id) + seq_along(lhs) )
-        LIST$lhs        <- c(LIST$lhs,        lhs)
-        LIST$op         <- c(LIST$op,         op)
-        LIST$rhs        <- c(LIST$rhs,        rhs)
-        LIST$user       <- c(LIST$user,       user)
-        LIST$group      <- c(LIST$group,      rep(0L, each=length(CON)))
-        LIST$free       <- c(LIST$free,       rep(0L, length(lhs)) )
-        LIST$ustart     <- c(LIST$ustart,     rep(as.numeric(NA), length(lhs)))
-        LIST$exo        <- c(LIST$exo,        rep(0L, length(lhs)) )
-        LIST$label      <- c(LIST$label,      rep("",  length(lhs)) )
-        if(!is.null(LIST$prior)) {
-            LIST$prior      <- c(LIST$prior,      rep("",  length(lhs)) )
+        CONLIST <- list()
+        CONLIST$id   = length(LIST$id) + seq_len(length(CON))
+        CONLIST$lhs  = unlist(lapply(CON, "[[", "lhs"))
+        CONLIST$op   = unlist(lapply(CON, "[[",  "op"))
+        CONLIST$rhs  = unlist(lapply(CON, "[[", "rhs"))
+        CONLIST$user = unlist(lapply(CON, "[[", "user"))
+
+        # add block columns with current values in BLOCK.rhs 
+        if(n.block.flat > 0L) {
+            for(b in seq_len(length(BLOCK.lhs))) {
+                block.lhs <- BLOCK.lhs[b]
+                if(is.character(LIST[[block.lhs]])) {
+                    CONLIST[[block.lhs]] <- rep("", length(CONLIST$lhs))
+                } else {
+                    # what shall we do: NA or 0L?
+                    CONLIST[[block.lhs]] <- rep(as.integer(NA), 
+                                                length(CONLIST$lhs))
+                }
+            }
+        } else {
+            CONLIST$group <- rep(0L, length(CONLIST$lhs))
         }
-        LIST$plabel     <- c(LIST$plabel,     rep("",  length(lhs)) )
-        if(!is.null(LIST$eq.id)) {
-            LIST$eq.id      <- c(LIST$eq.id,      rep(0L,  length(lhs)) )
-        }
-        if(!is.null(LIST$unco)) {
-            LIST$unco       <- c(LIST$unco,       rep(0L,  length(lhs)) )
-        }
+
+        CONLIST$ustart <- rep(as.numeric(NA), length(CONLIST$lhs))
+        #if(!is.null(LIST$prior)) {
+        #    LIST$prior      <- c(LIST$prior,      rep("",  length(lhs)) )
+        #}
+        #LIST$plabel     <- c(LIST$plabel,     rep("",  length(lhs)) )
+        #if(!is.null(LIST$eq.id)) {
+        #    LIST$eq.id      <- c(LIST$eq.id,      rep(0L,  length(lhs)) )
+        #}
+        #if(!is.null(LIST$unco)) {
+        #    LIST$unco       <- c(LIST$unco,       rep(0L,  length(lhs)) )
+        #}
+
+        # merge
+        LIST <- lav_partable_merge(LIST, CONLIST)
     }
 
     # put lhs of := elements in label column
@@ -410,6 +514,7 @@ lavaanify <- lavParTable <- function(
 
 # user visible function to add 'matrix' entries in the parameter table
 lavMatrixRepresentation <- function(partable, representation = "LISREL",
+                                    add.attributes = FALSE,
                                     as.data.frame. = TRUE) {
 
     # check parameter table
@@ -417,7 +522,8 @@ lavMatrixRepresentation <- function(partable, representation = "LISREL",
 
     # get model matrices
     if(representation == "LISREL") {
-        REP <- representation.LISREL(partable, target=NULL, extra=FALSE)
+        REP <- representation.LISREL(partable, target = NULL, 
+                                     extra = add.attributes)
     } else {
         stop("lavaan ERROR: only representation \"LISREL\" has been implemented.")
     }
@@ -429,6 +535,17 @@ lavMatrixRepresentation <- function(partable, representation = "LISREL",
     if(as.data.frame.) {
         partable <- as.data.frame(partable, stringsAsFactors=FALSE)
         class(partable) <- c("lavaan.data.frame", "data.frame")
+    }
+
+    if(add.attributes) {
+        attr(partable, "ov.dummy.names.nox") <- attr(REP, "ov.dummy.names.nox")
+        attr(partable, "ov.dummy.names.x")   <- attr(REP, "ov.dummy.names.x")
+        attr(partable, "mmNames")  <- attr(REP, "mmNames")
+        attr(partable, "mmNumber") <- attr(REP, "mmNumber")
+        attr(partable, "mmRows")   <- attr(REP, "mmRows")
+        attr(partable, "mmCols")   <- attr(REP, "mmCols")
+        attr(partable, "mmDimNames")  <- attr(REP, "mmDimNames")
+        attr(partable, "mmSymmetric") <- attr(REP, "mmSymmetric")
     }
 
     partable
@@ -452,8 +569,31 @@ lav_partable_attributes <- function(partable, pta=NULL) {
     # vnames
     pta$vnames <- lav_partable_vnames(partable, type="all", group="list")
 
+    # vidx
+    OV <- pta$vnames$ov
+    LV <- pta$vnames$lv
+    ngroups <- length(pta$vnames$ov)
+    pta$vidx <- lapply(names(pta$vnames), function(v) {
+                    lapply(seq_len(ngroups), function(g) {
+                        if(grepl("lv", v)) {
+                            match(pta$vnames[[v]][[g]], LV[[g]])
+                        } else if(grepl("th", v)) {
+                            # thresholds have '|t' pattern
+                            TH <-  sapply(strsplit(pta$vnames[[v]][[g]], 
+                                          "|t", fixed = TRUE), "[[", 1L)
+                            match(TH, OV[[g]])
+                        } else if(grepl("eqs", v)){
+                            # mixture of OV/LV
+                            integer(0L)
+                        } else {
+                            match(pta$vnames[[v]][[g]], OV[[g]])
+                        }
+                    })
+                })
+    names(pta$vidx) <- names(pta$vnames)
+
     # ngroups
-    pta$ngroups <- length(pta$vnames$ov)
+    pta$ngroups <- ngroups
 
     # nvar
     pta$nvar <- lapply(pta$vnames$ov, length)
@@ -488,13 +628,27 @@ lav_partable_ov_idx <- function(partable, type="th", group=NULL) {
 
 lav_partable_ndat <- function(partable, group=NULL) {
 
-    ngroups <- max(partable$group)
+    # ngroups
+    if(is.null(partable$group)) {
+        partable$group <- rep(1L, length(partable$lhs))
+        ngroups <- 1L
+    } else {
+        if(is.character(partable$group)) {
+            group.label <- unique(partable$group)
+            group.label <- group.label[ nchar(group.label) > 0L ]
+            ngroups <- length(group.label)
+        } else {
+            ngroups <- max(partable$group)
+        }
+    }
+
     meanstructure <- any(partable$op == "~1")
     fixed.x <- any(partable$exo > 0L & partable$free == 0L)
+    conditional.x <- any(partable$exo > 0L & partable$op == "~")
     categorical <- any(partable$op == "|")
     if(categorical) meanstructure <- TRUE
 
-    if(categorical) {
+    if(conditional.x) {
         ov.names <- lav_partable_vnames(partable, "ov.nox", group=group)
     } else {
         ov.names <- lav_partable_vnames(partable, "ov", group=group)
@@ -505,7 +659,7 @@ lav_partable_ndat <- function(partable, group=NULL) {
     ndat  <- ngroups*pstar
 
     # correction for fixed.x?
-    if(!categorical && fixed.x) {
+    if(!conditional.x && fixed.x) {
         ov.names.x <- lav_partable_vnames(partable, "ov.x", group=group)
         nvar.x <- length(ov.names.x)
         pstar.x <- nvar.x * (nvar.x + 1) / 2
@@ -527,6 +681,14 @@ lav_partable_ndat <- function(partable, group=NULL) {
         ndat <- ndat - (ngroups * nvar.ord)
         # but additional thresholds
         ndat <- ndat + (ngroups * nth)
+        # add slopes
+        ndat <- ndat + (ngroups * nvar * nexo)
+    }
+ 
+    # correction for conditional.x not categorical
+    if(conditional.x && !categorical) {
+        ov.names.x <- lav_partable_vnames(partable, "ov.x", group=group)
+        nexo     <- length(ov.names.x)
         # add slopes
         ndat <- ndat + (ngroups * nvar * nexo)
     }
@@ -558,8 +720,10 @@ lav_partable_df <- function(partable, group=NULL) {
     as.integer(df)
 }
 
-lav_partable_labels <- function(partable, group.equal="", group.partial="", 
-                               type="user") {
+lav_partable_labels <- function(partable, 
+                                blocks = "group",
+                                group.equal = "", group.partial = "", 
+                                type = "user") {
 
     # catch empty partable
     if(length(partable$lhs) == 0L) return(character(0L))
@@ -568,12 +732,24 @@ lav_partable_labels <- function(partable, group.equal="", group.partial="",
     label <- paste(partable$lhs, partable$op, partable$rhs, sep="")
     
     # handle multiple groups
-    ngroups <- max(partable$group)
-    if(ngroups > 1L) {
-        for(g in 2:ngroups) {
-            label[partable$group == g] <- 
-                paste(label[partable$group == g], ".g", g, sep="")
+    if("group" %in% blocks) {
+        if(is.character(partable$group)) {
+            group.label <- unique(partable$group)
+            group.label <- group.label[ nchar(group.label) > 0L ]
+            ngroups <- length(group.label)
+        } else {
+            ngroups <- max(partable$group)
+            group.label <- 1:ngroups
         }
+        if(ngroups > 1L) {
+            for(g in 2:ngroups) {
+                label[partable$group == group.label[g]] <- 
+                    paste(label[partable$group == group.label[g]], 
+                          ".g", g, sep="")
+            }
+        }
+    } else {
+        ngroups <- 1L
     }
  
     #cat("DEBUG: label start:\n"); print(label); cat("\n")
@@ -668,6 +844,14 @@ lav_partable_labels <- function(partable, group.equal="", group.partial="",
     #cat("DEBUG: g1.idx = ", g1.idx, "\n")
     #cat("DEBUG: label after group.equal:\n"); print(label); cat("\n")
 
+    # handle other block identifier (not 'group')
+    for(block in blocks) {
+        if(block == "group") {
+            next
+        }
+        label <- paste(label, ".", partable[[block]], sep = "")
+    } 
+
     # user-specified labels -- override everything!!
     user.idx <- which(nchar(partable$label) > 0L)
     label[user.idx] <- partable$label[user.idx]
@@ -707,7 +891,13 @@ lav_partable_full <- function(partable = NULL, group = NULL,
 
     # number of groups
     if(!is.null(partable$group)) {
-        ngroups <- max(partable$group)
+        if(is.character(partable$group)) {
+            group.label <- unique(partable$group)
+            group.label <- group.label[ nchar(group.label) > 0L ]
+            ngroups <- length(group.label)
+        } else {
+            ngroups <- max(partable$group)
+        }
     } else {
         ngroups <- 1L
     }
@@ -870,11 +1060,13 @@ lav_partable_full <- function(partable = NULL, group = NULL,
 }
 
 lav_partable_flat <- function(FLAT = NULL,
+                              blocks           = "group",
                               meanstructure    = FALSE,
                               int.ov.free      = FALSE,
                               int.lv.free      = FALSE,
                               orthogonal       = FALSE,
                               std.lv           = FALSE,
+                              conditional.x    = FALSE,
                               fixed.x          = TRUE,
                               parameterization = "delta",
                               auto.fix.first   = FALSE,
@@ -1002,7 +1194,7 @@ lav_partable_flat <- function(FLAT = NULL,
     }
 
     # d) exogenous x covariates: VARIANCES + COVARIANCES
-    if(!categorical && (nx <- length(ov.names.x)) > 0L) {
+    if(!conditional.x && (nx <- length(ov.names.x)) > 0L) {
         idx <- lower.tri(matrix(0, nx, nx), diag=TRUE)
         lhs <- c(lhs, rep(ov.names.x,  each=nx)[idx]) # fill upper.tri
         rhs <- c(rhs, rep(ov.names.x, times=nx)[idx])
@@ -1026,7 +1218,7 @@ lav_partable_flat <- function(FLAT = NULL,
 
     # 3. INTERCEPTS
     if(meanstructure) {
-        if(categorical) {
+        if(conditional.x) {
             ov.int <- ov.names.nox
         } else {
             ov.int <- ov.names
@@ -1096,7 +1288,12 @@ lav_partable_flat <- function(FLAT = NULL,
     TMP <- USER[,1:3]
     idx <- which(duplicated(TMP))
     if(length(idx) > 0L) {
-        warning("duplicated elements in model syntax have been ignored: ", TMP[idx,])
+        txt <- sapply(1:length(idx), function(i) { 
+            paste("    ", TMP[idx[i],"lhs"], 
+                          TMP[idx[i], "op"], 
+                          TMP[idx[i],"rhs"]) })
+        warning("duplicated elements in model syntax have been ignored:\n", 
+                paste(txt, collapse = "\n"))
         USER <- USER[-idx,]
     }
 
@@ -1122,7 +1319,7 @@ lav_partable_flat <- function(FLAT = NULL,
     }
 
     # now that we have removed all duplicated elements, we can construct
-    # the LIST for a single group
+    # the LIST for a single group/block
     lhs     <- c(USER$lhs, DEFAULT$lhs)
     op      <- c(USER$op,  DEFAULT$op)
     rhs     <- c(USER$rhs, DEFAULT$rhs)
@@ -1238,23 +1435,40 @@ lav_partable_flat <- function(FLAT = NULL,
         }
     }
 
-    # 5. handle exogenous `fixed.x' covariates
-    if(length(ov.names.x) > 0 && fixed.x) {
+    # 5. handle exogenous `x' covariates
+    if(length(ov.names.x) > 0) {
+
         # 1. variances/covariances
-               exo.idx  <- which(op == "~~" &
-                                 rhs %in% ov.names.x &
-                                 user == 0L)
-        ustart[exo.idx] <- as.numeric(NA) # should be overriden later!
-          free[exo.idx] <- 0L
-           exo[exo.idx] <- 1L
+        exo.var.idx  <- which(op == "~~" &
+                          rhs %in% ov.names.x &
+                          user == 0L)
+        if(fixed.x) {
+            ustart[exo.var.idx] <- as.numeric(NA) # should be overriden later!
+              free[exo.var.idx] <- 0L
+               exo[exo.var.idx] <- 1L
+        } else if(conditional.x) {
+               exo[exo.var.idx] <- 1L
+        }
 
         # 2. intercepts
-               exo.int.idx  <- which(op == "~1" &
-                                     lhs %in% ov.names.x &
-                                     user == 0L)
-        ustart[exo.int.idx] <- as.numeric(NA) # should be overriden later!
-          free[exo.int.idx] <- 0L
-           exo[exo.int.idx] <- 1L
+        exo.int.idx  <- which(op == "~1" &
+                              lhs %in% ov.names.x &
+                              user == 0L)
+        if(fixed.x) {
+            ustart[exo.int.idx] <- as.numeric(NA) # should be overriden later!
+              free[exo.int.idx] <- 0L
+               exo[exo.int.idx] <- 1L
+        } else if(conditional.x) {
+               exo[exo.int.idx] <- 1L
+        }
+
+        # 3. regressions ov + lv
+        exo.reg.idx <- which(op == "~" &
+                             lhs %in% c(lv.names, ov.names.nox) &
+                             rhs %in% ov.names.x)
+        if(conditional.x) {
+            exo[exo.reg.idx] <- 1L
+        }
     }
 
     # 5b. residual variances of ordinal variables?
@@ -1353,49 +1567,28 @@ lav_partable_flat <- function(FLAT = NULL,
     } # ngroups
 
     # construct LIST
-    #LIST  <- data.frame(
-    LIST   <- list(     id          = seq_along(lhs),
-                        lhs         = lhs,
-                        op          = op,
-                        rhs         = rhs,
-                        user        = user,
-                        group       = group,
-                        mod.idx     = mod.idx,
-                        free        = free,
-                        ustart      = ustart,
-                        exo         = exo,
-                        label       = label   # ,
-                        # IF we add these, also change
-                        #eq.id       = rep(0L,  length(lhs)),
-                        #unco        = rep(0L,  length(lhs))
-                   )
-    #                   stringsAsFactors=FALSE)
-
-    LIST
-}
-
-lav_partable_matrixrep <- function(partable, target = NULL,
-                                       representation = "LISREL") {
-
-    if(is.null(target)) {
-        target <- partable
-    } 
-
-    if(representation == "LISREL") {
-        REP <- representation.LISREL(partable = partable, target = target,
-                                     extra = FALSE)
-    } else {
-        stop("only LISREL representation has been implemented")
-    }
-
-    if(is.data.frame(target)) {
-        target <- cbind(target, as.data.frame(REP, stringsAsFactors = FALSE))
-    } else {
-        target$mat <- REP$mat
-        target$row <- REP$row
-        target$col <- REP$col
-    }
-
-    target
-}
+    LIST <- list( id          = seq_along(lhs),
+                  lhs         = lhs,
+                  op          = op,
+                  rhs         = rhs,
+                  user        = user)
     
+    # block columns (typically only group)
+    for(block in blocks) {
+        if(block == "group") {
+            LIST[[block]] <- group
+        } else {
+            LIST[[block]] <- rep(0L, length(lhs))
+        }
+    }
+
+    # other columns
+    LIST2 <- list(mod.idx     = mod.idx,
+                  free        = free,
+                  ustart      = ustart,
+                  exo         = exo,
+                  label       = label)
+
+    LIST <- c(LIST, LIST2)
+}
+

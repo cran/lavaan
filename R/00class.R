@@ -32,14 +32,20 @@ setClass("lavData",
 setClass("lavSampleStats",         # sample moments
     representation(
         CAT="list",
-        var="list",                # variances
+        var="list",                # observed variances (per group)
         cov="list",                # observed var/cov matrix (per group)
         mean="list",               # observed mean vector (per group)
         th="list",                 # thresholds for non-numeric var (per group)
-        th.nox="list",             # thresholds ignoring eXo
-        th.idx="list",
+        th.idx="list",             # th index (0 for numeric)
         th.names="list",           # threshold names
-        slopes="list",             # slopes exo
+
+        res.cov="list",            # residual var/cov matrix (if conditional.x)
+        res.var="list",            # residual variances
+        res.th="list",             # residual thresholds
+        res.th.nox="list",         # residual thresholds ignoring x
+        res.slopes="list",         # slopes exo (if conditional.x) 
+        res.int="list",            # intercepts (if conditional.x)
+
         mean.x="list",             # mean exo
         cov.x="list",              # variance/covariance exo
         bifreq="list",             # bivariate frequency tables
@@ -48,14 +54,18 @@ setClass("lavSampleStats",         # sample moments
         nobs="list",               # effective number of obs (per group)
         ntotal="integer",          # total number of obs (all groups)
         ngroups="integer",         # number of groups
+        x.idx="list",              # x.idx if fixed.x = TRUE
 
         icov="list",               # inverse of observed cov (per group)
         cov.log.det="list",        # log det of observed cov (per group)
+        res.icov="list",
+        res.cov.log.det="list",
         ridge="numeric",           # ridge constant
         WLS.obs="list",            # all relevant observed stats in a vector
         WLS.V="list",              # weight matrix for GLS/WLS
         WLS.VD="list",             # diagonal of weight matrix only
         NACOV="list",              # N times the asymptotic covariance matrix
+        NACOV.user="logical",      # user-specified NACOV?
 
         missing.flag="logical",    # missing patterns?
         missing="list",            # missingness information
@@ -119,6 +129,7 @@ setClass("Model",          # MATRIX representation of the sem model
         con.lambda="numeric",
 
         nexo="integer",
+        conditional.x="logical",
         fixed.x="logical",
         parameterization="character",
         ov.x.dummy.ov.idx="list",
@@ -173,6 +184,31 @@ setClass("lavaan",
         external    = "list"             # optional slot, for add-on packages
     ) 
 )
+
+setClass("lavaanList",
+    representation(
+        call            = "call",     # matched call
+        Options         = "list",     # lavOptions
+        ParTable        = "list",
+        pta             = "list",
+        Data            = "lavData",  # from first dataset (ngroups!)
+        Model           = "Model",    # based on first dataset
+        meta            = "list",
+
+        timingList      = "list",
+        ParTableList    = "list",
+        DataList        = "list",
+        SampleStatsList = "list",
+        CacheList       = "list",
+        vcovList        = "list",
+        testList        = "list",
+        optimList       = "list",
+        impliedList     = "list",
+        funList         = "list",
+        external        = "list"       # optional slot, for add-on packages
+    )
+)
+
 
 
 

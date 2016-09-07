@@ -68,7 +68,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     FLAT.op          <- character(0)
     FLAT.rhs         <- character(0)
     FLAT.rhs.mod.idx <- integer(0)
-    FLAT.group       <- integer(0)    # keep track of groups using ":" operator
+    FLAT.block       <- integer(0)    # keep track of groups using ":" operator
   
     FLAT.fixed       <- character(0)  # only for display purposes! 
     FLAT.start       <- character(0)  # only for display purposes!
@@ -79,8 +79,8 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     CON.idx  <- 0L
     MOD <- vector("list", length=0L)
     CON <- vector("list", length=0L)
-    GRP <- 1L
-    GRP_OP <- FALSE
+    BLOCK <- 1L
+    BLOCK_OP <- FALSE
     for(i in 1:length(model)) {
         x <- model[i]
         if(debug) {
@@ -160,22 +160,22 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
             next
         }
     
-        # 2c if operator is ":", put it in GRP
+        # 2c if operator is ":", put it in BLOCK
         if(op == ":") {
             FLAT.idx <- FLAT.idx + 1L
             FLAT.lhs[FLAT.idx] <- lhs
             FLAT.op[ FLAT.idx] <- op
-            FLAT.rhs[FLAT.idx] <- ""
+            FLAT.rhs[FLAT.idx] <- rhs
             FLAT.fixed[FLAT.idx] <- ""
             FLAT.start[FLAT.idx] <- ""
             FLAT.label[FLAT.idx] <- ""
             FLAT.prior[FLAT.idx] <- ""
             FLAT.rhs.mod.idx[FLAT.idx] <- 0L
-            if(GRP_OP) {
-                GRP <- GRP + 1L
+            if(BLOCK_OP) {
+                BLOCK <- BLOCK + 1L
             }
-            FLAT.group[FLAT.idx] <- GRP
-            GRP_OP <- TRUE
+            FLAT.block[FLAT.idx] <- BLOCK
+            BLOCK_OP <- TRUE
             next
         }
     
@@ -193,7 +193,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
 
         # new 0.5-12: before we do this, replace '0.2?' by 'start(0.2)*'
         # requested by the simsem folks
-        rhs <- gsub('([0-9]*\\.*[0-9]*)\\?',"start(\\1)\\*",rhs)
+        rhs <- gsub('\\(?([-]?[0-9]*\\.?[0-9]*)\\)?\\?',"start(\\1)\\*", rhs)
         rhs.formula <- as.formula(paste("~",rhs))
         out <- lav_syntax_parse_rhs(rhs=rhs.formula[[2L]],op=op)
 
@@ -241,7 +241,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
                 if(op != "~~") {
                     idx <- which(FLAT.lhs == lhs.names[l] &
                                  FLAT.op  == op &
-                                 FLAT.group == GRP &
+                                 FLAT.block == BLOCK &
                                  FLAT.rhs == rhs.name)
                     if(length(idx) > 0L) {
                         stop("lavaan ERROR: duplicate model element in: ", model[i])
@@ -250,7 +250,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
                     # 2. symmetric (~~)
                     idx <- which(FLAT.lhs == rhs.name &
                                  FLAT.op  == "~~" &
-                                 FLAT.group == GRP &
+                                 FLAT.block == BLOCK &
                                  FLAT.rhs == lhs.names[l])
                     if(length(idx) > 0L) {
                         stop("lavaan ERROR: duplicate model element in: ", model[i])
@@ -260,7 +260,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
                 FLAT.lhs[FLAT.idx] <- lhs.names[l]
                 FLAT.op[ FLAT.idx] <- op
                 FLAT.rhs[FLAT.idx] <- rhs.name
-                FLAT.group[FLAT.idx] <- GRP
+                FLAT.block[FLAT.idx] <- BLOCK
                 FLAT.fixed[FLAT.idx] <- ""
                 FLAT.start[FLAT.idx] <- ""
                 FLAT.label[FLAT.idx] <- ""
@@ -315,7 +315,7 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     FLAT.rhs.mod.idx[ mod.idx ] <- 1:length(mod.idx)
   
     FLAT <- list(lhs=FLAT.lhs, op=FLAT.op, rhs=FLAT.rhs,
-                 mod.idx=FLAT.rhs.mod.idx, group=FLAT.group,
+                 mod.idx=FLAT.rhs.mod.idx, block=FLAT.block,
                  fixed=FLAT.fixed, start=FLAT.start,
                  label=FLAT.label, prior=FLAT.prior)
 
@@ -362,7 +362,13 @@ lav_syntax_parse_rhs <- function(rhs, op="") {
         } else if(rhs[[1L]] == "*") { # last one, but with modifier
             out <- c(vector("list", 1L), out)
             NAME <- all.vars(rhs[[3L]])
-            if(length(NAME) > 0L) {
+
+            if(length(NAME) > 0L) { # not an intercept
+                # catch interaction term
+                rhs3.names <- all.names(rhs[[3L]])
+                if(rhs3.names[1L] == ":") {
+                    NAME <- paste(NAME[1L], ":", NAME[2L], sep = "")
+                }
                 names(out)[1L] <- NAME
             } else { # intercept
                 names(out)[1L] <- "intercept"
@@ -376,9 +382,26 @@ lav_syntax_parse_rhs <- function(rhs, op="") {
                 out[[1L]] <- lav_syntax_get_modifier(rhs[[2L]])
             }
             break
+        } else if(rhs[[1L]] == ":") { # last one, but interaction term
+            out <- c(vector("list", 1L), out)
+            NAME <- all.vars(rhs)
+            NAME <- paste(NAME[1L], ":", NAME[2L], sep = "")
+            names(out)[1L] <- NAME
+            break
         } else if(rhs[[1L]] == "+") { # not last one!
             i.var <- all.vars(rhs[[3L]], unique=FALSE)
             n.var <- length(i.var)
+
+            # catch interaction term
+            rhs3.names <- all.names(rhs[[3L]])
+            if(length(i.var) > 1L && ":" %in% rhs3.names) {
+               colon.idx <- which(rhs3.names == ":")
+               i.var <- i.var[seq_len(n.var - 1L)]
+               n.var <- n.var - 1L
+               i.var[n.var] <- paste(rhs3.names[colon.idx + 1L], ":",
+                                     rhs3.names[colon.idx + 2L], sep = "")
+            }
+
             out <- c(vector("list", 1L), out)
             if(length(i.var) > 0L) {
                 names(out)[1L] <- i.var[n.var]
@@ -388,7 +411,7 @@ lav_syntax_parse_rhs <- function(rhs, op="") {
             if(n.var > 1L) { 
                 # modifier are unquoted labels
                 out[[1L]]$label <- i.var[-n.var]
-            } else if(length(rhs[[3]]) == 3L) {
+            } else if(length(rhs[[3L]]) == 3L && rhs3.names[1L] == "*") {
                 # modifiers!!
                 out[[1L]] <- lav_syntax_get_modifier(rhs[[3L]][[2L]])
             }

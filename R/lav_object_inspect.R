@@ -15,10 +15,12 @@ lavTech <- function(lavobject,
                     what                   = "free",
                     add.labels             = FALSE,
                     add.class              = FALSE,
+                    list.by.group          = FALSE,  
                     drop.list.single.group = FALSE) {
 
     lavInspect(lavobject = lavobject, what = what,
                add.labels = add.labels, add.class = add.class,
+               list.by.group = list.by.group,
                drop.list.single.group =  drop.list.single.group)
 }
 
@@ -27,6 +29,7 @@ lavInspect <- function(lavobject,
                        what                   = "free",
                        add.labels             = TRUE,
                        add.class              = TRUE,
+                       list.by.group          = TRUE,
                        drop.list.single.group = TRUE) {
 
     # lavobject must inherit from class lavaan
@@ -43,39 +46,60 @@ lavInspect <- function(lavobject,
 
     #### model matrices, with different contents ####
     if(what == "free") {
-        lav_object_inspect_modelmatrices(lavobject, what = "free", type = "free",
-            add.labels = add.labels, add.class = add.class)
+        lav_object_inspect_modelmatrices(lavobject, what = "free", 
+            type = "free", add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group, 
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "partable" || what == "user") {
-        lav_object_inspect_modelmatrices(lavobject, what = "free", type="partable",
-            add.labels = add.labels, add.class = add.class)
+        lav_object_inspect_modelmatrices(lavobject, what = "free", 
+            type="partable", add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group, 
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "se" ||
               what == "std.err" ||
               what == "standard.errors") {
         lav_object_inspect_modelmatrices(lavobject, what = "se",
-            add.labels = add.labels, add.class = add.class)
+            add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group, 
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "start" || what == "starting.values") {
         lav_object_inspect_modelmatrices(lavobject, what = "start",
-            add.labels = add.labels, add.class = add.class)
+            add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group, 
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "est"  || what == "estimates" ||
               what == "coef" || what == "coefficients" ||
               what == "x") {
         lav_object_inspect_modelmatrices(lavobject, what = "est",
-            add.labels = add.labels, add.class = add.class)
+            add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group, 
+            #list.by.group = FALSE, for semTools only
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "dx.free") {
         lav_object_inspect_modelmatrices(lavobject, what = "dx.free",
-            add.labels = add.labels, add.class = add.class)
+            add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group, 
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "dx.all") {
         lav_object_inspect_modelmatrices(lavobject, what = "dx.all",
-            add.labels = add.labels, add.class = add.class)
+            add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group, 
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "std" || what == "std.all" || what == "standardized") {
         lav_object_inspect_modelmatrices(lavobject, what = "std.all",
-           add.labels = add.labels, add.class = add.class)
+           add.labels = add.labels, add.class = add.class,
+           list.by.group = list.by.group, 
+           drop.list.single.group = drop.list.single.group)
     } else if(what == "std.lv") {
         lav_object_inspect_modelmatrices(lavobject, what = "std.lv",
-           add.labels = add.labels, add.class = add.class)
+           add.labels = add.labels, add.class = add.class,
+           list.by.group = list.by.group, 
+           drop.list.single.group = drop.list.single.group)
     } else if(what == "std.nox") {
         lav_object_inspect_modelmatrices(lavobject, what = "std.nox",
-           add.labels = add.labels, add.class = add.class)
+           add.labels = add.labels, add.class = add.class,
+           list.by.group = list.by.group, 
+           drop.list.single.group = drop.list.single.group)
 
 
     #### parameter table ####
@@ -99,6 +123,8 @@ lavInspect <- function(lavobject,
 
     #### sample statistics #####
     } else if(what == "sampstat" ||
+              what == "sampstats" ||
+              what == "samplestats" ||
               what == "samp" ||
               what == "sample" ||
               what == "samplestatistics") {
@@ -228,11 +254,11 @@ lavInspect <- function(lavobject,
 
     #### convergence, meanstructure, categorical ####
     } else if(what == "converged") {
-        lavobject@Fit@converged
+        lavobject@optim$converged
     } else if(what == "iterations" ||
               what == "iter" ||
               what == "niter") {
-        lavobject@Fit@iterations
+        lavobject@optim$iterations
     } else if(what == "meanstructure") {
         lavobject@Model@meanstructure
     } else if(what == "categorical") {
@@ -350,6 +376,12 @@ lavInspect <- function(lavobject,
         lav_object_inspect_UGamma(lavobject,
             add.labels = add.labels, add.class = add.class)
 
+    ### jacobians ####
+    } else if(what == "delta") {
+        lav_object_inspect_delta(lavobject,
+            add.labels = add.labels, add.class = add.class,
+            drop.list.single.group = drop.list.single.group)
+
     # post-checking
     } else if(what == "post.check" || what == "post") {
         lav_object_post_check(lavobject)
@@ -389,9 +421,12 @@ lav_object_inspect_est <- function(lavobject) {
     # from 0.5-19, they are in the partable
     if(!is.null(lavobject@ParTable$est)) {
         OUT <- lavobject@ParTable$est
-    } else {
+    } else if("Fit" %in% slotNames(lavobject)) {
         # in < 0.5-19, we should look in @Fit@est
         OUT <- lavobject@Fit@est
+    } else {
+        PT <- parTable(lavobject)
+        OUT <- rep(as.numeric(NA), length(PT$lhs))
     }
 
     OUT
@@ -402,9 +437,12 @@ lav_object_inspect_se <- function(lavobject) {
     # from 0.5-19, they are in the partable
     if(!is.null(lavobject@ParTable$se)) {
         OUT <- lavobject@ParTable$se
-    } else {
+    } else if("Fit" %in% slotNames(lavobject)) {
         # in < 0.5-19, we should look in @Fit@se
         OUT <- lavobject@Fit@se
+    } else {
+        PT <- parTable(lavobject)
+        OUT <- rep(as.numeric(NA), length(PT$lhs))
     }
 
     OUT
@@ -441,7 +479,9 @@ lav_object_inspect_boot <- function(lavobject) {
 
 
 lav_object_inspect_modelmatrices <- function(lavobject, what = "free",
-    type = "free", add.labels = FALSE, add.class = FALSE) {
+    type = "free", add.labels = FALSE, add.class = FALSE,
+    list.by.group = FALSE,
+    drop.list.single.group = FALSE) {
 
     GLIST <- lavobject@Model@GLIST
 
@@ -544,80 +584,230 @@ lav_object_inspect_modelmatrices <- function(lavobject, what = "free",
         }
     }
 
-    GLIST
+    # try to reflect `equality constraints'
+    con.flag <- FALSE
+    if(what == "free" && lavobject@Model@eq.constraints) {
+        # extract constraints from parameter table
+        PT <- parTable(lavobject)
+        CON <-  PT[PT$op %in% c("==","<",">") ,c("lhs","op","rhs")]
+        rownames(CON) <- NULL
+
+        # replace 'labels' by parameter numbers
+        ID <- lav_partable_constraints_label_id(PT)
+        LABEL <- names(ID)
+        for(con in 1:nrow(CON)) {
+            # lhs
+            LHS.labels <- all.vars(as.formula(paste("~",CON[con,"lhs"]))) 
+
+            if(length(LHS.labels) > 0L) {
+                # par id
+                LHS.freeid <- ID[match(LHS.labels, LABEL)]
+
+                # substitute
+                tmp <- CON[con,"lhs"]
+                for(pat in 1:length(LHS.labels)) {
+                    tmp <- sub(LHS.labels[pat], LHS.freeid[pat], tmp)
+                }
+                CON[con,"lhs"] <- tmp
+            }
+
+            # rhs
+            RHS.labels <- all.vars(as.formula(paste("~",CON[con,"rhs"])))
+
+            if(length(RHS.labels) > 0L) {
+                # par id
+                RHS.freeid <- ID[match(RHS.labels, LABEL)]
+                # substitute
+                tmp <- CON[con,"rhs"]
+                for(pat in 1:length(RHS.labels)) {
+                    tmp <- sub(RHS.labels[pat], RHS.freeid[pat], tmp)
+                }
+                CON[con,"rhs"] <- tmp
+            }
+        } # con
+
+        # add this info at the top
+        #GLIST <- c(constraints = list(CON), GLIST)
+        #no, not a good idea, it does not work with list.by.group
+  
+        # add it as a 'header' attribute?
+        attr(CON, "header") <- "Note: model contains equality constraints:"
+        con.flag <- TRUE
+    }
+
+    # should we group them per group?
+    if(list.by.group) {
+        lavsamplestats <- lavobject@SampleStats
+        lavmodel       <- lavobject@Model
+        nmat           <- lavmodel@nmat
+
+        OUT <- vector("list", length = lavsamplestats@ngroups)
+        for(g in 1:lavsamplestats@ngroups) {
+            # which mm belong to group g?
+            mm.in.group <- 1:nmat[g] + cumsum(c(0,nmat))[g]
+            mm.names <- names( GLIST[mm.in.group] )
+
+            OUT[[g]] <- GLIST[mm.in.group]
+        }
+
+        if(lavsamplestats@ngroups == 1L && drop.list.single.group) {
+            OUT <- OUT[[1]]
+        } else {
+            if(length(lavobject@Data@group.label) > 0L) {
+                names(OUT) <- unlist(lavobject@Data@group.label)
+            }
+        }
+    } else {
+        OUT <- GLIST
+    }
+
+    # header
+    if(con.flag) {
+        attr(OUT, "header") <- CON
+    }
+
+    # lavaan.list
+    if(add.class) {
+        class(OUT) <- c("lavaan.list", "list")
+    }
+
+    OUT
 }
 
 
 
 
-# fixme, should we export this function?
+# - fixme, should we export this function?
+# - since 0.5-21, conditional.x = TRUE returns residual sample statistics
+#    for ML, we have both joint and residual cov/var/...; but for 
+#    categorical = TRUE, we only have residual cov/var...; so, we
+#    only return residual in both cases, whenever residual
 lav_object_inspect_sampstat <- function(lavobject, h1 = FALSE,
     add.labels = FALSE, add.class = FALSE, drop.list.single.group = FALSE) {
 
     G <- lavobject@Data@ngroups
-    ov.names <- lavobject@Data@ov.names
+    ov.names <- lavobject@pta$vnames$ov
+    ov.names.res <- lavobject@pta$vnames$ov.nox
+    ov.names.x   <- lavobject@pta$vnames$ov.x
+    lavsamplestats <- lavobject@SampleStats
 
     OUT <- vector("list", length=G)
     for(g in 1:G) {
 
-        # covariance matrix
-        if(h1 && !is.null(lavobject@SampleStats@missing.h1[[g]])) {
-            OUT[[g]]$cov  <- lavobject@SampleStats@missing.h1[[g]]$sigma
-        } else {
-            OUT[[g]]$cov  <- lavobject@SampleStats@cov[[g]]
-        }
-        if(add.labels) {
-            rownames(OUT[[g]]$cov) <- colnames(OUT[[g]]$cov) <- ov.names[[g]]
-        }
-        if(add.class) {
-            class(OUT[[g]]$cov) <- c("lavaan.matrix.symmetric", "matrix")
-        }
+        if(!lavobject@Model@conditional.x) {
 
-        # mean vector
-        if(h1 && !is.null(lavobject@SampleStats@missing.h1[[g]])) {
-            OUT[[g]]$mean <- lavobject@SampleStats@missing.h1[[g]]$mu
-        } else {
-            OUT[[g]]$mean <- as.numeric(lavobject@SampleStats@mean[[g]])
-        }
-        if(add.labels) {
-            names(OUT[[g]]$mean) <- ov.names[[g]]
-        }
-        if(add.class) {
-            class(OUT[[g]]$mean) <- c("lavaan.vector", "numeric")
-        }
-
-        # thresholds
-        if(lavobject@Model@categorical) {
-            OUT[[g]]$th <- as.numeric(lavobject@SampleStats@th[[g]])
-            if(length(lavobject@Model@num.idx[[g]]) > 0L) {
-                OUT[[g]]$th <- OUT[[g]]$th[-lavobject@Model@num.idx[[g]]]
+            # covariance matrix
+            if(h1 && !is.null(lavsamplestats@missing.h1[[g]])) {
+                OUT[[g]]$cov  <- lavsamplestats@missing.h1[[g]]$sigma
+            } else {
+                OUT[[g]]$cov  <- lavsamplestats@cov[[g]]
             }
-            if(add.labels) {
-                names(OUT[[g]]$th) <- 
-                    vnames(lavobject@ParTable, type="th", group=g)
+            if(add.labels && !is.null(OUT[[g]]$cov)) {
+                rownames(OUT[[g]]$cov) <- colnames(OUT[[g]]$cov) <- 
+                    ov.names[[g]]
             }
             if(add.class) {
-                class(OUT[[g]]$th) <- c("lavaan.vector", "numeric")
+                class(OUT[[g]]$cov) <- c("lavaan.matrix.symmetric", "matrix")
             }
-        }
 
-        # slopes
-        if(lavobject@Model@categorical &&
-           lavobject@Model@nexo > 0L) {
-            OUT[[g]]$slopes  <- lavobject@SampleStats@slopes[[g]]
+            # mean vector
+            if(h1 && !is.null(lavsamplestats@missing.h1[[g]])) {
+                OUT[[g]]$mean <- lavsamplestats@missing.h1[[g]]$mu
+            } else {
+                OUT[[g]]$mean <- as.numeric(lavsamplestats@mean[[g]])
+            }
             if(add.labels) {
-                rownames(OUT[[g]]$slopes) <- ov.names[[g]]
-                colnames(OUT[[g]]$slopes) <- 
-                    vnames(lavobject@ParTable, type="ov.x", group=g)
+                names(OUT[[g]]$mean) <- ov.names[[g]]
             }
             if(add.class) {
-                class(OUT[[g]]$slopes) <- c("lavaan.matrix", "matrix")
+                class(OUT[[g]]$mean) <- c("lavaan.vector", "numeric")
             }
-        }
+
+            # thresholds
+            if(lavobject@Model@categorical) {
+                OUT[[g]]$th <- as.numeric(lavsamplestats@th[[g]])
+                if(length(lavobject@Model@num.idx[[g]]) > 0L) {
+                    NUM.idx <- which(lavobject@Model@th.idx[[g]] == 0)
+                    OUT[[g]]$th <- OUT[[g]]$th[ -NUM.idx ]
+                }
+                if(add.labels) {
+                    names(OUT[[g]]$th) <- lavobject@pta$vnames$th[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$th) <- c("lavaan.vector", "numeric")
+                }
+            }
+        } # !conditional.x
+
+        else { # if conditional.x = TRUE
+
+            # residual covariance matrix
+            OUT[[g]]$res.cov  <- lavsamplestats@res.cov[[g]]
+            if(add.labels) {
+                rownames(OUT[[g]]$res.cov) <- colnames(OUT[[g]]$res.cov) <- 
+                    ov.names.res[[g]]
+            }
+            if(add.class) {
+                class(OUT[[g]]$res.cov) <- 
+                    c("lavaan.matrix.symmetric", "matrix")
+            }
+   
+            # intercepts
+            if(lavobject@Model@conditional.x) {
+                OUT[[g]]$res.int <- as.numeric(lavsamplestats@res.int[[g]])
+                if(add.labels) {
+                    names(OUT[[g]]$res.int) <- ov.names.res[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$res.int) <- c("lavaan.vector", "numeric")
+                }
+            }
+
+            # thresholds
+            if(lavobject@Model@categorical) {
+                OUT[[g]]$res.th <- as.numeric(lavsamplestats@res.th[[g]])
+                if(length(lavobject@Model@num.idx[[g]]) > 0L) {
+                    NUM.idx <- which(lavobject@Model@th.idx[[g]] == 0)
+                    OUT[[g]]$res.th <- OUT[[g]]$res.th[ -NUM.idx ]
+                }
+                if(add.labels) {
+                    names(OUT[[g]]$res.th) <- lavobject@pta$vnames$th[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$res.th) <- c("lavaan.vector", "numeric")
+                }
+            }
+
+            # slopes
+            if(lavobject@Model@nexo > 0L) {
+                OUT[[g]]$res.slopes  <- lavsamplestats@res.slopes[[g]]
+                if(add.labels) {
+                    rownames(OUT[[g]]$res.slopes) <- ov.names.res[[g]]
+                    colnames(OUT[[g]]$res.slopes) <- ov.names.x[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$res.slopes) <- c("lavaan.matrix", "matrix")
+                }
+            }
+
+            # cov.x
+            if(lavobject@Model@nexo > 0L) {
+                OUT[[g]]$cov.x  <- lavsamplestats@cov.x[[g]]
+                if(add.labels) {
+                    rownames(OUT[[g]]$cov.x) <- ov.names.x[[g]]
+                    colnames(OUT[[g]]$cov.x) <- ov.names.x[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$cov.x) <- 
+                        c("lavaan.matrix.symmetric", "matrix")
+                }
+            }
+
+        } # conditional.x
 
         # stochastic weights
         if(lavobject@Model@group.w.free) {
-            OUT[[g]]$group.w <- lavobject@SampleStats@group.w[[g]]
+            OUT[[g]]$group.w <- lavsamplestats@group.w[[g]]
             if(add.labels) {
                 names(OUT[[g]]$group.w) <- "w"
             }
@@ -845,7 +1035,7 @@ lav_object_inspect_cov_ov <- function(lavobject, correlation.metric = FALSE,
     G <- lavobject@Data@ngroups
 
     # get model-implied covariance matrix observed
-    OUT <- lavobject@Fit@Sigma.hat
+    OUT <- lavobject@implied$cov
 
     # cor + labels + class
     for(g in 1:G) {
@@ -881,7 +1071,7 @@ lav_object_inspect_mean_ov <- function(lavobject,
     G <- lavobject@Data@ngroups
 
     # compute lv means
-    OUT <- lavobject@Fit@Mu.hat
+    OUT <- lavobject@implied$mean
     OUT <- lapply(OUT, as.numeric)
 
     # labels + class
@@ -911,13 +1101,14 @@ lav_object_inspect_th <- function(lavobject,
     G <- lavobject@Data@ngroups
 
     # thresholds
-    OUT <- lavobject@Fit@TH
+    OUT <- lavobject@implied$th
     OUT <- lapply(OUT, as.numeric)
 
     # labels + class
     for(g in 1:G) {
         if(length(lavobject@Model@num.idx[[g]]) > 0L) {
-            OUT[[g]] <- OUT[[g]][ -lavobject@Model@num.idx[[g]] ]
+            NUM.idx <- which(lavobject@Model@th.idx[[g]] == 0)
+            OUT[[g]] <- OUT[[g]][ -NUM.idx ]
         }
         if(add.labels && length(OUT[[g]]) > 0L) {
             names(OUT[[g]]) <- lavobject@pta$vnames$th[[g]]
@@ -949,7 +1140,8 @@ lav_object_inspect_vy <- function(lavobject,
     #  - if also Gamma, cov.x is used (only if categorical)
 
     OUT <- computeVY(lavmodel = lavobject@Model, GLIST = NULL, 
-                     lavsamplestats = lavobject@SampleStats)
+                     lavsamplestats = lavobject@SampleStats,
+                     diagonal.only = TRUE)
                      
 
     # labels + class
@@ -1121,7 +1313,8 @@ lav_object_inspect_wls_est <- function(lavobject,
     add.labels = FALSE, add.class = FALSE, drop.list.single.group = FALSE) {
 
     G <- lavobject@Data@ngroups
-    OUT <- lav_model_wls_est(lavobject@Model)
+    OUT <- lav_model_wls_est(lavobject@Model) #,
+                             #cov.x = lavobject@SampleStats@cov.x)
 
     for(g in 1:G) {
         if(add.labels && length(OUT[[g]]) > 0L) {
@@ -1379,7 +1572,8 @@ lav_object_inspect_vcov <- function(lavobject, standardized = FALSE,
     type = "std.all", free.only = TRUE,
     add.labels = FALSE, add.class = FALSE, remove.duplicated = FALSE) {
 
-    if(lavobject@Fit@npar == 0) {
+    npar <- max(lavobject@ParTable$free)
+    if(lavobject@optim$npar == 0) {
         OUT <- matrix(0,0,0)
     } else {
         # check if we already have it
@@ -1410,26 +1604,26 @@ lav_object_inspect_vcov <- function(lavobject, standardized = FALSE,
     if(standardized) {
         if(type == "std.lv") {
             JAC <- try(lav_func_jacobian_complex(func = standardize.est.lv.x,
-                x = lavobject@Fit@x, lavobject = lavobject), silent = TRUE)
+                x = lavobject@optim$x, lavobject = lavobject), silent = TRUE)
             if(inherits(JAC, "try-error")) { # eg. pnorm()
                 JAC <- lav_func_jacobian_simple(func = standardize.est.lv.x,
-                    x = lavobject@Fit@x, lavobject=lavobject)
+                    x = lavobject@optim$x, lavobject=lavobject)
             }
         } else if(type == "std.all") {
             JAC <- try(lav_func_jacobian_complex(func = standardize.est.all.x,
-                x = lavobject@Fit@x, lavobject = lavobject), silent = TRUE)
+                x = lavobject@optim$x, lavobject = lavobject), silent = TRUE)
             if(inherits(JAC, "try-error")) { # eg. pnorm()
                 JAC <- lav_func_jacobian_simple(func = standardize.est.all.x,
-                    x = lavobject@Fit@x, lavobject=lavobject)
+                    x = lavobject@optim$x, lavobject=lavobject)
             }
         } else if(type == "std.nox") {
             JAC <- 
                 try(lav_func_jacobian_complex(func = standardize.est.all.nox.x,
-                    x = lavobject@Fit@x, lavobject = lavobject), silent = TRUE)
+                    x = lavobject@optim$x, lavobject = lavobject), silent = TRUE)
             if(inherits(JAC, "try-error")) { # eg. pnorm()
                 JAC <- 
                     lav_func_jacobian_simple(func = standardize.est.all.nox.x,
-                        x = lavobject@Fit@x, lavobject=lavobject)
+                        x = lavobject@optim$x, lavobject=lavobject)
             }
         }
 
@@ -1448,14 +1642,15 @@ lav_object_inspect_vcov <- function(lavobject, standardized = FALSE,
     }
 
     # alias?
-    if(remove.duplicated) {
+    if(remove.duplicated && lavobject@Model@eq.constraints) {
         simple.flag <- lav_constraints_check_simple(lavobject@Model)
         if(simple.flag) {
-          K <- lav_constraints_R2K(lavobject@Model)
-          OUT <- t(K) %*% OUT %*% K
-      } else {
-          warning("lavaan WARNING: alias is TRUE, but equality constraints do not appear to be simple; returning full vcov")
-      }
+            LAB <- lav_partable_labels(lavobject@ParTable, type="free")
+            dup.flag <- duplicated(LAB)
+            OUT <- OUT[!dup.flag, !dup.flag, drop = FALSE]
+        } else {
+            warning("lavaan WARNING: alias is TRUE, but equality constraints do not appear to be simple; returning full vcov")
+        }
     }
 
     # class
@@ -1551,4 +1746,106 @@ lav_object_inspect_UGamma <- function(lavobject,
 
     OUT
 }
+
+# Delta (jacobian: d samplestats / d free_parameters)
+lav_object_inspect_delta <- function(lavobject,
+    add.labels = FALSE, add.class = FALSE, drop.list.single.group = FALSE) {
+
+    OUT <- computeDelta(lavobject@Model)
+
+    # labels
+    lavmodel <- lavobject@Model
+    categorical    <- lavmodel@categorical
+    conditional.x  <- lavmodel@conditional.x
+    group.w.free   <- lavmodel@group.w.free
+    nvar           <- lavmodel@nvar
+    num.idx        <- lavmodel@num.idx
+    th.idx         <- lavmodel@th.idx
+    nexo           <- lavmodel@nexo
+    ngroups        <- lavmodel@ngroups
+
+    if(add.labels) {
+        PNAMES <- lav_partable_labels(lavobject@ParTable, type="free")
+
+        for(g in 1:ngroups) {
+            colnames(OUT[[g]]) <- PNAMES
+
+            if(conditional.x) {
+                ov.names <- lavobject@pta$vnames$ov.nox[[g]]
+            } else {
+                ov.names <- lavobject@pta$vnames$ov[[g]]
+            }
+            ov.names.x <- lavobject@pta$vnames$ov.x[[g]]
+            nvar <- length(ov.names)
+
+
+            names.cov <- names.cor <- names.var <- character(0L)
+            names.mu <- names.pi <- names.th <- character(0L)
+            names.gw <- character(0L)
+ 
+            # Sigma
+            # - if continuous: vech(Sigma)
+            # - if categorical: first numeric variances, then
+            tmp <- apply(expand.grid(ov.names, ov.names), 1L, 
+                         paste, collapse = "~~")
+            if(categorical) {
+                names.cor <- tmp[lav_matrix_vech_idx(nvar, diagonal = FALSE)]
+                names.var <- tmp[lav_matrix_diag_idx(nvar)[num.idx[[g]]]]
+            } else {
+                names.cov <- tmp[lav_matrix_vech_idx(nvar, diagonal = TRUE)]
+            }
+
+            # Mu
+            if(!categorical && lavmodel@meanstructure) {
+                names.mu <- paste(ov.names, "~1", sep = "")
+            }
+
+            # Pi
+            if(conditional.x && lavmodel@nexo[g] > 0L) {
+               names.pi <- apply(expand.grid(ov.names, ov.names.x), 1L, 
+                                 paste, collapse = "~")
+            }
+
+            # th
+            if(categorical) {
+                names.th <- lavobject@pta$vnames$th[[g]]
+                # interweave numeric intercepts, if any
+                if(length(num.idx[[g]]) > 0L) {
+                    tmp <- character( length(th.idx[[g]]) )
+                    tmp[ th.idx[[g]] > 0 ] <- names.th
+                    tmp[ th.idx[[g]] == 0 ] <- paste(ov.names[ num.idx[[g]] ],
+                                                     "~1", sep = "")
+                    names.th <- tmp
+                }
+            }
+
+            # gw
+            if(group.w.free) {
+                names.gw <- "w"
+            }
+
+            rownames(OUT[[g]]) <- c(names.gw,
+                                    names.th, names.mu, 
+                                    names.pi, 
+                                    names.cov, names.var, names.cor)
+
+            # class
+            if(add.class) {
+                class(OUT[[g]]) <- c("lavaan.matrix", "matrix")
+            }
+
+        } # g
+    } # labels
+
+    if(ngroups == 1L && drop.list.single.group) {
+        OUT <- OUT[[1]]
+    } else {
+        if(length(lavobject@Data@group.label) > 0L) {
+            names(OUT) <- unlist(lavobject@Data@group.label)
+        }
+    }
+
+    OUT
+}
+
 

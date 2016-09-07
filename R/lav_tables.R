@@ -18,6 +18,7 @@
 #                 - added many more statistics; some based on the model, some
 #                   on the unrestricted model
 # - 8 Nov 2013:   - skip empty cells for G2, instead of adding 0.5 to obs
+# - 7 Feb 2016:   - take care of conditional.x = TRUE
 
 lavTables <- function(object,
                       # what type of table?
@@ -195,7 +196,7 @@ lav_tables_pattern <- function(lavobject = NULL, lavdata = NULL,
 
     # first, create basic table with response patterns
     for(g in 1:lavdata@ngroups) {
-        pat <- lav_data_resppatterns(lavdata@X[[g]])$pat
+        pat <- lav_data_resp_patterns(lavdata@X[[g]])$pat
         obs.freq <- as.integer( rownames(pat) )
         if(patternAsString) {
             pat <- data.frame(pattern = apply(pat, 1, paste, collapse=""),
@@ -208,7 +209,8 @@ lav_tables_pattern <- function(lavobject = NULL, lavdata = NULL,
         if(lavdata@ngroups > 1L) {
             pat$group <- rep(g, nrow(pat))
         }
-        pat$nobs <- rep(nrow(lavdata@X[[g]]), nrow(pat))
+        NOBS <- sum(obs.freq)
+        pat$nobs <- rep(NOBS, nrow(pat))
         pat$obs.freq <- obs.freq
         rownames(pat) <- NULL
         if(g == 1L) {
@@ -605,7 +607,7 @@ lav_tables_oneway <- function(lavobject = NULL, lavdata = NULL,
                 id <- (g-1)*nvar + x
 
                 # compute observed frequencies
-                FREQ <- tabulate(X[[g]][,idx])
+                FREQ <- tabulate(X[[g]][,idx], nbins = ncell)
 
                 list(   id = rep.int(id, ncell),
                        lhs = rep.int(vartable$name[idx], ncell),
@@ -669,7 +671,7 @@ lav_tables_oneway <- function(lavobject = NULL, lavdata = NULL,
 
             # model based
             th.h0 <- unlist(lapply(1:lavdata@ngroups, function(x) {
-                         TH <- lavobject@Fit@TH[[x]][ 
+                         TH <- lavobject@implied$th[[x]][ 
                                 lavobject@SampleStats@th.idx[[x]] > 0 ]
                       TH.IDX <- lavobject@SampleStats@th.idx[[x]][
                                 lavobject@SampleStats@th.idx[[x]] > 0 ]
@@ -802,9 +804,8 @@ lav_tables_pairwise_model_pi <- function(lavobject = NULL) {
     ngroups   <- lavobject@Data@ngroups
     ov.types  <- lavobject@Data@ov$type
     th.idx    <- lavobject@Model@th.idx
-    num.idx   <- lavobject@Model@num.idx
-    Sigma.hat <- lavobject@Fit@Sigma.hat
-    TH        <- lavobject@Fit@TH
+    Sigma.hat <- lavobject@implied$cov
+    TH        <- lavobject@implied$th
 
     PI <- vector("list", length=ngroups)
     for(g in 1:ngroups) {
@@ -859,13 +860,23 @@ lav_tables_pairwise_sample_pi <- function(lavobject = NULL, lavdata = NULL) {
 
     # get COR, TH and th.idx
     if(!is.null(lavobject)) {
-        COR    <- lavobject@SampleStats@cov
-        TH     <- lavobject@SampleStats@th
+        if(lavobject@Model@conditional.x) {
+            COR    <- lavobject@SampleStats@res.cov
+            TH     <- lavobject@SampleStats@res.th
+        } else { 
+            COR    <- lavobject@SampleStats@cov
+            TH     <- lavobject@SampleStats@th
+        }
         TH.IDX <- lavobject@SampleStats@th.idx
     } else if(!is.null(lavdata)) {
         fit.un <- lavCor(object = lavdata, se = "none", output = "fit")
-        COR    <- fit.un@SampleStats@cov
-        TH     <- fit.un@SampleStats@th
+        if(lavobject@Model@conditional.x) {
+            COR    <- fit.un@SampleStats@res.cov
+            TH     <- fit.un@SampleStats@res.th
+        } else {
+            COR    <- fit.un@SampleStats@cov
+            TH     <- fit.un@SampleStats@th
+        }
         TH.IDX <- fit.un@SampleStats@th.idx
     } else {
         stop("lavaan ERROR: both lavobject and lavdata are NULL")
@@ -935,18 +946,23 @@ lav_tables_resp_pi <- function(lavobject = NULL, lavdata = NULL,
 
     # h0 or unrestricted?
     if(est == "h0") {
-        Sigma.hat <- lavobject@Fit@Sigma.hat
-        TH        <- lavobject@Fit@TH
+        Sigma.hat <- lavobject@implied$cov
+        TH        <- lavobject@implied$th
         TH.IDX    <- lavobject@SampleStats@th.idx
     } else {
         if(is.null(lavobject)) {
             fit.un <- lavCor(object = lavdata, se = "none", output = "fit")
-            Sigma.hat  <- fit.un@Fit@Sigma.hat
-            TH         <- fit.un@Fit@TH
+            Sigma.hat  <- fit.un@implied$cov
+            TH         <- fit.un@implied$th
             TH.IDX     <- fit.un@SampleStats@th.idx
         } else {
-            Sigma.hat <- lavobject@SampleStats@cov
-            TH        <- lavobject@SampleStats@th
+            if(lavobject@Model@conditional.x) {
+                Sigma.hat <- lavobject@SampleStats@res.cov
+                TH        <- lavobject@SampleStats@res.th
+            } else {
+                Sigma.hat <- lavobject@SampleStats@cov
+                TH        <- lavobject@SampleStats@th
+            }
             TH.IDX    <- lavobject@SampleStats@th.idx
         }
     }
@@ -972,7 +988,7 @@ lav_tables_resp_pi <- function(lavobject = NULL, lavdata = NULL,
             if(!is.null(lavdata@Rp[[g]]$pat)) {
                 PAT <- lavdata@Rp[[g]]$pat
             } else {
-                PAT <- lav_data_resppatterns( lavdata@X[[g]] )$pat
+                PAT <- lav_data_resp_patterns( lavdata@X[[g]] )$pat
             }
             npatterns <- nrow(PAT)
             freq <- as.numeric( rownames(PAT) )

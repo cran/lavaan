@@ -20,6 +20,11 @@ lav_matrix_vec <- function(A) {
 # the vecr operator ransforms a matrix into 
 # a vector by stacking the *rows* of the matrix one underneath the other
 lav_matrix_vecr <- function(A) {
+
+    # faster way??
+    # nRow <- NROW(A); nCol <- NCOL(A)
+    # idx <- (seq_len(nCol) - 1L) * nRow + rep(seq_len(nRow), each = nCol)
+
     lav_matrix_vec(t(A))
 }
 
@@ -44,7 +49,7 @@ lav_matrix_vech <- function(S, diagonal = TRUE) {
 # into a vector by stacking the *rows* of the matrix one after the
 # other, but eliminating all supradiagonal elements
 lav_matrix_vechr <- function(S, diagonal = TRUE) {
-    S[lav_matrix_vechr_idx(n = ncol(S), diagonal = diagonal)]
+    S[lav_matrix_vechr_idx(n = NCOL(S), diagonal = diagonal)]
 }
 
 
@@ -52,7 +57,7 @@ lav_matrix_vechr <- function(S, diagonal = TRUE) {
 # into a vector by stacking the *columns* of the matrix one after the
 # other, but eliminating all infradiagonal elements
 lav_matrix_vechu <- function(S, diagonal = TRUE) {
-    S[lav_matrix_vechu_idx(n = ncol(S), diagonal = diagonal)]
+    S[lav_matrix_vechu_idx(n = NCOL(S), diagonal = diagonal)]
 }
 
 
@@ -62,7 +67,7 @@ lav_matrix_vechu <- function(S, diagonal = TRUE) {
 #
 # same as vech (but using upper-diagonal elements)
 lav_matrix_vechru <- function(S, diagonal = TRUE) {
-    S[lav_matrix_vechru_idx(n = ncol(S), diagonal = diagonal)]
+    S[lav_matrix_vechru_idx(n = NCOL(S), diagonal = diagonal)]
 }
 
 
@@ -185,7 +190,7 @@ lav_matrix_lower2full <- function(x, diagonal = TRUE) {
 # matrix of size 'n'
 lav_matrix_diag_idx <- function(n = 1L) {
     if(n < 1L) return(integer(0L))
-    1L + 0L:(n-1L)*(n+1L)
+    1L + (seq_len(n) - 1L)*(n + 1L)
 }
 
 
@@ -340,7 +345,7 @@ lav_matrix_duplication <- .dup3
 lav_matrix_duplication_pre <- function(A = matrix(0,0,0)) {
 
     # number of rows
-    n2 <- nrow(A)
+    n2 <- NROW(A)
 
     # square nrow(A) only, n2 = n^2
     stopifnot(sqrt(n2) == round(sqrt(n2)))
@@ -361,7 +366,7 @@ lav_matrix_duplication_pre <- function(A = matrix(0,0,0)) {
 lav_matrix_duplication_dup_pre2 <- function(A = matrix(0,0,0)) {
 
     # number of rows
-    n2 <- nrow(A)
+    n2 <- NROW(A)
 
     # square nrow(A) only, n2 = n^2
     stopifnot(sqrt(n2) == round(sqrt(n2)))
@@ -385,7 +390,7 @@ lav_matrix_duplication_dup_pre2 <- function(A = matrix(0,0,0)) {
 lav_matrix_duplication_post <- function(A = matrix(0,0,0)) {
 
     # number of columns
-    n2 <- ncol(A)
+    n2 <- NCOL(A)
 
     # square A only, n2 = n^2
     stopifnot(sqrt(n2) == round(sqrt(n2)))
@@ -407,10 +412,10 @@ lav_matrix_duplication_post <- function(A = matrix(0,0,0)) {
 lav_matrix_duplication_pre_post <- function(A = matrix(0,0,0)) {
 
     # number of columns
-    n2 <- ncol(A)
+    n2 <- NCOL(A)
 
     # square A only, n2 = n^2
-    stopifnot(nrow(A) == n2, sqrt(n2) == round(sqrt(n2)))
+    stopifnot(NROW(A) == n2, sqrt(n2) == round(sqrt(n2)))
 
     # dimension
     n <- sqrt(n2)
@@ -495,7 +500,7 @@ lav_matrix_duplication_ginv_pre <- function(A = matrix(0,0,0)) {
     A <- as.matrix(A)
 
     # number of rows
-    n2 <- nrow(A)
+    n2 <- NROW(A)
 
     # square nrow(A) only, n2 = n^2
     stopifnot(sqrt(n2) == round(sqrt(n2)))
@@ -516,7 +521,7 @@ lav_matrix_duplication_ginv_post <- function(A = matrix(0,0,0)) {
     A <- as.matrix(A)
 
     # number of columns
-    n2 <- ncol(A)
+    n2 <- NCOL(A)
 
     # square A only, n2 = n^2
     stopifnot(sqrt(n2) == round(sqrt(n2)))
@@ -536,10 +541,10 @@ lav_matrix_duplication_ginv_pre_post <- function(A = matrix(0,0,0)) {
     A <- as.matrix(A)
 
     # number of columns
-    n2 <- ncol(A)
+    n2 <- NCOL(A)
 
     # square A only, n2 = n^2
-    stopifnot(nrow(A) == n2, sqrt(n2) == round(sqrt(n2)))
+    stopifnot(NROW(A) == n2, sqrt(n2) == round(sqrt(n2)))
 
     # dimension
     n <- sqrt(n2)
@@ -604,7 +609,7 @@ lav_matrix_commutation <- .com1
 lav_matrix_commutation_pre <- function(A = matrix(0,0,0)) {
 
     # number of rows of A
-    n2 <- nrow(A)
+    n2 <- NROW(A)
 
     # K_nn only (n2 = m * n)
     stopifnot(sqrt(n2) == round(sqrt(n2)))
@@ -625,7 +630,7 @@ lav_matrix_commutation_pre <- function(A = matrix(0,0,0)) {
 lav_matrix_commutation_mn_pre <- function(A, m = 1L, n = 1L) {
 
     # number of rows of A
-    mn <- nrow(A)
+    mn <- NROW(A)
     stopifnot(mn == m * n)
 
     # compute row indices
@@ -695,10 +700,10 @@ lav_matrix_kronecker_symmetric <- function(S, check = TRUE) {
 lav_matrix_tS2_SxS_S2 <- function(S2, S, check = TRUE) {
 
     # size of S
-    n <- nrow(S)
+    n <- NROW(S)
 
     if(check) {
-        stopifnot(nrow(S2) == n*n)
+        stopifnot(NROW(S2) == n*n)
     }
 
     A <- matrix(S %*% matrix(S2, n, ), n*n,)
@@ -714,7 +719,7 @@ lav_matrix_tD_SxS_D <- function(S) {
 # square root of a positive definite symmetric matrix
 lav_matrix_symmetric_sqrt <- function(S = matrix(0,0,0)) {
 
-    n <- nrow(S)
+    n <- NROW(S)
 
     # eigen decomposition, assume symmetric matrix
     S.eigen <- eigen(S, symmetric = TRUE)
@@ -760,7 +765,9 @@ lav_matrix_orthogonal_complement <- function(A = matrix(0,0,0)) {
      OUT
 }
 
-# construct block diagonal matrix
+# construct block diagonal matrix from a list of matrices
+# ... can contain multiple arguments, which will be coerced to a list
+#     or it can be a single list (of matrices)
 lav_matrix_bdiag <- function(...) {
 
     if(nargs() == 0L) return(matrix(0,0,0))
@@ -776,8 +783,8 @@ lav_matrix_bdiag <- function(...) {
 
     # more than 1 matrix
     nmat <- length(mlist)
-    nrows <- sapply(mlist, nrow); crows <- cumsum(nrows)
-    ncols <- sapply(mlist, ncol); ccols <- cumsum(ncols)
+    nrows <- sapply(mlist, NROW); crows <- cumsum(nrows)
+    ncols <- sapply(mlist, NCOL); ccols <- cumsum(ncols)
     trows <- sum(nrows)
     tcols <- sum(ncols)
     x <- numeric(trows * tcols)
@@ -797,6 +804,82 @@ lav_matrix_bdiag <- function(...) {
     x
 }
 
+# trace of a single square matrix, or the trace of a product of (compatible)
+# matrices resulting in a single square matrix
+lav_matrix_trace <- function(..., check = TRUE) {
+
+    if(nargs() == 0L) return(as.numeric(NA))
+    dots <- list(...)
+
+    # create list of matrices
+    if(is.list(dots[[1]])) {
+        mlist <- dots[[1]]
+    } else {
+        mlist <- dots
+    }
+
+    # number of matrices
+    nMat <- length(mlist)
+
+    # single matrix
+    if(nMat == 1L) {
+        S <- mlist[[1]]
+        if(check) {
+            # check if square
+            stopifnot(NROW(S) == NCOL(S))
+        }
+        out <- sum(S[lav_matrix_diag_idx(n = NROW(S))])
+
+
+    } else if(nMat == 2L) {
+
+        # dimension check is done by '*'
+        out <- sum(mlist[[1]] * t(mlist[[2]]))
+
+    } else if(nMat == 3L) {
+
+        A <- mlist[[1]]
+        B <- mlist[[2]]
+        C <- mlist[[3]]
+
+        # A, B, C
+        # below is the logic; to be coded inline
+        # DIAG <- numeric( NROW(A) )
+        # for(i in seq_len(NROW(A))) {
+        #     DIAG[i] <- sum( rep(A[i,], times = NCOL(B)) * 
+        #                  as.vector(B) * 
+        #                  rep(C[,i], each=NROW(B)) )
+        # }
+        # out <- sum(DIAG)
+
+        # FIXME: 
+
+        # dimension check is automatic
+        B2 <- B %*% C
+        out <- sum(A * t(B2))
+
+    } else {
+
+        #nRows <- sapply(mlist, NROW)
+        #nCols <- sapply(mlist, NCOL)
+
+        # check if product is ok
+        #stopifnot(all(nCols[seq_len(nMat-1L)] == nRows[2:nMat]))
+
+        # check if product is square
+        #stopifnot(nRows[1] == nCols[nMat])
+
+        M1 <- mlist[[1]]
+        M2 <- mlist[[2]]
+        for(m in 3L:nMat) {
+            M2 <- M2 %*% mlist[[m]]
+        }
+        out <- sum(M1 * t(M2))
+    }
+
+    out
+}
+
 # crossproduct, but handling NAs pairwise
 lav_matrix_crossprod <- function(A, B) {
     if(missing(B)) {
@@ -806,4 +889,304 @@ lav_matrix_crossprod <- function(A, B) {
 }
 
 
+# reduced row echelon form of A
+lav_matrix_rref <- function(A, tol = sqrt( .Machine$double.eps)) {
+
+    # MATLAB documentation says rref uses: tol = (max(size(A))*eps *norm(A,inf)
+    if(missing(tol)) {
+        A.norm <- max(abs(apply(A,1,sum)))
+        tol <- max(dim(A)) * A.norm * .Machine$double.eps
+    }
+
+    # check if A is a matrix
+    stopifnot(is.matrix(A))
+
+    # dimensions
+    nRow <- NROW(A); nCol <- NCOL(A)
+    pivot = integer(0L)
+
+    # catch empty matrix
+    if(nRow == 0 && nCol == 0) return(matrix(0,0,0))
+
+    rowIndex <- colIndex <- 1
+    while( rowIndex <= nRow &&
+           colIndex <= nCol ) {
+
+        # look for largest (in absolute value) element in this column:
+        i.below <- which.max(abs(A[rowIndex:nRow, colIndex]))
+        i <- i.below + rowIndex - 1L
+        p <- A[i, colIndex]
+
+        # check if column is empty
+        if(abs(p) <= tol) {
+            A[rowIndex:nRow, colIndex] <- 0L # clean up
+            colIndex <- colIndex + 1
+        } else {
+            # store pivot column
+            pivot <- c(pivot, colIndex)
+
+            # do we need to swap column?
+            if(rowIndex != i) {
+                A[ c(rowIndex,i), colIndex:nCol ] <-
+                    A[ c(i,rowIndex), colIndex:nCol ]
+            }
+
+            # scale pivot to be 1.0
+            A[ rowIndex, colIndex:nCol ] <- A[ rowIndex, colIndex:nCol] / p
+
+            # create zeroes below and above pivot
+            other <- seq_len(nRow)[-rowIndex]
+            A[other, colIndex:nCol] <-
+                A[other, colIndex:nCol] - tcrossprod(A[other,colIndex],
+                                                     A[rowIndex,colIndex:nCol])
+            # next row/col
+            rowIndex <- rowIndex + 1
+            colIndex <- colIndex + 1
+        }
+    }
+
+    # rounding?
+
+    list(R = A, pivot = pivot)
+}
+
+# non-orthonoramal (left) null space basis, using rref
+lav_matrix_orthogonal_complement2 <- function(A,
+    tol = sqrt( .Machine$double.eps)) {
+
+    # left
+    A <- t(A)
+
+    # compute rref
+    out <- lav_matrix_rref(A = A, tol = tol)
+
+    # number of free columns in R (if any)
+    nfree <- NCOL(A) - length(out$pivot)
+
+    if(nfree) {
+        R <- out$R
+ 
+        # remove all-zero rows
+        zero.idx <- which(apply(R, 1, function(x) { all(abs(x) < tol) }))
+        if(length(zero.idx) > 0) {
+            R <- R[-zero.idx,, drop = FALSE]
+        }
+ 
+        FREE <- R[, -out$pivot, drop = FALSE]
+        I <- diag( nfree )
+        N <- rbind(-FREE, I)
+    } else {
+        N <- matrix(0, nrow = NCOL(A), ncol = 0L)
+    }
+
+    N
+}
+
+
+# inverse of a positive-definite symmetric matrix
+# FIXME: error handling?
+lav_matrix_symmetric_inverse <- function(S, logdet = FALSE, 
+                                         Sinv.method = "eigen") {
+
+    if(Sinv.method == "eigen") {
+        EV <- eigen(S, symmetric = TRUE)
+        # V %*% diag(1/d) %*% V^{-1}, where V^{-1} = V^T
+        S.inv <- tcrossprod(sweep(EV$vector, 2L, 
+                                  STATS = (1/EV$values), FUN="*"), EV$vector)
+        if(logdet) {
+            if(all(EV$values >= 0)) {
+                attr(S.inv, "logdet") <- sum(log(EV$values))
+            } else {
+                attr(S.inv, "logdet") <- as.numeric(NA)
+            }
+        }
+    } else if(Sinv.method == "solve") {
+        S.inv <- solve(S)
+        if(logdet) {
+            ev <- eigen(S, symmetric = TRUE, only.values = TRUE)
+            if(all(ev$values >= 0)) {
+                attr(S.inv, "logdet") <- sum(log(ev$values))
+            } else {
+                attr(S.inv, "logdet") <- as.numeric(NA)
+            }
+        }
+    } else if(Sinv.method == "chol") {
+        # this will break if S is not positive definite
+        cS <- chol(S)
+        S.inv <- chol2inv(cS)
+        if(logdet) {
+            diag.cS <- diag(cS)
+            attr(S.inv, "logdet") <- sum(log(diag.cS * diag.cS))
+        }
+    } else {
+        stop("method must be either `eigen', `solve' or `chol'")
+    }
+
+    S.inv
+}
+
+# update inverse of A, after removing 1 or more rows (and corresponding
+# colums) from A
+#
+# - this is one of the many applications of the Sherman-Morrison formula
+# - only removal for now
+#
+lav_matrix_inverse_update <- function(A.inv, rm.idx = integer(0L)) {
+
+    ndel <- length(rm.idx)
+
+    # rank-1 update
+    if(ndel == 1L) {
+        a <- A.inv[-rm.idx, rm.idx, drop = FALSE]
+        b <- A.inv[rm.idx, -rm.idx, drop = FALSE]
+        h <- A.inv[rm.idx, rm.idx]
+        out <- A.inv[-rm.idx, -rm.idx, drop = FALSE] - (a %*% b) / h
+    }
+
+    # rank-n update
+    else if(ndel < NCOL(A.inv)) {
+        A <- A.inv[-rm.idx, rm.idx, drop = FALSE]
+        B <- A.inv[ rm.idx,-rm.idx, drop = FALSE]
+        H <- A.inv[ rm.idx, rm.idx, drop = FALSE]
+        out <- A.inv[-rm.idx, -rm.idx, drop = FALSE] - A %*% solve(H, B)
+
+    # erase all col/rows...
+    } else if(ndel == NCOL(A.inv)) {
+        out <- matrix(0,0,0)
+    }
+
+    out
+}
+
+# update inverse of S, after removing 1 or more rows (and corresponding
+# colums) from S, a symmetric matrix
+#
+# - only removal for now!
+#
+lav_matrix_symmetric_inverse_update <- function(S.inv, rm.idx = integer(0L),
+                                                logdet = FALSE, 
+                                                S.logdet = NULL) {
+
+    ndel <- length(rm.idx)
+
+    if(ndel == 0L) {
+        out <- S.inv
+        if(logdet) {
+            attr(out, "logdet") <- S.logdet
+        }
+    }
+
+    # rank-1 update
+    else if(ndel == 1L) {
+        h <- S.inv[rm.idx, rm.idx]
+        a <- S.inv[-rm.idx, rm.idx, drop = FALSE] / sqrt(h)
+        out <- S.inv[-rm.idx, -rm.idx, drop = FALSE] - tcrossprod(a)
+        if(logdet) {
+            attr(out, "logdet") <- S.logdet + log(h)
+        }
+    }
+
+    # rank-n update
+    else if(ndel < NCOL(S.inv)) {
+        A <- S.inv[ rm.idx, -rm.idx, drop = FALSE]
+        H <- S.inv[ rm.idx,  rm.idx, drop = FALSE]
+        out <- S.inv[-rm.idx, -rm.idx, drop = FALSE] - crossprod(A, solve(H, A))
+        if(logdet) {
+            cH <- chol(H); diag.cH <- diag(cH)
+            H.logdet <- sum(log(diag.cH * diag.cH))
+            attr(out, "logdet") <- S.logdet + H.logdet
+        }
+
+    # erase all col/rows...
+    } else if(ndel == NCOL(S.inv)) {
+        out <- matrix(0,0,0)
+    }
+
+    out
+}
+
+
+# update determinant of A, after removing 1 or more rows (and corresponding
+# colums) from A
+#
+lav_matrix_det_update <- function(det.A, A.inv, rm.idx = integer(0L)) {
+
+    ndel <- length(rm.idx)
+
+    # rank-1 update
+    if(ndel == 1L) {
+        h <- A.inv[rm.idx, rm.idx]
+        out <- det.A * h
+    }
+
+    # rank-n update
+    else if(ndel < NCOL(A.inv)) {
+        H <- A.inv[ rm.idx, rm.idx, drop = FALSE]
+        det.H <- det(H)
+        out <- det.A * det.H
+
+    # erase all col/rows...
+    } else if(ndel == NCOL(A.inv)) {
+        out <- matrix(0,0,0)
+    }
+
+    out
+}
+
+# update determinant of S, after removing 1 or more rows (and corresponding
+# colums) from S, a symmetric matrix
+#
+lav_matrix_symmetric_det_update <- function(det.S, S.inv, rm.idx = integer(0L)){
+
+    ndel <- length(rm.idx)
+
+    # rank-1 update
+    if(ndel == 1L) {
+        h <- S.inv[rm.idx, rm.idx]
+        out <- det.S * h
+    }
+
+    # rank-n update
+    else if(ndel < NCOL(S.inv)) {
+        H <- S.inv[ rm.idx, rm.idx, drop = FALSE]
+        cH <- chol(H); diag.cH <- diag(cH)
+        det.H <- prod(diag.cH * diag.cH)
+        out <- det.S * det.H
+
+    # erase all col/rows...
+    } else if(ndel == NCOL(S.inv)) {
+        out <- numeric(0L)
+    }
+
+    out
+}
+
+# update log determinant of S, after removing 1 or more rows (and corresponding
+# colums) from S, a symmetric matrix
+#
+lav_matrix_symmetric_logdet_update <- function(S.logdet, S.inv, 
+                                               rm.idx = integer(0L)) {
+
+    ndel <- length(rm.idx)
+
+    # rank-1 update
+    if(ndel == 1L) {
+        h <- S.inv[rm.idx, rm.idx]
+        out <- S.logdet + log(h)
+    }
+
+    # rank-n update
+    else if(ndel < NCOL(S.inv)) {
+        H <- S.inv[ rm.idx, rm.idx, drop = FALSE]
+        cH <- chol(H); diag.cH <- diag(cH)
+        H.logdet <- sum(log(diag.cH * diag.cH))
+        out <- S.logdet + H.logdet
+
+    # erase all col/rows...
+    } else if(ndel == NCOL(S.inv)) {
+        out <- numeric(0L)
+    }
+
+    out
+}
 
