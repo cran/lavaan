@@ -1098,8 +1098,9 @@ parameterEstimates <- parameterestimates <- function(object,
     # fractional missing information (if estimator="fiml")
     if(fmi) {
         SE.orig <- LIST$se
-        COV <- object@implied$cov
-        MEAN <- object@implied$mean
+        lavmodel <- object@Model; implied <- object@implied
+        COV <- if(lavmodel@conditional.x) implied$res.cov else implied$cov
+        MEAN <- if(lavmodel@conditional.x) implied$res.int else implied$mean
 
         # provide rownames
         for(g in 1:object@Data@ngroups)
@@ -1235,43 +1236,9 @@ function(object, type = "moments", labels=TRUE) {
         return( lavPredict(object, type = "ov", label = labels) )
     }
 
-    G <- object@Data@ngroups
-    ov.names <- object@Data@ov.names
-
-    OUT <- vector("list", length=G)
-    for(g in 1:G) {
-        OUT[[g]]$cov  <- object@implied$cov[[g]]
-        if(labels) 
-            rownames(OUT[[g]]$cov) <- colnames(OUT[[g]]$cov) <- ov.names[[g]]
-        class(OUT[[g]]$cov) <- c("lavaan.matrix.symmetric", "matrix")
-
-        #if(object@Model@meanstructure) {
-            OUT[[g]]$mean <- as.numeric(object@implied$mean[[g]])
-            if(labels) names(OUT[[g]]$mean) <- ov.names[[g]]
-            class(OUT[[g]]$mean) <- c("lavaan.vector", "numeric")
-        #}
-
-        if(object@Model@categorical) {
-            OUT[[g]]$th <- as.numeric(object@implied$th[[g]])
-            if(length(object@Model@num.idx[[g]]) > 0L) {
-                NUM.idx <- which(object@Model@th.idx[[g]] == 0)
-                OUT[[g]]$th <- OUT[[g]]$th[ -NUM.idx ]
-            }
-            if(labels) {
-                names(OUT[[g]]$th) <-
-                    vnames(object@ParTable, type="th", group=g)
-            }
-            class(OUT[[g]]$th) <- c("lavaan.vector", "numeric")
-        }
-    }
-
-    if(G == 1) {
-        OUT <- OUT[[1]]
-    } else {
-        names(OUT) <- unlist(object@Data@group.label)
-    }
-
-    OUT
+    lav_object_inspect_implied(object,
+               add.labels = labels, add.class = TRUE,
+               drop.list.single.group = TRUE)
 })
 
 

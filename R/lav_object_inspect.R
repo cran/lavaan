@@ -122,7 +122,9 @@ lavInspect <- function(lavobject,
 
 
     #### sample statistics #####
-    } else if(what == "sampstat" ||
+    } else if(what == "obs" ||
+              what == "observed" ||
+              what == "sampstat" ||
               what == "sampstats" ||
               what == "samplestats" ||
               what == "samp" ||
@@ -192,6 +194,15 @@ lavInspect <- function(lavobject,
 
 
     #### model-implied sample statistics ####
+    } else if(what == "implied" || what == "fitted") {
+        lav_object_inspect_implied(lavobject,
+            add.labels = add.labels, add.class = add.class,
+            drop.list.single.group = drop.list.single.group)
+    } else if(what == "resid" || what == "res" || what == "residual" ||
+              what == "residuals") {
+        lav_object_inspect_residuals(lavobject, h1 = TRUE,
+            add.labels = add.labels, add.class = add.class,
+            drop.list.single.group = drop.list.single.group)
     } else if(what == "cov.lv" || what == "veta") {
         lav_object_inspect_cov_lv(lavobject,
             correlation.metric = FALSE,
@@ -807,7 +818,10 @@ lav_object_inspect_sampstat <- function(lavobject, h1 = FALSE,
 
         # stochastic weights
         if(lavobject@Model@group.w.free) {
-            OUT[[g]]$group.w <- lavsamplestats@group.w[[g]]
+            # to be consistent with the 'implied' values, 
+            # transform so group.w is the 'log(group.freq)'
+            OUT[[g]]$group.w <- 
+                log(lavsamplestats@group.w[[g]] * lavsamplestats@ntotal)
             if(add.labels) {
                 names(OUT[[g]]$group.w) <- "w"
             }
@@ -915,6 +929,257 @@ lav_object_inspect_rsquare <- function(lavobject, est.std.all=NULL,
     }
 
     OUT 
+}
+
+# model implied sample stats
+lav_object_inspect_implied <- function(lavobject,
+    add.labels = FALSE, add.class = FALSE, drop.list.single.group = FALSE) {
+
+    G <- lavobject@Data@ngroups
+    ov.names <- lavobject@pta$vnames$ov
+    ov.names.res <- lavobject@pta$vnames$ov.nox
+    ov.names.x   <- lavobject@pta$vnames$ov.x
+    lavimplied <- lavobject@implied
+
+    OUT <- vector("list", length=G)
+    for(g in 1:G) {
+
+        if(!lavobject@Model@conditional.x) {
+
+            # covariance matrix
+            OUT[[g]]$cov  <- lavimplied$cov[[g]]
+            if(add.labels && !is.null(OUT[[g]]$cov)) {
+                rownames(OUT[[g]]$cov) <- colnames(OUT[[g]]$cov) <-
+                    ov.names[[g]]
+            }
+            if(add.class) {
+                class(OUT[[g]]$cov) <- c("lavaan.matrix.symmetric", "matrix")
+            }
+
+            # mean vector
+            OUT[[g]]$mean <- as.numeric(lavimplied$mean[[g]])
+            if(add.labels) {
+                names(OUT[[g]]$mean) <- ov.names[[g]]
+            }
+            if(add.class) {
+                class(OUT[[g]]$mean) <- c("lavaan.vector", "numeric")
+            }
+
+            # thresholds
+            if(lavobject@Model@categorical) {
+                OUT[[g]]$th <- as.numeric(lavimplied$th[[g]])
+                if(length(lavobject@Model@num.idx[[g]]) > 0L) {
+                    NUM.idx <- which(lavobject@Model@th.idx[[g]] == 0)
+                    OUT[[g]]$th <- OUT[[g]]$th[ -NUM.idx ]
+                }
+                if(add.labels) {
+                    names(OUT[[g]]$th) <- lavobject@pta$vnames$th[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$th) <- c("lavaan.vector", "numeric")
+                }
+            }
+        } # !conditional.x
+
+       else { # if conditional.x = TRUE
+
+            # residual covariance matrix
+            OUT[[g]]$res.cov  <- lavimplied$res.cov[[g]]
+            if(add.labels) {
+                rownames(OUT[[g]]$res.cov) <- colnames(OUT[[g]]$res.cov) <-
+                    ov.names.res[[g]]
+            }
+            if(add.class) {
+                class(OUT[[g]]$res.cov) <-
+                    c("lavaan.matrix.symmetric", "matrix")
+            }
+
+            # intercepts
+            if(lavobject@Model@conditional.x) {
+                OUT[[g]]$res.int <- as.numeric(lavimplied$res.int[[g]])
+                if(add.labels) {
+                    names(OUT[[g]]$res.int) <- ov.names.res[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$res.int) <- c("lavaan.vector", "numeric")
+                }
+            }
+
+            # thresholds
+            if(lavobject@Model@categorical) {
+                OUT[[g]]$res.th <- as.numeric(lavimplied$res.th[[g]])
+                if(length(lavobject@Model@num.idx[[g]]) > 0L) {
+                    NUM.idx <- which(lavobject@Model@th.idx[[g]] == 0)
+                    OUT[[g]]$res.th <- OUT[[g]]$res.th[ -NUM.idx ]
+                }
+                if(add.labels) {
+                    names(OUT[[g]]$res.th) <- lavobject@pta$vnames$th[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$res.th) <- c("lavaan.vector", "numeric")
+                }
+            }
+
+            # slopes
+            if(lavobject@Model@nexo > 0L) {
+                OUT[[g]]$res.slopes  <- lavimplied$res.slopes[[g]]
+                if(add.labels) {
+                    rownames(OUT[[g]]$res.slopes) <- ov.names.res[[g]]
+                    colnames(OUT[[g]]$res.slopes) <- ov.names.x[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$res.slopes) <- c("lavaan.matrix", "matrix")
+                }
+            }
+
+            # cov.x
+            if(lavobject@Model@nexo > 0L) {
+                OUT[[g]]$cov.x  <- lavobject@SampleStats@cov.x[[g]]
+                if(add.labels) {
+                    rownames(OUT[[g]]$cov.x) <- ov.names.x[[g]]
+                    colnames(OUT[[g]]$cov.x) <- ov.names.x[[g]]
+                }
+                if(add.class) {
+                    class(OUT[[g]]$cov.x) <-
+                        c("lavaan.matrix.symmetric", "matrix")
+                }
+            }
+
+        } # conditional.x
+
+        # stochastic weights
+        if(lavobject@Model@group.w.free) {
+            OUT[[g]]$group.w <- lavimplied$group.w[[g]]
+            if(add.labels) {
+                names(OUT[[g]]$group.w) <- "w" # somewhat redundant
+            }
+            if(add.class) {
+                class(OUT[[g]]$group.w) <- c("lavaan.vector", "numeric")
+            }
+        }
+    }
+
+    if(G == 1L && drop.list.single.group) {
+        OUT <- OUT[[1]]
+    } else {
+        if(length(lavobject@Data@group.label) > 0L) {
+            names(OUT) <- unlist(lavobject@Data@group.label)
+        }
+    }
+
+    OUT
+}
+
+
+# residuals: _inspect_sampstat - _inspect_implied
+lav_object_inspect_residuals <- function(lavobject, h1 = TRUE,
+    add.labels = FALSE, add.class = FALSE, drop.list.single.group = FALSE) {
+
+   # unstandardized residuals
+    obsList <- lav_object_inspect_sampstat(lavobject, h1 = h1,
+                                           add.labels = add.labels,
+                                           add.class  = FALSE,
+                                           drop.list.single.group = FALSE)
+    estList <- lav_object_inspect_implied(lavobject,
+                                          add.labels = add.labels,
+                                          add.class  = FALSE,
+                                          drop.list.single.group = FALSE)
+    # multiple groups
+    ngroups <- length(obsList)
+
+    resList <- vector("list", length = ngroups)
+    for(g in 1:ngroups) {
+        if(lavobject@Model@conditional.x) {
+            if(!is.null(estList[[g]]$res.cov)) {
+                resList[[g]]$res.cov <- ( obsList[[g]]$res.cov -
+                                          estList[[g]]$res.cov )
+                if(add.class) {
+                    class(resList[[g]]$res.cov) <- 
+                        c("lavaan.matrix.symmetric", "matrix")
+                }
+            }
+            if(!is.null(estList[[g]]$res.int)) {
+                 resList[[g]]$res.int <- ( obsList[[g]]$res.int -
+                                           estList[[g]]$res.int )
+                if(add.class) {
+                    class(resList[[g]]$res.int) <-
+                        c("lavaan.vector", "numeric")
+                }
+            }
+            if(!is.null(estList[[g]]$res.th)) {
+                resList[[g]]$res.th  <- ( obsList[[g]]$res.th  -
+                                          estList[[g]]$res.th )
+                if(add.class) {
+                    class(resList[[g]]$res.th) <-
+                        c("lavaan.vector", "numeric")
+                }
+            }
+            if(!is.null(estList[[g]]$res.slopes)) {
+                resList[[g]]$res.slopes <- ( obsList[[g]]$res.slopes -
+                                             estList[[g]]$res.slopes )
+                if(add.class) {
+                    class(resList[[g]]$res.slopes) <-
+                        c("lavaan.matrix", "matrix")
+                }
+            }
+            if(!is.null(estList[[g]]$cov.x)) {
+                resList[[g]]$cov.x  <- ( obsList[[g]]$cov.x  -
+                                         estList[[g]]$cov.x )
+                if(add.class) {
+                    class(resList[[g]]$cov.x) <- 
+                        c("lavaan.matrix.symmetric", "matrix")
+                }
+            }
+
+        # unconditional
+        } else {
+            if(!is.null(estList[[g]]$cov)) {
+                resList[[g]]$cov <- ( obsList[[g]]$cov -
+                                      estList[[g]]$cov )
+                if(add.class) {
+                    class(resList[[g]]$cov) <- 
+                        c("lavaan.matrix.symmetric", "matrix")
+                }
+            }
+            if(!is.null(estList[[g]]$mean)) {
+                 resList[[g]]$mean <- ( obsList[[g]]$mean -
+                                        estList[[g]]$mean )
+                 if(add.class) {
+                    class(resList[[g]]$mean) <-
+                        c("lavaan.vector", "numeric")
+                 }
+            }
+            if(!is.null(estList[[g]]$th)) {
+                resList[[g]]$th  <- ( obsList[[g]]$th  -
+                                      estList[[g]]$th )
+                if(add.class) {
+                    class(resList[[g]]$th) <-
+                        c("lavaan.vector", "numeric")
+                }
+            }
+        }
+
+        # free group.w
+        if(!is.null(estList[[g]]$group.w)) {
+            resList[[g]]$group.w <- ( obsList[[g]]$group.w  - 
+                                      estList[[g]]$group.w )
+            if(add.class) {
+                class(resList[[g]]$group.w) <-
+                    c("lavaan.vector", "numeric")
+            }
+        }
+    }
+
+    OUT <- resList
+    if(ngroups == 1L && drop.list.single.group) {
+        OUT <- OUT[[1]]
+    } else {
+        if(length(lavobject@Data@group.label) > 0L) {
+            names(OUT) <- unlist(lavobject@Data@group.label)
+        }
+    }
+
+    OUT
 }
 
 
@@ -1035,7 +1300,12 @@ lav_object_inspect_cov_ov <- function(lavobject, correlation.metric = FALSE,
     G <- lavobject@Data@ngroups
 
     # get model-implied covariance matrix observed
-    OUT <- lavobject@implied$cov
+
+    if(lavobject@Model@conditional.x) {
+        OUT <- lavobject@implied$res.cov
+    } else {
+        OUT <- lavobject@implied$cov
+    }
 
     # cor + labels + class
     for(g in 1:G) {
@@ -1071,7 +1341,13 @@ lav_object_inspect_mean_ov <- function(lavobject,
     G <- lavobject@Data@ngroups
 
     # compute lv means
-    OUT <- lavobject@implied$mean
+    if(lavobject@Model@conditional.x) {
+        OUT <- lavobject@implied$res.int
+    } else {
+        OUT <- lavobject@implied$mean
+    }
+   
+    # make numeric
     OUT <- lapply(OUT, as.numeric)
 
     # labels + class
@@ -1101,7 +1377,13 @@ lav_object_inspect_th <- function(lavobject,
     G <- lavobject@Data@ngroups
 
     # thresholds
-    OUT <- lavobject@implied$th
+    if(lavobject@Model@conditional.x) {
+        OUT <- lavobject@implied$res.th
+    } else {
+        OUT <- lavobject@implied$th
+    }
+
+    # make numeric
     OUT <- lapply(OUT, as.numeric)
 
     # labels + class

@@ -1,6 +1,6 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.5-21
+Version: 0.5-22
 Authors@R: c(person(given = "Yves", family = "Rosseel",
                     role  = c("aut", "cre"),
                     email = "Yves.Rosseel@UGent.be"),
@@ -41,7 +41,7 @@ License: GPL (>= 2)
 LazyData: yes
 URL: http://lavaan.org
 NeedsCompilation: no
-Packaged: 2016-09-05 17:45:27 UTC; yves
+Packaged: 2016-09-24 13:52:10 UTC; yves
 Author: Yves Rosseel [aut, cre],
   Daniel Oberski [ctb],
   Jarrett Byrnes [ctb],
@@ -54,4 +54,4 @@ Author: Yves Rosseel [aut, cre],
   Mariska Barendse [ctb]
 Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
 Repository: CRAN
-Date/Publication: 2016-09-07 15:59:04
+Date/Publication: 2016-09-24 18:02:02
