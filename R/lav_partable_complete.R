@@ -47,14 +47,18 @@ lav_partable_complete <- function(partable = NULL, start = TRUE) {
         partable$id <- seq_len(N)
     #}
 
-    # add group column
-    if(is.null(partable$group)) {
-        partable$group <- rep(1L, N)
+    # add block column
+    if(is.null(partable$block)) {
+        partable$block <- rep(1L, N)
+    } else {
+        partable$block <- as.integer(partable$block)
     }
 
     # add user column
     if(is.null(partable$user)) {
         partable$user <- rep(1L, N)
+    } else {
+         partable$user <- as.integer( partable$user )
     }
 
     # add free column
@@ -73,9 +77,9 @@ lav_partable_complete <- function(partable = NULL, start = TRUE) {
     if(is.null(partable$ustart)) {
         # do we have something else? start? est?
         if(!is.null(partable$start)) {
-            partable$ustart <- partable$start
+            partable$ustart <- as.numeric(partable$start)
         } else if(!is.null(partable$est)) {
-            partable$ustart <- partable$est
+            partable$ustart <- as.numeric(partable$est)
         } else {
             partable$ustart <- rep(as.numeric(NA), N)
             non.free <- which(!partable$free)
@@ -83,16 +87,22 @@ lav_partable_complete <- function(partable = NULL, start = TRUE) {
                 partable$ustart[non.free] <- 0
             }
         }
+    } else {
+        partable$ustart <- as.numeric(partable$ustart)
     }
 
     # add exo column
     if(is.null(partable$exo)) {
         partable$exo <- rep(0, N)
+    } else {
+        partable$exo <- as.integer( partable$exo )
     }
 
     # add label column
     if(is.null(partable$label)) {
         partable$label <- rep("", N)
+    } else {
+        partable$label <- as.character( partable$label )
     }
 
     # add eq.id column 
@@ -106,7 +116,7 @@ lav_partable_complete <- function(partable = NULL, start = TRUE) {
     #}
 
     # order them nicely: id lhs op rhs group
-    idx <- match(c("id", "lhs","op","rhs", "group","user",
+    idx <- match(c("id", "lhs","op","rhs", "block","user",
                    "free","ustart","exo","label"),
                  names(partable))
 

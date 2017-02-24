@@ -21,6 +21,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                       group.w.free      = FALSE,
                                       WLS.V             = NULL,
                                       NACOV             = NULL,
+                                      se                = "standard",
+                                      information       = "expected",
                                       ridge             = 1e-5,
                                       optim.method      = "nlminb",
                                       zero.add          = c(0.5, 0.0),
@@ -36,6 +38,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     if(!is.null(lavdata)) {
         X <- lavdata@X; Mp <- lavdata@Mp
         ngroups <- lavdata@ngroups
+        nlevels <- lavdata@nlevels
         nobs <- lavdata@nobs
         ov.names <- lavdata@ov.names
         ov.names.x <- lavdata@ov.names.x
@@ -46,8 +49,9 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         X <- DataX
         eXo <- DataeXo
         ngroups <- length(X)
-        Mp <- vector("list", length=ngroups)
-        nobs <- vector("list", length=ngroups)
+        nlevels <- 1L # for now
+        Mp   <- vector("list", length = ngroups)
+        nobs <- vector("list", length = ngroups)
         for(g in 1:ngroups) {
             if(missing != "listwise") {
                 Mp[[g]] <- lav_data_missing_patterns(X[[g]], sort.freq = FALSE,
@@ -64,48 +68,50 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     # sample statistics per group
 
     # joint (y,x)
-    cov         <- vector("list", length=ngroups)
-    var         <- vector("list", length=ngroups)
-    mean        <- vector("list", length=ngroups)
-    th          <- vector("list", length=ngroups)
-    th.idx      <- vector("list", length=ngroups)
-    th.names    <- vector("list", length=ngroups)
+    cov         <- vector("list", length = ngroups)
+    var         <- vector("list", length = ngroups)
+    mean        <- vector("list", length = ngroups)
+    th          <- vector("list", length = ngroups)
+    th.idx      <- vector("list", length = ngroups)
+    th.names    <- vector("list", length = ngroups)
 
     # residual (y | x)
-    res.cov     <- vector("list", length=ngroups)
-    res.var     <- vector("list", length=ngroups)
-    res.th      <- vector("list", length=ngroups)
-    res.th.nox  <- vector("list", length=ngroups)
-    res.slopes  <- vector("list", length=ngroups)
-    res.int     <- vector("list", length=ngroups)
+    res.cov     <- vector("list", length = ngroups)
+    res.var     <- vector("list", length = ngroups)
+    res.th      <- vector("list", length = ngroups)
+    res.th.nox  <- vector("list", length = ngroups)
+    res.slopes  <- vector("list", length = ngroups)
+    res.int     <- vector("list", length = ngroups)
 
     # fixed.x
-    mean.x      <- vector("list", length=ngroups)
-    cov.x       <- vector("list", length=ngroups)
+    mean.x      <- vector("list", length = ngroups)
+    cov.x       <- vector("list", length = ngroups)
 
     # binary/ordinal
-    bifreq      <- vector("list", length=ngroups)
+    bifreq      <- vector("list", length = ngroups)
 
     # extra sample statistics per group
-    icov            <- vector("list", length=ngroups)
-    cov.log.det     <- vector("list", length=ngroups)
-    res.icov        <- vector("list", length=ngroups)
-    res.cov.log.det <- vector("list", length=ngroups)
-    WLS.obs         <- vector("list", length=ngroups)
-    missing.        <- vector("list", length=ngroups)
-    missing.h1.     <- vector("list", length=ngroups)
-    missing.flag.   <- FALSE
+    icov             <- vector("list", length = ngroups)
+    cov.log.det      <- vector("list", length = ngroups)
+    res.icov         <- vector("list", length = ngroups)
+    res.cov.log.det  <- vector("list", length = ngroups)
+    WLS.obs          <- vector("list", length = ngroups)
+    missing.         <- vector("list", length = ngroups)
+    missing.h1.      <- vector("list", length = ngroups)
+    missing.flag.    <- FALSE
+    zero.cell.tables <- vector("list", length = ngroups)
+    YLp              <- vector("list", length = ngroups)
 
     # group weights
-    group.w       <- vector("list", length=ngroups)
+    group.w       <- vector("list", length = ngroups)
 
     # convenience? # FIXME!
-    x.idx         <- vector("list", length=ngroups)
+    x.idx         <- vector("list", length = ngroups)
 
 
-    WLS.VD <- vector("list", length=ngroups)
+    WLS.VD <- vector("list", length = ngroups)
     if(is.null(WLS.V)) {
-        WLS.V      <- vector("list", length=ngroups)
+        WLS.V      <- vector("list", length = ngroups)
         WLS.V.user <- FALSE   
     } else {
         if(!is.list(WLS.V)) {
@@ -137,7 +143,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
     NACOV.compute <- TRUE
     if(is.null(NACOV)) {
-        NACOV      <- vector("list", length=ngroups)
+        NACOV      <- vector("list", length = ngroups)
         NACOV.user <- FALSE
     } else if(is.logical(NACOV)) {
         if(!NACOV) {
@@ -146,7 +152,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             NACOV.compute <- TRUE
         }
         NACOV.user <- FALSE
-        NACOV      <- vector("list", length=ngroups)
+        NACOV      <- vector("list", length = ngroups)
     } else {
         NACOV.compute <- FALSE
         if(!is.list(NACOV)) {
@@ -165,15 +171,16 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         # FIXME: check dimension of NACOV!!
     }
 
+    # compute some sample statistics per group
     for(g in 1:ngroups) {
 
         # check nobs
         if(nobs[[g]] < 2L) {
             if(nobs[[g]] == 0L) {
-                stop("lavaan ERROR: data contains no observations", 
+                stop("lavaan ERROR: data contains no observations",
                      ifelse(ngroups > 1L, paste(" in group ", g, sep=""), ""))
             } else {
-                stop("lavaan ERROR: data contains only a single observation", 
+                stop("lavaan ERROR: data contains only a single observation",
                      ifelse(ngroups > 1L, paste(" in group ", g, sep=""), ""))
             }
         }
@@ -211,7 +218,14 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         ov.levels <- DataOv$nlev[ match(ov.names[[g]], DataOv$name) ]
         CAT <- list()
         if("ordered" %in% ov.types) {
-            categorical <- TRUE
+            if(nlevels > 1L) {
+                stop("lavaan ERROR: multilevel + categorical not supported yet.")
+            } else {
+                categorical <- TRUE
+            }
+        }
+
+        if(categorical) {
             if(estimator %in% c("ML","REML","PML","FML","MML","none")) {
                 WLS.W <- FALSE
             } else {
@@ -220,8 +234,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             if(verbose) {
                 cat("Estimating sample thresholds and correlations ... ")
             }
-            CAT <- muthen1984(Data=X[[g]], 
-                              ov.names=ov.names[[g]], 
+            CAT <- muthen1984(Data=X[[g]],
+                              ov.names=ov.names[[g]],
                               ov.types=ov.types,
                               ov.levels=ov.levels,
                               ov.names.x=ov.names.x[[g]],
@@ -232,8 +246,11 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                               optim.method = optim.method,
                               zero.add = zero.add,
                               zero.keep.margins = zero.keep.margins,
-                              zero.cell.warn = zero.cell.warn,
+                              zero.cell.warn = FALSE,
+                              zero.cell.tables = TRUE,
                               verbose=debug)
+            # empty cell tables
+            zero.cell.tables[[g]] <- CAT$zero.cell.tables
             if(verbose) cat("done\n")
         }
 
@@ -279,7 +296,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             } else {
                 # var/cov
                 var[[g]]  <- unlist(CAT$VAR)
-                cov[[g]]  <- unname(CAT$COV)               
+                cov[[g]]  <- unname(CAT$COV)
 
                 # th also contains the means of numeric variables
                 th[[g]] <- unlist(CAT$TH)
@@ -294,8 +311,24 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 }
 
             }
-            
-        } else { # continuous case
+
+        } else if(nlevels > 1L) { # continuous, multilevel setting
+
+            # overwrite later with within cov? -- used for starting values
+            cov[[g]]  <-   stats::cov(X[[g]], use = "pairwise")
+            var[[g]]  <-   diag(cov[[g]])
+            # rescale cov by (N-1)/N? (only COV!)
+            if(rescale) {
+                # we 'transform' the sample cov (divided by n-1)
+                # to a sample cov divided by 'n'
+                cov[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov[[g]]
+            }
+            mean[[g]] <- colMeans(X[[g]], na.rm = TRUE)
+
+            #YLp[[g]] <- lav_samplestats_cluster_patterns(Y  = X[[g]],
+            #                                             Lp = Lp[[g]])
+
+        } else { # continuous, single-level case
  
             if(conditional.x) {
                 # residual covariances!
@@ -303,7 +336,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 # FIXME: how to handle missing data here?
                    Y <- cbind(X[[g]], eXo[[g]])
                  COV <- unname( stats::cov(Y, use="pairwise"))
-                MEAN <- unname( apply(Y, 2, base::mean, na.rm=TRUE) )
+                MEAN <- unname( colMeans(Y, na.rm=TRUE) )
                 var[[g]] <- diag(COV)
                 cov[[g]] <- COV
                 # rescale cov by (N-1)/N? (only COV!)
@@ -320,7 +353,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 C <- COV[ x.idx[[g]],  x.idx[[g]], drop=FALSE]
                 # FIXME: make robust against singular C!!!
                 res.cov[[g]] <- A - B %*% solve(C) %*% t(B)
-                res.var[[g]] <- diag( cov[[g]] ) 
+                res.var[[g]] <- diag( cov[[g]] )
  
 
                 MY <- MEAN[-x.idx[[g]]]; MX <- MEAN[x.idx[[g]]]
@@ -332,6 +365,23 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 res.int[[g]]    <- COEF[1,]                  # intercepts
                 res.slopes[[g]] <- t(COEF[-1,,drop = FALSE]) # slopes
 
+            } else if(missing == "two.stage" ||
+                      missing == "robust.two.stage") {
+                stopifnot(!conditional.x) # for now
+                missing.flag. <- FALSE #!!! just use sample statistics
+                missing.[[g]] <-
+                    lav_samplestats_missing_patterns(Y  = X[[g]],
+                                                     Mp = Mp[[g]])
+                out <- lav_mvnorm_missing_h1_estimate_moments(Y = X[[g]],
+                          Mp = Mp[[g]], Yp = missing.[[g]], verbose = verbose)
+                missing.h1.[[g]]$sigma <- out$Sigma
+                missing.h1.[[g]]$mu    <- out$Mu
+                missing.h1.[[g]]$h1    <- out$fx
+
+                # here, sample statistics == EM estimates
+                cov[[g]]  <- missing.h1.[[g]]$sigma
+                var[[g]]  <- diag(cov[[g]])
+                mean[[g]] <- missing.h1.[[g]]$mu
             } else {
                 cov[[g]]  <-   stats::cov(X[[g]], use = "pairwise")
                 var[[g]]  <-   diag(cov[[g]])
@@ -341,7 +391,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     # to a sample cov divided by 'n'
                     cov[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov[[g]]
                 }
-                mean[[g]] <- apply(X[[g]], 2, base::mean, na.rm=TRUE)
+                mean[[g]] <- colMeans(X[[g]], na.rm=TRUE)
             }
 
 
@@ -366,18 +416,27 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
 
         # WLS.obs
-        WLS.obs[[g]] <- lav_samplestats_wls_obs(mean.g = mean[[g]], 
-            cov.g = cov[[g]], var.g = var[[g]], th.g = th[[g]], 
-            th.idx.g = th.idx[[g]], res.int.g = res.int[[g]], 
-            res.cov.g = res.cov[[g]], res.var.g = res.var[[g]], 
-            res.th.g = res.th[[g]],  res.slopes.g = res.slopes[[g]],
-            group.w.g = group.w[[g]], 
-            categorical = categorical, conditional.x = conditional.x,
-            meanstructure = meanstructure, slopestructure = conditional.x,
-            group.w.free = group.w.free)
+        if(nlevels == 1L) {
+            WLS.obs[[g]] <- lav_samplestats_wls_obs(mean.g = mean[[g]],
+                cov.g = cov[[g]], var.g = var[[g]], th.g = th[[g]],
+                th.idx.g = th.idx[[g]], res.int.g = res.int[[g]],
+                res.cov.g = res.cov[[g]], res.var.g = res.var[[g]],
+                res.th.g = res.th[[g]],  res.slopes.g = res.slopes[[g]],
+                group.w.g = group.w[[g]],
+                categorical = categorical, conditional.x = conditional.x,
+                meanstructure = meanstructure, slopestructure = conditional.x,
+                group.w.free = group.w.free)
+
+        }
 
         # if missing = "fiml", sample statistics per pattern
         if(missing == "ml") {
+            if(nlevels > 1L) {
+                stop("lavaan ERROR: multilevel + fiml not supported yet")
+            }
+            if(conditional.x) {
+                stop("lavaan ERROR: multilevel + conditional.x not supported yet")
+            }
             stopifnot(!conditional.x) # for now
             missing.flag. <- TRUE
             missing.[[g]] <- 
@@ -387,17 +446,16 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             #cat("missing.h1 = "); print(missing.h1); cat("\n")
             if(missing.h1) {
                 # estimate moments unrestricted model
-                out <- estimate.moments.EM(Y = X[[g]], Mp = Mp[[g]],
-                                           Yp = missing.[[g]],
-                                           verbose = verbose)
-                missing.h1.[[g]]$sigma <- out$sigma
-                missing.h1.[[g]]$mu    <- out$mu
+                out <- lav_mvnorm_missing_h1_estimate_moments(Y = X[[g]],
+                          Mp = Mp[[g]], Yp = missing.[[g]], verbose = verbose)
+                missing.h1.[[g]]$sigma <- out$Sigma
+                missing.h1.[[g]]$mu    <- out$Mu
                 missing.h1.[[g]]$h1    <- out$fx
             }
         }
 
         # NACOV (=GAMMA)
-        if(!NACOV.user) {
+        if(!NACOV.user && nlevels == 1L) {
             if(estimator == "ML" && !missing.flag. && NACOV.compute) {
                 if(conditional.x) {
                      Y <- Y
@@ -432,8 +490,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                         } else {
                             txt <- "\n"
                         }
-                        warning("lavaan WARNING: number of observations (", 
-                                nrow(X[[g]]), ") too small to compute Gamma", 
+                        warning("lavaan WARNING: number of observations (",
+                                nrow(X[[g]]), ") too small to compute Gamma",
                                 txt)
                     }
                     if(conditional.x) {
@@ -441,7 +499,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     } else {
                         Y <- X[[g]]
                     }
-                    NACOV[[g]] <- 
+                    NACOV[[g]] <-
                         lav_samplestats_Gamma(Y             = Y,
                                               x.idx         = x.idx[[g]],
                                               fixed.x       = fixed.x,
@@ -458,7 +516,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         }
 
         # WLS.V
-        if(!WLS.V.user) {
+        if(!WLS.V.user && nlevels == 1L) {
             if(estimator == "GLS") {
                 # Note: we need the 'original' COV/MEAN/ICOV
                 #        sample statistics; not the 'residual' version
@@ -477,8 +535,12 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     WLS.V[[g]][1:nvar, 1:nvar] <- WLS.V[[g]][1:nvar, 1:nvar,
                                         drop = FALSE] * nobs[[g]]/(nobs[[g]]-1)
                 }
+
+
             } else if(estimator == "ML") {
                 # no WLS.V here, since function of model-implied moments
+
+
             } else if(estimator %in% c("WLS","DWLS","ULS")) {
                 if(!categorical) {
                     if(estimator == "WLS") {
@@ -510,7 +572,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                         } else {
                             idacov <- 1/dacov
                         }
-                        WLS.V[[g]] <- diag(idacov, nrow=NROW(NACOV[[g]]), 
+                        WLS.V[[g]] <- diag(idacov, nrow=NROW(NACOV[[g]]),
                                                    ncol=NCOL(NACOV[[g]]))
                         WLS.VD[[g]] <- idacov
                     } else if(estimator == "ULS") {
@@ -558,7 +620,6 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
     # construct SampleStats object
     lavSampleStats <- new("lavSampleStats",
-                       CAT = CAT, # debug only
                        # sample moments
                        th           = th,
                        th.idx       = th.idx,
@@ -598,11 +659,24 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                        NACOV           = NACOV,
                        NACOV.user      = NACOV.user,
 
+                       # cluster/levels
+                       YLp             = YLp,
+
                        # missingness
                        missing.flag    = missing.flag.,
                        missing         = missing.,
-                       missing.h1      = missing.h1.
+                       missing.h1      = missing.h1.,
+                       zero.cell.tables = zero.cell.tables
                       )
+
+    # just a SINGLE warning if we have empty cells
+    if(categorical && zero.cell.warn && 
+       any(sapply(zero.cell.tables, nrow) > 0L)) {
+        nempty <- sum(sapply(zero.cell.tables, nrow))
+        warning("lavaan WARNING: ", nempty,
+                " bivariate tables have empty cells; to see them, use:\n",
+                "                  lavInspect(fit, \"zero.cell.tables\")")
+    }
 
     lavSampleStats
 }
@@ -639,40 +713,42 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
 
 
     # sample statistics per group
-    cov         <- vector("list", length=ngroups)
-    var         <- vector("list", length=ngroups)
-    mean        <- vector("list", length=ngroups)
-    th          <- vector("list", length=ngroups)
-    th.idx      <- vector("list", length=ngroups)
-    th.names    <- vector("list", length=ngroups)
+    cov         <- vector("list", length = ngroups)
+    var         <- vector("list", length = ngroups)
+    mean        <- vector("list", length = ngroups)
+    th          <- vector("list", length = ngroups)
+    th.idx      <- vector("list", length = ngroups)
+    th.names    <- vector("list", length = ngroups)
 
     # residual (y | x)
-    res.cov     <- vector("list", length=ngroups)
-    res.var     <- vector("list", length=ngroups)
-    res.th      <- vector("list", length=ngroups)
-    res.th.nox  <- vector("list", length=ngroups)
-    res.slopes  <- vector("list", length=ngroups)
-    res.int     <- vector("list", length=ngroups)
+    res.cov     <- vector("list", length = ngroups)
+    res.var     <- vector("list", length = ngroups)
+    res.th      <- vector("list", length = ngroups)
+    res.th.nox  <- vector("list", length = ngroups)
+    res.slopes  <- vector("list", length = ngroups)
+    res.int     <- vector("list", length = ngroups)
 
     # fixed.x
-    mean.x      <- vector("list", length=ngroups)
-    cov.x       <- vector("list", length=ngroups)
+    mean.x      <- vector("list", length = ngroups)
+    cov.x       <- vector("list", length = ngroups)
 
-    bifreq      <- vector("list", length=ngroups)
+    bifreq      <- vector("list", length = ngroups)
 
     # extra sample statistics per group
-    icov          <- vector("list", length=ngroups)
-    cov.log.det   <- vector("list", length=ngroups)
-    res.icov        <- vector("list", length=ngroups)
-    res.cov.log.det <- vector("list", length=ngroups)
-    WLS.obs         <- vector("list", length=ngroups)
-    missing.        <- vector("list", length=ngroups)
-    missing.h1.     <- vector("list", length=ngroups)
+    icov          <- vector("list", length = ngroups)
+    cov.log.det   <- vector("list", length = ngroups)
+    res.icov        <- vector("list", length = ngroups)
+    res.cov.log.det <- vector("list", length = ngroups)
+    WLS.obs         <- vector("list", length = ngroups)
+    missing.        <- vector("list", length = ngroups)
+    missing.h1.     <- vector("list", length = ngroups)
     missing.flag.   <- FALSE
+    zero.cell.tables <- vector("list", length = ngroups)
+    YLp              <- vector("list", length = ngroups)
 
     # group weights
-    group.w         <- vector("list", length=ngroups)
-    x.idx           <- vector("list", length=ngroups)
+    group.w         <- vector("list", length = ngroups)
+    x.idx           <- vector("list", length = ngroups)
 
     # for now, we do NOT support categorical data (using moments only),
     # fixed.x, and conditional.x
@@ -681,9 +757,9 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
     conditional.x <- FALSE
 
 
-    WLS.VD <- vector("list", length=ngroups)
+    WLS.VD <- vector("list", length = ngroups)
     if(is.null(WLS.V)) {
-        WLS.V      <- vector("list", length=ngroups)
+        WLS.V      <- vector("list", length = ngroups)
         WLS.V.user <- FALSE
     } else {
         if(!is.list(WLS.V)) {
@@ -714,7 +790,7 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
     }
 
     if(is.null(NACOV)) {
-        NACOV      <- vector("list", length=ngroups)
+        NACOV      <- vector("list", length = ngroups)
         NACOV.user <- FALSE
     } else {
         if(!is.list(NACOV)) {
@@ -869,7 +945,6 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
 
     # construct SampleStats object
     lavSampleStats <- new("lavSampleStats",
-
                        # sample moments
                        th           = th,
                        th.idx       = th.idx,
@@ -912,11 +987,14 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                        NACOV            = NACOV,
                        NACOV.user       = NACOV.user,
 
+                       # cluster/level
+                       YLp              = YLp,
+
                        # missingness
                        missing.flag     = missing.flag.,
                        missing          = missing.,
-                       missing.h1       = missing.h1.
-
+                       missing.h1       = missing.h1.,
+                       zero.cell.tables = zero.cell.tables
                       )
 
     lavSampleStats
@@ -959,3 +1037,17 @@ lav_samplestats_missing_patterns <- function(Y = NULL, Mp = NULL) {
     Yp
 }
 
+# compute sample statistics, per cluster
+lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL) {
+
+    # coerce Y to matrix
+    Y <- as.matrix(Y)
+
+    if(is.null(Lp)) {
+        stop("lavaan ERROR: Lp is NULL")
+    }
+
+    YLp <- vector("list", length = length(Lp$cluster))
+
+    YLp
+}

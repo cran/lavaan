@@ -141,6 +141,8 @@ lav_test_diff_SatorraBentler2001 <- function(m1, m0) {
 
 lav_test_diff_SatorraBentler2010 <- function(m1, m0, H1 = FALSE) {
 
+    ### FIXME: check if models are nested at the parameter level!!!
+
     # extract information from m1 and m2
     T1 <- m1@test[[1]]$stat
     r1 <- m1@test[[1]]$df
@@ -220,10 +222,10 @@ lav_test_diff_m10 <- function(m1, m0, test = FALSE) {
     # FIXME:
     # - check if H0 does not contain additional parameters...
 
+    Options$optim.method          = "none"
+    Options$optim.force.converged = TRUE
     m10 <- lavaan(model = PT.M1.extended,
                   start = PE.M0.extended,
-                  control=list(optim.method          = "none",
-                               optim.force.converged = TRUE) ,
                   slotOptions     = Options,
                   slotSampleStats = m1@SampleStats,
                   slotData        = m1@Data,
@@ -329,6 +331,8 @@ lav_test_diff_af_h1 <- function(m1, m0) {
     p0.free.idx <- which(PT.M0.part1$free > 0)
 
     # change 'free' order in m0
+    # NOTE: this only works all the free parameters in h0 are also free
+    # in h1 (and if not, they will become fixed in h0)
     PT.M0.part1$free[p0.free.idx] <- 
     PT.M1.part1$free[ PT.M0.part1$id[p1.id][p0.free.idx] ]
 

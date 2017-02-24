@@ -6,20 +6,22 @@
 \description{
 The \code{lavInspect()} and \code{lavTech()} functions can be used to
 inspect/extract information that is stored inside (or can be computed from) a
-fitted lavaan object. Note: the (older) S4 \code{inspect()} method is now a
-shortcut for \code{lavInspect()} with default arguments.
+fitted lavaan object. Note: the (older) \code{inspect()} function is
+now simply a shortcut for \code{lavInspect()} with default arguments.
 }
 \usage{
-lavInspect(lavobject, what = "free", add.labels = TRUE, add.class = TRUE,
+lavInspect(object, what = "free", add.labels = TRUE, add.class = TRUE,
            list.by.group = TRUE,
            drop.list.single.group = TRUE)
 
-lavTech(lavobject, what = "free", add.labels = FALSE, add.class = FALSE,
+lavTech(object, what = "free", add.labels = FALSE, add.class = FALSE,
         list.by.group = FALSE,
         drop.list.single.group = FALSE)
+
+inspect(object, what = "free", ...)
 }
 \arguments{
-\item{lavobject}{An object of class \code{\linkS4class{lavaan}}.}
+\item{object}{An object of class \code{\linkS4class{lavaan}}.}
 \item{what}{Character. What needs to be inspected/extracted? See Details for a
 full list. Note: the \code{what} argument is not case-sensitive
 (everything is converted to lower case.)}
@@ -37,6 +39,7 @@ names for multiple groups.}
     a list, where each element corresponds to a group (even if there is only
     a single group.) If \code{TRUE}, the list will be unlisted if there is
     only a single group.}
+\item{...}{Additional arguments. Not used by lavaan, but by other packages.}
 }
 \details{
 The \code{lavInspect()} and \code{lavTech()} functions only differ in the way
@@ -107,6 +110,9 @@ Information about the data (including missing patterns):
         the data.frame (if any).}
     \item{\code{"ngroups"}:}{Integer. The number of groups.}
     \item{\code{"group.label"}:}{A character vector. The group labels.}
+    \item{\code{"cluster"}:}{A character vector. The cluster variable(s) 
+       in the data.frame (if any).}
+    \item{\code{"ordered"}:}{A character vector. The ordered variables.}
     \item{\code{"nobs"}:}{Integer vector. The number of observations
         in each group that were used in the analysis.}
     \item{\code{"norig"}:}{Integer vector. The original number of observations
@@ -300,6 +306,8 @@ Miscellaneous:
         admissible. A warning is raised if negative variances are found, or if 
         either \code{lavInspect(fit, "cov.lv")} or 
         \code{lavInspect(fit, "theta")} return a non-positive definite matrix.}
+    \item{\code{"zero.cell.tables"}:}{List. List of bivariate frequency tables 
+        where at least one cell is empty.}
 }
 
 }

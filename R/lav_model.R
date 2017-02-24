@@ -1,25 +1,21 @@
-# constructor of the matrix representation
+# constructor of the matrix lavoptions$representation
 #
 # initial version: YR 22/11/2010
 # - YR 14 Jan 2014: moved to lav_model.R
 # - YR 18 Nov 2014: more efficient handling of linear equality constraints
 # - YR 02 Dec 2014: allow for bare-minimum parameter tables
+# - YR 25 Jan 2017: collect options in lavoptions
 
-# construct MATRIX representation of the model
+# construct MATRIX lavoptions$representation of the model
 lav_model <- function(lavpartable      = NULL,
-                      representation   = "LISREL",
-                      conditional.x    = FALSE,
-                      th.idx           = list(),
-                      parameterization = "delta",
-                      link             = "logit",
-                      control          = list(),
-                      debug            = FALSE) {
+                      lavoptions       = NULL,
+                      th.idx           = list()) {
 
     # handle bare-minimum partables
     lavpartable <- lav_partable_complete(lavpartable)
  
     # global info from user model
-    ngroups <- max(lavpartable$group)
+    nblocks <- lav_partable_nblocks(lavpartable)
     meanstructure <- any(lavpartable$op == "~1")
     categorical <- any(lavpartable$op == "|")
     if(categorical) meanstructure <- TRUE
@@ -29,7 +25,7 @@ lav_model <- function(lavpartable      = NULL,
     # handle variable definitions and (in)equality constraints
     CON <- lav_constraints_parse(partable = lavpartable,
                                  constraints = NULL,
-                                 debug = debug)
+                                 debug = lavoptions$debug)
 
     # handle *linear* equality constraints special
     if(CON$ceq.linear.only.flag) {
@@ -43,12 +39,12 @@ lav_model <- function(lavpartable      = NULL,
     }
 
     # select model matrices
-    if(representation == "LISREL") {
+    if(lavoptions$representation == "LISREL") {
         REP <- representation.LISREL(lavpartable, target=NULL, extra=TRUE)
     } else {
         stop("lavaan ERROR: only representation \"LISREL\" has been implemented.")
     }
-    if(debug) print(REP)
+    if(lavoptions$debug) print(REP)
 
     # FIXME: check for non-existing parameters
     bad.idx <- which(REP$mat == "" & 
@@ -73,33 +69,33 @@ lav_model <- function(lavpartable      = NULL,
     m.free.idx <- m.user.idx <- vector(mode="list", length=nG)
     x.free.idx <- x.user.idx <- vector(mode="list", length=nG)
 
-    # prepare ngroups-sized slots
-    nvar <- integer(ngroups)
+    # prepare nblocks-sized slots
+    nvar <- integer(nblocks)
     nmat <- unlist(attr(REP, "mmNumber"))
-    num.idx <- vector("list", length=ngroups)
-    nexo <- integer(ngroups)
-    ov.x.dummy.ov.idx <- vector(mode="list", length=ngroups)
-    ov.x.dummy.lv.idx <- vector(mode="list", length=ngroups)
-    ov.y.dummy.ov.idx <- vector(mode="list", length=ngroups)
-    ov.y.dummy.lv.idx <- vector(mode="list", length=ngroups)
+    num.idx <- vector("list", length=nblocks)
+    nexo <- integer(nblocks)
+    ov.x.dummy.ov.idx <- vector(mode="list", length=nblocks)
+    ov.x.dummy.lv.idx <- vector(mode="list", length=nblocks)
+    ov.y.dummy.ov.idx <- vector(mode="list", length=nblocks)
+    ov.y.dummy.lv.idx <- vector(mode="list", length=nblocks)
 
     offset <- 0L
-    for(g in 1:ngroups) {
+    for(g in 1:nblocks) {
 
-        # observed and latent variables for this group
-        ov.names <- vnames(lavpartable, "ov", group=g)
-        ov.names.nox <- vnames(lavpartable, "ov.nox", group=g)
-        ov.names.x <- vnames(lavpartable, "ov.x", group=g)
+        # observed and latent variables for this block
+        ov.names <-     lav_partable_vnames(lavpartable, "ov",     block = g)
+        ov.names.nox <- lav_partable_vnames(lavpartable, "ov.nox", block = g)
+        ov.names.x <-   lav_partable_vnames(lavpartable, "ov.x",   block = g)
         nexo[g] <- length(ov.names.x)
-        ov.num <- vnames(lavpartable, "ov.num", group=g)
-        if(conditional.x) {
+        ov.num <-       lav_partable_vnames(lavpartable, "ov.num", block = g)
+        if(lavoptions$conditional.x) {
             nvar[g] <- length(ov.names.nox)
         } else {
             nvar[g] <- length(ov.names)
         }
         num.idx[[g]] <- match(ov.num, ov.names.nox)
 
-        # model matrices for this group
+        # model matrices for this block
         mmNumber    <- attr(REP, "mmNumber")[[g]]
         mmNames     <- attr(REP, "mmNames")[[g]]
         mmSymmetric <- attr(REP, "mmSymmetric")[[g]]
@@ -124,7 +120,7 @@ lav_model <- function(lavpartable      = NULL,
             dimNames[[offset]] <- mmDimNames[[mm]]
 
             # select elements for this matrix
-            idx <- which(lavpartable$group == g & REP$mat == mmNames[mm]) 
+            idx <- which(lavpartable$block == g & REP$mat == mmNames[mm]) 
 
             # create empty `pattern' matrix
             # FIXME: one day, we may want to use sparse matrices...
@@ -177,7 +173,7 @@ lav_model <- function(lavpartable      = NULL,
             }
 
             # representation specific stuff
-            if(representation == "LISREL" && mmNames[mm] == "lambda") { 
+            if(lavoptions$representation == "LISREL" && mmNames[mm] == "lambda") { 
                 ov.dummy.names.nox <- attr(REP, "ov.dummy.names.nox")[[g]]
                 ov.dummy.names.x   <- attr(REP, "ov.dummy.names.x")[[g]]
                 ov.dummy.names <- c(ov.dummy.names.nox, ov.dummy.names.x)
@@ -198,7 +194,7 @@ lav_model <- function(lavpartable      = NULL,
             }
 
             # representation specific
-            if(representation == "LISREL" && mmNames[mm] == "delta") {
+            if(lavoptions$representation == "LISREL" && mmNames[mm] == "delta") {
                 # only categorical values are listed in the lavpartable
                 # but all remaining values should be 1.0
                 idx <- which(tmp[,1L] == 0.0)
@@ -211,23 +207,23 @@ lav_model <- function(lavpartable      = NULL,
     } # g
 
     # fixed.x parameters?
-    fixed.x <- any(lavpartable$exo > 0L & lavpartable$free == 0L) 
-    if(categorical) {
-        fixed.x <- TRUE
-    }
+    #fixed.x <- any(lavpartable$exo > 0L & lavpartable$free == 0L) 
+    #if(categorical) {
+    #    fixed.x <- TRUE
+    #}
 
 
-    Model <- new("Model",
+    Model <- new("lavModel",
                  GLIST=GLIST,
                  dimNames=dimNames,
                  isSymmetric=isSymmetric,
                  mmSize=mmSize,
-                 representation=representation,
+                 representation=lavoptions$representation,
                  meanstructure=meanstructure,
                  categorical=categorical,
-                 link=link,
-                 control=control,
-                 ngroups=ngroups,
+                 link=lavoptions$link,
+                 nblocks=nblocks,
+                 ngroups=nblocks, # for rsem!!!
                  group.w.free=group.w.free,
                  nmat=nmat,
                  nvar=nvar,
@@ -269,18 +265,20 @@ lav_model <- function(lavpartable      = NULL,
                  con.lambda          = con.lambda,
 
                  nexo                = nexo,
-                 fixed.x             = fixed.x,
-                 conditional.x       = conditional.x,
+                 fixed.x             = lavoptions$fixed.x,
+                 conditional.x       = lavoptions$conditional.x,
                  #x.idx               = x.idx,
-                 parameterization    = parameterization,
+                 parameterization    = lavoptions$parameterization,
 
                  ov.x.dummy.ov.idx   = ov.x.dummy.ov.idx,
                  ov.x.dummy.lv.idx   = ov.x.dummy.lv.idx,
                  ov.y.dummy.ov.idx   = ov.y.dummy.ov.idx,
-                 ov.y.dummy.lv.idx   = ov.y.dummy.lv.idx)
+                 ov.y.dummy.lv.idx   = ov.y.dummy.lv.idx,
 
-    if(debug) {
-         cat("lavaan DEBUG: lavaanModel\n")
+                 estimator           = lavoptions$estimator)
+
+    if(lavoptions$debug) {
+         cat("lavaan lavoptions$debug: lavaanModel\n")
          print( str(Model) )
          print( Model@GLIST )
     }

@@ -1,6 +1,6 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.5-22
+Version: 0.5-23.1097
 Authors@R: c(person(given = "Yves", family = "Rosseel",
                     role  = c("aut", "cre"),
                     email = "Yves.Rosseel@UGent.be"),
@@ -30,18 +30,24 @@ Authors@R: c(person(given = "Yves", family = "Rosseel",
                     email = "mirtok2@gmail.com"),
              person(given = "Mariska", family = "Barendse",
                     role = "ctb",
-                    email = "m.t.barendse@rug.nl")
+                    email = "m.t.barendse@rug.nl"),
+             person(given = "Michael", family = "Chow",
+                    role = "ctb",
+                    email = "machow@princeton.edu"),
+             person(given = "Terrence", family = "Jorgensen",
+                    role = "ctb")
             )
 Description: Fit a variety of latent variable models, including confirmatory
    factor analysis, structural equation modeling and latent growth curve models.
 Depends: R(>= 3.1.0)
 Imports: methods, stats4, stats, utils, graphics, MASS, mnormt,
-        pbivnorm, quadprog
+        pbivnorm, quadprog, numDeriv
+Suggests: testthat
 License: GPL (>= 2)
 LazyData: yes
 URL: http://lavaan.org
 NeedsCompilation: no
-Packaged: 2016-09-24 13:52:10 UTC; yves
+Packaged: 2017-02-24 13:08:31 UTC; yves
 Author: Yves Rosseel [aut, cre],
   Daniel Oberski [ctb],
   Jarrett Byrnes [ctb],
@@ -51,7 +57,9 @@ Author: Yves Rosseel [aut, cre],
   Michael Hallquist [ctb],
   Mijke Rhemtulla [ctb],
   Myrsini Katsikatsou [ctb],
-  Mariska Barendse [ctb]
+  Mariska Barendse [ctb],
+  Michael Chow [ctb],
+  Terrence Jorgensen [ctb]
 Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
 Repository: CRAN
-Date/Publication: 2016-09-24 18:02:02
+Date/Publication: 2017-02-24 23:28:29

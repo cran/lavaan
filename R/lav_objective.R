@@ -23,7 +23,7 @@ estimator.ML <- function(Sigma.hat=NULL, Mu.hat=NULL,
     }
 
     # no negative values
-    if(fx < 0.0) fx <- 0.0
+    if(is.finite(fx) && fx < 0.0) fx <- 0.0
 
     fx
 }
@@ -56,7 +56,7 @@ estimator.ML_res <- function(Sigma.hat=NULL, Mu.hat=NULL, PI=NULL,
     fx <- objective.sigma + objective.beta
 
     # no negative values
-    if(fx < 0.0) fx <- 0.0
+    if(is.finite(fx) && fx < 0.0) fx <- 0.0
 
     fx
 }
@@ -96,7 +96,7 @@ estimator.REML <- function(Sigma.hat=NULL, Mu.hat=NULL,
     fx <- fx + ( 1/nobs * (reml.h0  - reml.h1) )
 
     # no negative values
-    if(fx < 0.0) fx <- 0.0
+    if(is.finite(fx) && fx < 0.0) fx <- 0.0
 
     fx
 }
@@ -119,7 +119,7 @@ estimator.GLS <- function(Sigma.hat=NULL, Mu.hat=NULL,
     }
 
     # no negative values
-    if(fx < 0.0) fx <- 0.0
+    if(is.finite(fx) && fx < 0.0) fx <- 0.0
 
     fx
 }
@@ -136,7 +136,7 @@ estimator.WLS <- function(WLS.est=NULL, WLS.obs=NULL, WLS.V=NULL) {
     fx <- as.numeric( crossprod(crossprod(WLS.V, diff), diff) )
 
     # no negative values
-    if(fx < 0.0) fx <- 0.0
+    if(is.finite(fx) && fx < 0.0) fx <- 0.0
 
     fx
 }
@@ -148,53 +148,30 @@ estimator.DWLS <- function(WLS.est = NULL, WLS.obs = NULL, WLS.VD = NULL) {
     fx <- sum(diff * diff * WLS.VD)
 
     # no negative values
-    if(fx < 0.0) fx <- 0.0
+    if(is.finite(fx) && fx < 0.0) fx <- 0.0
 
     fx
 }
 
 # Full Information ML estimator (FIML) handling the missing values 
-estimator.FIML <- function(Sigma.hat=NULL, Mu.hat=NULL, M=NULL, h1=NULL) {
+estimator.FIML <- function(Sigma.hat = NULL, Mu.hat = NULL, Yp = NULL, 
+                           h1 = NULL, N = NULL) {
 
-    npatterns <- length(M)
-
-    fx.p <- numeric(npatterns)
-     w.p <- numeric(npatterns)
-
-    # for each missing pattern, combine cases and compute raw loglikelihood
-    for(p in 1:npatterns) {
-
-        SX <- M[[p]][["SY"]]
-        MX <- M[[p]][["MY"]]
-        w.p[p] <- nobs <- M[[p]][["freq"]]
-        var.idx <- M[[p]][["var.idx"]]
-
-        # note: if a decent 'sweep operator' was available (in fortran)
-        # we might win some time by 'updating' the inverse by sweeping
-        # out the changed patterns... (but to get the logdet, we need
-        # to do it one column at a time?)
-
-        #cat("FIML: pattern ", p, "\n")
-        #print(Sigma.hat[var.idx, var.idx])
-
-        Sigma.inv <- inv.chol(Sigma.hat[var.idx, var.idx], logdet=TRUE)
-        Sigma.log.det <- attr(Sigma.inv, "logdet")
-        Mu <- Mu.hat[var.idx]
-
-        TT <- SX + tcrossprod(MX - Mu)
-        trace <- sum(Sigma.inv * TT)
-
-        fx.p[p] <- Sigma.log.det + trace
+    if(is.null(N)) {
+        N <- sum(sapply(Yp, "[[", "freq"))
     }
 
-    fx <- weighted.mean(fx.p, w=w.p)
+    fx <- lav_mvnorm_missing_loglik_samplestats(Yp = Yp,
+                                                Mu = Mu.hat, Sigma = Sigma.hat,
+                                                log2pi = FALSE,
+                                                minus.two = TRUE)/N
 
     # ajust for h1
     if(!is.null(h1)) {
         fx <- fx - h1
 
         # no negative values
-        if(fx < 0.0) fx <- 0.0
+        if(is.finite(fx) && fx < 0.0) fx <- 0.0
     }
 
     fx
@@ -288,7 +265,8 @@ estimator.PML <- function(Sigma.hat  = NULL,    # model-based var/cov/cor
         ##Fmin <- sum( prop*log(prop/pairwisePI) )
         Fmin <- sum( freq * log(prop/pairwisePI) ) # to avoid 'N'
 
-        if(missing == "available.cases" || missing =="doubly.robust.PML") {
+        if(missing == "available.cases" || missing == "doubly.robust") {
+
             uniPI <- univariateExpProbVec(TH = TH, th.idx = th.idx)
 
             # shortcuts
@@ -312,110 +290,121 @@ estimator.PML <- function(Sigma.hat  = NULL,    # model-based var/cov/cor
             Fmin <- Fmin + sum(uniweights * log(uniprop/uniPI))
         }
 
-                if (missing =="doubly.robust.PML")  {
+        if (missing =="doubly.robust")  {
 
-          # COMPUTE THE SUM OF THE EXPECTED BIVARIATE CONDITIONAL LIKELIHOODS
-          #SUM_{i,j} [ E_{Yi,Yj|y^o}}(lnf(Yi,Yj))) ]
+             # COMPUTE THE SUM OF THE EXPECTED BIVARIATE CONDITIONAL LIKELIHOODS
+             #SUM_{i,j} [ E_{Yi,Yj|y^o}}(lnf(Yi,Yj))) ]
 
-          #First compute the terms of the summand. Since the cells of
-          # pairwiseProbGivObs are zero for the pairs of variables that at least 
-          #one of the variables is observed (hence not contributing to the summand)
-          #there is no need to construct an index vector for summing appropriately 
-          #within each individual.
-          log_pairwisePI_orig <- log(pairwisePI_orig)
-          pairwiseProbGivObs <- lavcache$pairwiseProbGivObs
-          tmp_prod <- t(t(pairwiseProbGivObs)*log_pairwisePI_orig)
+             #First compute the terms of the summand. Since the cells of
+             # pairwiseProbGivObs are zero for the pairs of variables that at least 
+             #one of the variables is observed (hence not contributing to the summand)
+             #there is no need to construct an index vector for summing appropriately 
+             #within each individual.
+             log_pairwisePI_orig <- log(pairwisePI_orig)
+             pairwiseProbGivObs <- lavcache$pairwiseProbGivObs
+             tmp_prod <- t(t(pairwiseProbGivObs)*log_pairwisePI_orig)
+  
+             SumElnfijCasewise <- apply(tmp_prod, 1, sum)
+             SumElnfij <- sum(SumElnfijCasewise)
+             logl <- logl + SumElnfij
+             Fmin <- Fmin - SumElnfij
 
-          SumElnfijCasewise <- apply(tmp_prod, 1, sum)
-          SumElnfij <- sum(SumElnfijCasewise)
-          logl <- logl + SumElnfij
+             # COMPUTE THE THE SUM OF THE EXPECTED UNIVARIATE CONDITIONAL LIKELIHOODS 
+             # SUM_{i,j} [ E_{Yj|y^o}}(lnf(Yj|yi))) ]
 
-          # COMPUTE THE THE SUM OF THE EXPECTED UNIVARIATE CONDITIONAL LIKELIHOODS 
-          # SUM_{i,j} [ E_{Yj|y^o}}(lnf(Yj|yi))) ]
+             #First compute the model-implied conditional univariate probabilities
+             # p(y_i=a|y_j=b). Let ModProbY1Gy2 be the vector of these
+             # probabilities. The order the probabilities
+             #are listed in the vector ModProbY1Gy2 is as follows: 
+             # y1|y2, y1|y3, ..., y1|yp, y2|y1, y2|y3, ..., y2|yp,
+             # ..., yp|y1, yp|y2, ..., yp|y(p-1). Within each pair of variables the
+             #index "a" which represents the response category of variable yi runs faster than 
+             #"b" which represents the response category of the given variable yj.
+             #The computation of these probabilities are based on the model-implied
+             #bivariate probabilities p(y_i=a,y_j=b). To do the appropriate summations
+             #and divisions we need some index vectors to keep track of the index i, j,
+             #a, and b, as well as the pair index. These index vectors should be 
+             #computed once and stored in lavcache. About where in the lavaan code
+             #we will add the computations and how they will be done please see the 
+             #file "new objects in lavcache for DR-PL.r"
 
-          #First compute the model-implied conditional univariate probabilities
-          # p(y_i=a|y_j=b). Let ModProbY1Gy2 be the vector of these
-          # probabilities. The order the probabilities
-          #are listed in the vector ModProbY1Gy2 is as follows: 
-          # y1|y2, y1|y3, ..., y1|yp, y2|y1, y2|y3, ..., y2|yp,
-          # ..., yp|y1, yp|y2, ..., yp|y(p-1). Within each pair of variables the
-          #index "a" which represents the response category of variable yi runs faster than 
-          #"b" which represents the response category of the given variable yj.
-          #The computation of these probabilities are based on the model-implied
-          #bivariate probabilities p(y_i=a,y_j=b). To do the appropriate summations
-          #and divisions we need some index vectors to keep track of the index i, j,
-          #a, and b, as well as the pair index. These index vectors should be 
-          #computed once and stored in lavcache. About where in the lavaan code
-          #we will add the computations and how they will be done please see the 
-          #file "new objects in lavcache for DR-PL.r"
+             idx.pairs <- lavcache$idx.pairs
+             idx.cat.y2.split <- lavcache$idx.cat.y2.split
+             idx.cat.y1.split <- lavcache$idx.cat.y1.split
+             idx.Y1      <- lavcache$idx.Y1
+             idx.Gy2     <- lavcache$idx.Gy2
+             idx.cat.Y1  <- lavcache$idx.cat.Y1
+             idx.cat.Gy2 <- lavcache$idx.cat.Gy2
+             id.uniPrGivObs <- lavcache$id.uniPrGivObs
+             #the latter keeps track which variable each column of the matrix
+             #univariateProbGivObs refers to
 
-          idx.pairs <- lavcache$idx.pairs
-          idx.cat.y2.split <- lavcache$idx.cat.y2.split
-          idx.cat.y1.split <- lavcache$idx.cat.y1.split
-          idx.Y1      <- lavcache$idx.Y1
-          idx.Gy2     <- lavcache$idx.Gy2
-          idx.cat.Y1  <- lavcache$idx.cat.Y1
-          idx.cat.Gy2 <- lavcache$idx.cat.Gy2
-          id.uniPrGivObs <- lavcache$id.uniPrGivObs
-          #the latter keeps track which variable each column of the matrix
-          #univariateProbGivObs refers to
+             #For the function compute_uniCondProb_based_on_bivProb see the .r file
+             #with the same name.
+             ModProbY1Gy2 <- compute_uniCondProb_based_on_bivProb(
+                                     bivProb = pairwisePI_orig,
+                                        nvar = nvar,
+                                   idx.pairs = idx.pairs,
+                                      idx.Y1 = idx.Y1,
+                                     idx.Gy2 = idx.Gy2,
+                            idx.cat.y1.split = idx.cat.y1.split,
+                            idx.cat.y2.split = idx.cat.y2.split)
 
-          #For the function compute_uniCondProb_based_on_bivProb see the .r file
-          #with the same name.
-          compute_uniCondProb_based_on_bivProb <- function() {
-              stop("not ready yet!")
-          }
-          ModProbY1Gy2 <- compute_uniCondProb_based_on_bivProb(
-                                  bivProb = pairwisePI_orig,
-                                     nvar = nvar,
-                                idx.pairs = idx.pairs,
-                                   idx.Y1 = idx.Y1,
-                                  idx.Gy2 = idx.Gy2,
-                         idx.cat.y1.split = idx.cat.y1.split,
-                         idx.cat.y2.split = idx.cat.y2.split)
+             log_ModProbY1Gy2 <- log(ModProbY1Gy2)
 
-          log_ModProbY1Gy2 <- log(ModProbY1Gy2)
+             #Let univariateProbGivObs be the matrix of the conditional univariate 
+             # probabilities Pr(y_i=a|y^o) that has been computed in advance and are
+             #fed to the DR-PL function. The rows represent different individuals, 
+             #i.e. nrow=nobs, and the columns different probabilities. The columns
+             # are listed as follows: a runs faster than i. 
+   
+             #Note that the number of columns of univariateProbGivObs is not the 
+             #same with the length(log_ModProbY1Gy2), actually 
+             #ncol(univariateProbGivObs) < length(log_ModProbY1Gy2).
+             #For this we use the following commands in order to multiply correctly.
 
-          #Let univariateProbGivObs be the matrix of the conditional univariate 
-          # probabilities Pr(y_i=a|y^o) that has been computed in advance and are
-          #fed to the DR-PL function. The rows represent different individuals, 
-          #i.e. nrow=nobs, and the columns different probabilities. The columns
-          # are listed as follows: a runs faster than i. 
+             #Compute for each case the product  Pr(y_i=a|y^o) * log[ p(y_i=a|y_j=b) ]
+             #i.e. univariateProbGivObs * log_ModProbY1Gy2
+             univariateProbGivObs <- lavcache$univariateProbGivObs
+             nobs <-  nrow(X)
+             uniweights.casewise <- lavcache$uniweights.casewise
+             id.cases.with.missing <- which(uniweights.casewise > 0)
+             no.cases.with.missing <- length(id.cases.with.missing)
+             no.obs.casewise <- nvar - uniweights.casewise
+             idx.missing.var <- apply(X, 1, function(x) { 
+                 which(is.na(x)) 
+             })
+             idx.observed.var <- lapply(idx.missing.var, function(x) {
+                 c(1:nvar)[-x] 
+             })
+             idx.cat.observed.var <- sapply(1:nobs, function(i) {
+                 X[i, idx.observed.var[[i]]]  
+             })
+             ElnyiGivyjbCasewise <- sapply(1:no.cases.with.missing,function(i) {
+                 tmp.id.case <- id.cases.with.missing[i]
+                 tmp.no.mis <- uniweights.casewise[tmp.id.case]
+                 tmp.idx.mis <- idx.missing.var[[tmp.id.case]]
+                 tmp.idx.obs <- idx.observed.var[[tmp.id.case]]
+                 tmp.no.obs <- no.obs.casewise[tmp.id.case]
+                 tmp.idx.cat.obs <- idx.cat.observed.var[[tmp.id.case]]
+                 tmp.uniProbGivObs.i <- univariateProbGivObs[tmp.id.case, ]
+                 sapply(1:tmp.no.mis, function(k) {
+                     tmp.idx.mis.var <- tmp.idx.mis[k]
+                     tmp.uniProbGivObs.ik <-
+                         tmp.uniProbGivObs.i[id.uniPrGivObs == tmp.idx.mis.var]
+                     tmp.log_ModProbY1Gy2 <- sapply(1:tmp.no.obs, function(z) {
+                         log_ModProbY1Gy2[idx.Y1 == tmp.idx.mis.var &
+                                         idx.Gy2 == tmp.idx.obs[z] &
+                                     idx.cat.Gy2 == tmp.idx.cat.obs[z]]})
+                     sum(tmp.log_ModProbY1Gy2 * tmp.uniProbGivObs.ik)
+                 })
+             })
+             ElnyiGivyjb <- sum(unlist(ElnyiGivyjbCasewise))
+             logl <- logl + ElnyiGivyjb
+             # for the Fmin function
+             Fmin <- Fmin - ElnyiGivyjb
 
-          #Note that the number of columns of univariateProbGivObs is not the 
-          #same with the length(log_ModProbY1Gy2), actually 
-          #ncol(univariateProbGivObs) < length(log_ModProbY1Gy2).
-          #For this we use the following commands in order to multiply correctly.
-
-          #Compute for each case the product  Pr(y_i=a|y^o) * log[ p(y_i=a|y_j=b) ]
-          #i.e. univariateProbGivObs * log_ModProbY1Gy2
-          univariateProbGivObs <- lavcache$univariateProbGivObs
-          nobs <-  nrow(X)
-          Cond_prod <- matrix(NA, nrow=nobs, ncol=length(ModProbY1Gy2) )
-
-          for(i in 1:nvar) {
-             tmp.mat  <- univariateProbGivObs[ , id.uniPrGivObs==i]
-             tmp.vec  <- log_ModProbY1Gy2[ idx.Y1==i]
-             #note that tmp.vec is longer than ncol(tmp.mat). That's why
-             #we use apply below where the function is done row-wise
-             #x recycles as we wish to meet the length of tmp.vec
-             Cond_prod[ , idx.Y1==i] <-
-                           t( apply(tmp.mat, 1, function(x){tmp.vec*x} ) )
-          }
-
-          #Since the cells of univariateProbGivObs are zero for the variables 
-          #that are observed (hence not contributing to the summand)
-          #there is no need to construct an index vector for summing appropriately 
-          #within each individual.
-          ElnyiGivyjbCasewise <- apply(Cond_prod, 1, sum)
-          ElnyiGivyjb <- sum(ElnyiGivyjbCasewise)
-          logl <- logl + ElnyiGivyjb
-          logl <- logl + ElnyiGivyjb
-
-          # for the Fmin function
-          Fmin <- lavcache$FitFunctionConst -logl
-
-        } #end of if (missing =="doubly.robust.PML") 
+        } #end of if (missing =="doubly.robust") 
 
     } else {
         # # order! first i, then j, lav_matrix_vec(table)!

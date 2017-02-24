@@ -4,14 +4,75 @@
 # 2) derivatives with respect to mu, Sigma, vech(Sigma)
 # 3) casewise scores with respect to mu, vech(Sigma), mu + vech(Sigma)
 # 4) hessian mu + vech(Sigma)
-# 5) information h0 (restricted Sigma/mu)
-#    5a: (unit)    expected information of mu + vech(Sigma) h0
-#    5b: (unit)    observed information h0
-#    5c: (unit) first.order information h0
-
+# 5) information h0 mu + vech(Sigma)
+#    5a: (unit)    expected information
+#    5b: (unit)    observed information
+#    5c: (unit) first.order information
+# 6) inverted information h0 mu + vech(Sigma)
+#    6a: (unit) inverted expected information
+#    6b: /
+#    6c: /
+# 7) ACOV h0 mu + vech(Sigma)
+#    7a: 1/N * inverted expected    information
+#    7b: 1/N * inverted observed    information
+#    7c: 1/N * inverted first-order information
+#    7d: sandwich acov
 
 # YR 07 Feb 2016: first version
 # YR 24 Mar 2016: added firstorder information, hessian logl
+# YR 19 Jan 2017: added lav_mvnorm_inverted_information_expected
+
+# 0. densities 
+lav_mvnorm_dmvnorm <- function(Y             = NULL,
+                               Mu            = NULL,
+                               Sigma         = NULL,
+                               Sigma.inv     = NULL,
+                               Sinv.method   = "eigen",
+                               log           = TRUE) {
+
+    if(is.matrix(Y)) {
+        if(is.null(Mu) && is.null(Sigma) && is.null(Sigma.inv)) {
+            out <- lav_mvnorm_loglik_data_z(Y = Y, casewise = TRUE)
+        } else {
+            out <- lav_mvnorm_loglik_data(Y = Y, Mu = Mu, Sigma = Sigma,
+                                          casewise = TRUE,
+                                          Sinv.method = Sinv.method)
+        }
+    } else {
+        # just one
+        P <- length(Y); LOG.2PI <- log(2 * pi)
+
+        if(is.null(Mu) && is.null(Sigma) && is.null(Sigma.inv)) {
+            # mahalanobis distance
+            DIST <- sum(Y * Y)
+            out <- -(P * LOG.2PI + DIST)/2
+        } else {
+            if(is.null(Sigma.inv)) {
+                Sigma.inv <- lav_matrix_symmetric_inverse(S = Sigma, 
+                    logdet = TRUE, Sinv.method = Sinv.method)
+                logdet <- attr(Sigma.inv, "logdet")
+            } else {
+                logdet <- attr(Sigma.inv, "logdet")
+                if(is.null(logdet)) {
+                    # compute - ln|Sigma.inv|
+                    ev <- eigen(Sigma.inv, symmetric = TRUE, only.values = TRUE)
+                    logdet <- -1 * sum(log(ev$values))
+                }
+            }
+
+            # mahalanobis distance
+            Yc <- Y - Mu
+            DIST <- sum(Yc %*% Sigma.inv * Yc)
+            out <- -(P * LOG.2PI + logdet + DIST)/2
+        }
+    }
+
+    if(!log) {
+        out <- exp(out)
+    }
+
+    out
+}
 
 # 1. likelihood
 
@@ -98,6 +159,29 @@ lav_mvnorm_loglik_samplestats <- function(sample.mean  = NULL,
 
     loglik
 }
+
+# 1c special case: Mu = 0, Sigma = I
+lav_mvnorm_loglik_data_z <- function(Y             = NULL,
+                                     casewise      = FALSE) {
+    P <- NCOL(Y); N <- NROW(Y); LOG.2PI <- log(2 * pi)
+   
+    if(casewise) {
+        DIST <- rowSums(Y * Y)
+        loglik <- -(P * LOG.2PI + DIST)/2
+    } else {
+        sample.mean <- colMeans(Y)
+        sample.cov <- 1/N*crossprod(Y) - tcrossprod(sample.mean)
+
+        DIST1 <- sum(diag(sample.cov))
+        DIST2 <- sum(sample.mean * sample.mean)
+
+        loglik <- -N/2 * (P * LOG.2PI + DIST1 + DIST2)
+    }
+
+    loglik
+}
+
+
 
 
 
@@ -353,7 +437,7 @@ lav_mvnorm_information_observed_data <- function(Y           = NULL,
 
     # sample statistics
     sample.mean <- colMeans(Y)
-    sample.cov <- cov(Y) * (N-1)/N
+    sample.cov <- 1/N*crossprod(Y) - tcrossprod(sample.mean)
 
     lav_mvnorm_information_observed_samplestats(sample.mean = sample.mean,
         sample.cov = sample.cov, Mu = Mu, Sigma = Sigma,
@@ -411,4 +495,44 @@ lav_mvnorm_information_firstorder <- function(Y             = NULL,
     crossprod(SC)/N
 }
 
+
+# 6: inverted information h0
+
+# 6a: inverted unit expected information h0 Mu and vech(Sigma)
+lav_mvnorm_inverted_information_expected <- function(Y     = NULL, # unused!
+                                                     Mu    = NULL, # unused!
+                                                     Sigma         = NULL,
+                                                     meanstructure = TRUE) {
+
+    I22 <- 2 * lav_matrix_duplication_ginv_pre_post(Sigma %x% Sigma)
+
+    if(meanstructure) {
+        I11 <- Sigma
+        out <- lav_matrix_bdiag(I11, I22)
+    } else {
+        out <- I22
+    }
+
+    out
+}
+
+# 6b:  inverted unit observed information h0
+
+# one could use the inverse of a partitioned matrix, but that does not
+# seem to help much... unless we can find an expression for solve(I22)
+
+# 6c: inverted unit first-order information h0
+# /
+
+
+# 7) ACOV h0 mu + vech(Sigma)
+# not implemented, as too trivial
+
+#    7a: 1/N * inverted expected    information
+
+#    7b: 1/N * inverted observed    information
+
+#    7c: 1/N * inverted first-order information
+
+#    7d: sandwich acov
 

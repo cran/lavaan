@@ -5,7 +5,6 @@ lav_model_objective <- function(lavmodel       = NULL,
                                 lavsamplestats = NULL,
                                 lavdata        = NULL,
                                 lavcache       = NULL,
-                                estimator      = "ML",
                                 verbose        = FALSE,
                                 forcePD        = TRUE,
                                 debug          = FALSE) {
@@ -14,13 +13,14 @@ lav_model_objective <- function(lavmodel       = NULL,
     if(is.null(GLIST)) GLIST <- lavmodel@GLIST
 
     # shortcut for data.type == "none" or estimator == "none"
-    if(estimator == "none" || length(lavsamplestats@cov) == 0L) {
+    if(lavmodel@estimator == "none" || length(lavsamplestats@cov) == 0L) {
         fx <- as.numeric(NA)
         attr(fx, "fx.group") <- rep(as.numeric(NA), lavsamplestats@ngroups)
         return(fx)
     }
 
     meanstructure <- lavmodel@meanstructure
+    estimator     <- lavmodel@estimator
     categorical   <- lavmodel@categorical
     group.w.free  <- lavmodel@group.w.free
     fixed.x       <- lavmodel@fixed.x
@@ -94,6 +94,7 @@ lav_model_objective <- function(lavmodel       = NULL,
     fx <- 0.0
     fx.group <- numeric( lavsamplestats@ngroups )
     logl.group <- rep(as.numeric(NA), lavsamplestats@ngroups)
+
     for(g in 1:lavsamplestats@ngroups) {
 
         # incomplete data and fiml?
@@ -103,8 +104,8 @@ lav_model_objective <- function(lavmodel       = NULL,
                 if(!attr(Sigma.hat[[g]], "po")) return(Inf)
                 group.fx <- estimator.FIML(Sigma.hat=Sigma.hat[[g]],
                                            Mu.hat=Mu.hat[[g]],
-                                           M=lavsamplestats@missing[[g]],
-                                           h1=lavsamplestats@missing.h1[[g]]$h1)
+                                           Yp=lavsamplestats@missing[[g]],
+                                           h1=lavsamplestats@missing.h1[[g]]$h1,                                           N=lavsamplestats@nobs[[g]])
             } else {
                 stop("this estimator: `", estimator, 
                      "' can not be used with incomplete data and the missing=\"ml\" option")
@@ -112,7 +113,9 @@ lav_model_objective <- function(lavmodel       = NULL,
         } else if(estimator == "ML" || estimator == "Bayes") {
         # complete data
             # ML and friends
-            if(conditional.x) {
+            if(lavdata@nlevels > 1L) {
+                group.fx <- 0
+            } else if(conditional.x) {
                 group.fx <- estimator.ML_res(
                     Sigma.hat        = Sigma.hat[[g]],
                     Mu.hat           = Mu.hat[[g]],
@@ -216,7 +219,9 @@ lav_model_objective <- function(lavmodel       = NULL,
         }
 
         if(estimator == "ML" || estimator == "REML" || estimator == "NTRLS") {
-            group.fx <- 0.5 * group.fx ## FIXME
+            if(lavdata@nlevels == 1L) {
+                group.fx <- 0.5 * group.fx ## FIXME
+            }
         } else if(estimator == "PML" || estimator == "FML" || 
                   estimator == "MML") {
             # do nothing
@@ -288,4 +293,5 @@ lav_model_objective <- function(lavmodel       = NULL,
 
     fx
 }
+
 

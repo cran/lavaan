@@ -19,8 +19,7 @@ ctr_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
         fx <- lav_model_objective(lavmodel       = lavmodel,
                                   lavsamplestats = lavsamplestats,
                                   lavdata        = lavdata,
-                                  lavcache       = lavcache,
-                                  estimator      = "PML")
+                                  lavcache       = lavcache)
         H0.fx <- as.numeric(fx)
         H0.fx.group <- attr(fx, "fx.group")
     } else {
@@ -45,8 +44,7 @@ ctr_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
     fx <- lav_model_objective(lavmodel = fittedSat@Model,
                               lavsamplestats = fittedSat@SampleStats,
                               lavdata = fittedSat@Data,
-                              lavcache = fittedSat@Cache,
-                              estimator = "PML")
+                              lavcache = fittedSat@Cache)
     SAT.fx <- as.numeric(fx)
     SAT.fx.group <- attr(fx, "fx.group")
 
@@ -62,14 +60,13 @@ ctr_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
                                   sample.th      = computeTH(lavmodel),
                                   sample.th.idx  = lavsamplestats@th.idx)
 
-    #Options$se <- lavoptions$se
+    Options2 <- Options
+    Options2$optim.method <- "none"
+    Options2$optim.force.converged <- TRUE
     fittedSat2 <- lavaan(ModelSat2, 
-                        control=list(optim.method          = "none",
-                                     optim.force.converged = TRUE) ,
-                        #slotOptions = lavoptions,
-                        slotOptions = Options,
-                        slotSampleStats = lavsamplestats,
-                        slotData = lavdata, slotCache = lavcache)
+                         slotOptions = Options2,
+                         slotSampleStats = lavsamplestats,
+                         slotData = lavdata, slotCache = lavcache)
 
     # the code below was contributed by Myrsini Katsikatsou (Jan 2015)
 

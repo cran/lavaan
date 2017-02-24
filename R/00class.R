@@ -9,7 +9,10 @@ setClass("lavData",
         data.type="character",     # "full", "moment" or "none"
         ngroups="integer",         # number of groups
         group="character",         # group variable
+        nlevels="integer",         # number of levels
+        cluster="character",       # cluster variable(s)
         group.label="character",   # group labels
+        level.label="character",   # level labels
         std.ov="logical",          # standardize observed variables?
         nobs="list",               # effective number of observations
         norig="list",              # original number of observations
@@ -17,12 +20,14 @@ setClass("lavData",
         ov.names.x="list",         # exo variable names (per group)
         #ov.types="list",           # variable types (per group)
         #ov.idx="list",             # column indices (all observed variables)
+        ordered="character",       # ordered variables
         ov="list",                 # variable table
         case.idx="list",           # case indices per group
         missing="character",       # "listwise" or not?
         Mp="list",                 # if not complete, missing patterns
                                    # we need this here, to get nobs right!
         Rp="list",                 # response patterns (categorical only)
+        Lp="list",                 # level patterns
         eXo="list",                # local copy exo only
         X="list"                   # local copy
     )
@@ -31,7 +36,6 @@ setClass("lavData",
 
 setClass("lavSampleStats",         # sample moments
     representation(
-        CAT="list",
         var="list",                # observed variances (per group)
         cov="list",                # observed var/cov matrix (per group)
         mean="list",               # observed mean vector (per group)
@@ -69,11 +73,15 @@ setClass("lavSampleStats",         # sample moments
 
         missing.flag="logical",    # missing patterns?
         missing="list",            # missingness information
-        missing.h1="list"          # h1 model
+        missing.h1="list",         # h1 model
+
+        YLp = "list",              # cluster/level information
+
+        zero.cell.tables="list"    # bivariate tables with empty cells
     )
 )
 
-setClass("Model",          # MATRIX representation of the sem model
+setClass("lavModel",          # MATRIX representation of the sem model
     representation(
         GLIST="list",              # list of all model matrices (for all groups)
         dimNames="list",           # dim names for the model matrices
@@ -85,9 +93,9 @@ setClass("Model",          # MATRIX representation of the sem model
         categorical="logical",
         group.w.free="logical",
         link="character",
-        control="list",
 
-        ngroups="integer",
+        nblocks="integer",
+        ngroups="integer",   # only for rsem!! (which uses rsem:::computeDelta)
         nmat="integer",
         nvar="integer",
         num.idx="list",
@@ -135,8 +143,9 @@ setClass("Model",          # MATRIX representation of the sem model
         ov.x.dummy.ov.idx="list",
         ov.x.dummy.lv.idx="list",
         ov.y.dummy.ov.idx="list",
-        ov.y.dummy.lv.idx="list"
+        ov.y.dummy.lv.idx="list",
 
+        estimator="character"
     )
 )
 
@@ -173,7 +182,7 @@ setClass("lavaan",
         pta         = "list",            # parameter table attributes
         Data        = "lavData",         # full data
         SampleStats = "lavSampleStats",  # sample statistics
-        Model       = "Model",           # internal matrix representation
+        Model       = "lavModel",        # internal matrix representation
         Cache       = "list",            # housekeeping stuff
         Fit         = "Fit",             # fitted results 
         boot        = "list",            # bootstrap results
@@ -192,7 +201,7 @@ setClass("lavaanList",
         ParTable        = "list",
         pta             = "list",
         Data            = "lavData",  # from first dataset (ngroups!)
-        Model           = "Model",    # based on first dataset
+        Model           = "lavModel", # based on first dataset
         meta            = "list",
 
         timingList      = "list",
