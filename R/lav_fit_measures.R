@@ -83,7 +83,7 @@ lav_fit_measures <- function(object, fit.measures="all",
     #
     #}
 
-    if(test %in% c("satorra.bentler", "yuan.bentler",
+    if(test %in% c("satorra.bentler", "yuan.bentler", "yuan.bentler.mplus",
                    "mean.var.adjusted", "scaled.shifted")) {
         scaled <- TRUE
     } else {
@@ -154,19 +154,24 @@ lav_fit_measures <- function(object, fit.measures="all",
 
     # srmr
     if(categorical) {
-        fit.srmr <- c("srmr", "wrmr")
+        fit.srmr <- c("srmr")
         fit.srmr2 <- c("rmr", "rmr_nomean",
                        "srmr", # per default equal to srmr_bentler_nomean
                        "srmr_bentler", "srmr_bentler_nomean",
                        "srmr_bollen", "srmr_bollen_nomean",
                        "srmr_mplus", "srmr_mplus_nomean")
     } else {
-        fit.srmr <- c("srmr")
-        fit.srmr2 <- c("rmr", "rmr_nomean",
-                       "srmr", # the default
-                       "srmr_bentler", "srmr_bentler_nomean",
-                       "srmr_bollen", "srmr_bollen_nomean",
-                       "srmr_mplus", "srmr_mplus_nomean")
+        if(object@Data@nlevels > 1L) {
+            fit.srmr  <- c("srmr","srmr_within", "srmr_between")
+            fit.srmr2 <- c("srmr","srmr_within", "srmr_between")
+        } else {
+            fit.srmr <- c("srmr")
+            fit.srmr2 <- c("rmr", "rmr_nomean",
+                           "srmr", # the default
+                           "srmr_bentler", "srmr_bentler_nomean",
+                           "srmr_bollen", "srmr_bollen_nomean",
+                           "srmr_mplus", "srmr_mplus_nomean")
+        }
     }
 
     # table
@@ -181,9 +186,13 @@ lav_fit_measures <- function(object, fit.measures="all",
     #}
 
     # various
-    fit.other <- c("cn_05","cn_01","gfi","agfi","pgfi","mfi")
-    if(!categorical && G == 1) {
-        fit.other <- c(fit.other, "ecvi")
+    if(object@Data@nlevels > 1L) {
+        fit.other <- ""
+    } else {
+        fit.other <- c("cn_05","cn_01","gfi","agfi","pgfi","mfi")
+        if(!categorical && G == 1) {
+            fit.other <- c(fit.other, "ecvi")
+        }
     }
 
 
@@ -264,10 +273,10 @@ lav_fit_measures <- function(object, fit.measures="all",
         # this is not strictly needed for ML, but it is for
         # GLS and WLS
         # and MLM and MLR to get the scaling factor(s)!
-        if (!is.null(baseline.model) && is(baseline.model, "lavaan")) {
+        if (!is.null(baseline.model) && inherits(baseline.model, "lavaan")) {
             fit.indep <- baseline.model
-        } else if (!is.null(object@external$baseline.model) && 
-                   is(object@external$baseline.model, "lavaan")) {
+        } else if (!is.null(object@external$baseline.model) &&
+                   inherits(object@external$baseline.model, "lavaan")) {
             fit.indep <- object@external$baseline.model
             ## check baseline converged
             if (!fit.indep@optim$converged) {
@@ -278,7 +287,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 sameSE <- ( object@Options$se == fit.indep@Options$se )
                 sameEstimator <- ( object@Options$estimator == fit.indep@Options$estimator )
                 if (!all(sameTest, sameSE, sameEstimator)) {
-                    fit.indep <- try(update(fit.indep, 
+                    fit.indep <- try(update(fit.indep,
                                             test = object@Options$test,
                                             se   = object@Options$se,
                                             estimator = object@Options$estimator),
@@ -295,6 +304,13 @@ lav_fit_measures <- function(object, fit.measures="all",
                 X2.null.scaled <- df.null.scaled <- as.numeric(NA)
             }
         } else {
+            if(fit.indep@Data@nlevels > 1L) {
+                fit.indep@test[[1]]$stat <- ( -2 * (fit.indep@loglik$loglik -
+                                                    object@loglik$loglik) )
+                fit.indep@test[[1]]$pvalue <-
+                   1 - pchisq(fit.indep@test[[1]]$stat, fit.indep@test[[1]]$df)
+            } 
+
             X2.null <- fit.indep@test[[1]]$stat
             df.null <- fit.indep@test[[1]]$df
             if(scaled) {
@@ -399,7 +415,6 @@ lav_fit_measures <- function(object, fit.measures="all",
             if("rni.scaled" %in% fit.measures) {
                 t1 <- X2.scaled - df.scaled
                 t2 <- X2.null.scaled - df.null.scaled
-                t2 <- X2.null - df.null
                 if(is.na(t1) || is.na(t2)) {
                     RNI <- NA
                 } else if(t2 == 0) {
@@ -463,7 +478,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 #   therefore, t1 can go negative, and TLI can be > 1
                 t1 <- (X2 - df)*df.null
                 t2 <- (X2.null - df.null)*df
-                if(df > 0) {
+                if(df > 0 && t2 != 0) {
                     indices["tli"] <- indices["nnfi"] <- 1 - t1/t2
                 } else {
                     indices["tli"] <- indices["nnfi"] <- 1
@@ -518,7 +533,9 @@ lav_fit_measures <- function(object, fit.measures="all",
 
             # RFI - relative fit index (Bollen, 1986; Joreskog & Sorbom 1993)
             if("rfi" %in% fit.measures) {
-                if(df > 0) {
+                if(df > df.null) {
+                    RLI <- as.numeric(NA)
+                } else if(df > 0 && df.null > 0) {
                     t1 <- X2.null/df.null - X2/df
                     t2 <- X2.null/df.null
                     if(t1 < 0 || t2 < 0) {
@@ -532,7 +549,9 @@ lav_fit_measures <- function(object, fit.measures="all",
                 indices["rfi"] <- RLI
             }
             if("rfi.scaled" %in% fit.measures) {
-                if(df > 0) {
+                if(df > df.null) {
+                    RLI <- as.numeric(NA)
+                } else if(df > 0) {
                     t1 <- X2.null.scaled/df.null.scaled - X2.scaled/df.scaled
                     t2 <- X2.null.scaled/df.null.scaled
                     if(is.na(t1) || is.na(t2)) {
@@ -550,7 +569,9 @@ lav_fit_measures <- function(object, fit.measures="all",
 
             # NFI - normed fit index (Bentler & Bonett, 1980)
             if("nfi" %in% fit.measures) {
-                if(df > 0) {
+                if(df > df.null) {
+                    NFI <- as.numeric(NA)
+                } else if(df > 0) {
                     t1 <- X2.null - X2
                     t2 <- X2.null
                     NFI <- t1/t2
@@ -560,23 +581,35 @@ lav_fit_measures <- function(object, fit.measures="all",
                 indices["nfi"] <- NFI
             }
             if("nfi.scaled" %in% fit.measures) {
-                t1 <- X2.null.scaled - X2.scaled
-                t2 <- X2.null.scaled
-                NFI <- t1/t2
+                if(df > df.null) {
+                    NFI <- as.numeric(NA)
+                } else {
+                    t1 <- X2.null.scaled - X2.scaled
+                    t2 <- X2.null.scaled
+                    NFI <- t1/t2
+                }
                 indices["nfi.scaled"] <- NFI
             }
 
             # PNFI - Parsimony normed fit index (James, Mulaik & Brett, 1982)
             if("pnfi" %in% fit.measures) {
-                t1 <- X2.null - X2
-                t2 <- X2.null
-                PNFI <- (df/df.null) * t1/t2
+                if(df.null > 0) {
+                    t1 <- X2.null - X2
+                    t2 <- X2.null
+                    PNFI <- (df/df.null) * t1/t2
+                } else {
+                    PNFI <- as.numeric(NA)
+                }
                 indices["pnfi"] <- PNFI
             }
             if("pnfi.scaled" %in% fit.measures) {
-                t1 <- X2.null.scaled - X2.scaled
-                t2 <- X2.null.scaled
-                PNFI <- (df/df.null) * t1/t2
+                if(df.null > 0) {
+                    t1 <- X2.null.scaled - X2.scaled
+                    t2 <- X2.null.scaled
+                    PNFI <- (df/df.null) * t1/t2
+                } else {
+                    PNFI <- as.numeric(NA)
+                }
                 indices["pnfi.scaled"] <- PNFI
             }
 
@@ -614,64 +647,17 @@ lav_fit_measures <- function(object, fit.measures="all",
 
         if(estimator == "ML" || estimator == "MML") {
 
-            # logl H1 -- unrestricted (aka saturated) model
-            logl.H1.group <- numeric(G)
-
-            # check if everything is numeric, OR if we have exogenous
-            # factor with 2 levels only
-            logl.ok <- FALSE
-            if(all(object@Data@ov$type == "numeric")) {
-                logl.ok <- TRUE
+            # do we have a @h1 slot?
+            if(.hasSlot(object, "h1") && length(object@h1) > 0L) {
+                logl.H1.group <- object@h1$loglik.group
+                logl.H1       <- object@h1$loglik
             } else {
-                not.idx <- which(object@Data@ov$type != "numeric")
-                for(i in not.idx) {
-                    if(object@Data@ov$type[i] == "factor" &&
-                       object@Data@ov$exo[i] == 1L &&
-                       object@Data@ov$nlev[i] == 2L) {
-                        logl.ok <- TRUE
-                    } else {
-                        logl.ok <- FALSE
-                        break
-                    }
-                }
-            }
+                out <- lav_h1_logl(lavdata = object@Data,
+                                   lavsamplestats = object@SampleStats,
+                                   lavoptions = object@Options)
 
-            if(logl.ok) {
-                for(g in 1:G) {
-                    if(!object@SampleStats@missing.flag) {
-                        if(object@Model@conditional.x) {
-                            nvar <- ncol(object@SampleStats@res.cov[[g]])
-                            Ng <- object@SampleStats@nobs[[g]]
-                            c <- Ng*nvar/2 * log(2 * pi)
-                            logl.H1.group[g] <- ( -c -(Ng/2) *
-                                        object@SampleStats@res.cov.log.det[[g]]
-                                              - (Ng/2)*nvar )
-                        } else {
-                            nvar <- ncol(object@SampleStats@cov[[g]])
-                            Ng <- object@SampleStats@nobs[[g]]
-                            c <- Ng*nvar/2 * log(2 * pi)
-                            logl.H1.group[g] <- ( -c -(Ng/2) *
-                                            object@SampleStats@cov.log.det[[g]]
-                                              - (Ng/2)*nvar )
-                        }
-                    } else { # missing patterns case
-                        pat <- object@Data@Mp[[g]]$pat
-                        Ng <- object@Data@nobs[[g]]
-                        ni <- as.numeric(apply(pat, 1, sum) %*%
-                                         object@Data@Mp[[g]]$freq)
-                        fx.full <- object@SampleStats@missing.h1[[g]]$h1
-                        logl.H1.group[g] <- - (ni/2 * log(2 * pi)) -
-                                                  (Ng/2 * fx.full)
-                    }
-                }
-                if(G > 1) {
-                    logl.H1 <- sum(logl.H1.group)
-                } else {
-                    logl.H1 <- logl.H1.group[1]
-                }
-            } else {
-                logl.H1.group <- as.numeric(NA)
-                logl.H1 <- as.numeric(NA)
+                logl.H1.group <- out$loglik.group
+                logl.H1       <- out$loglik
             }
 
             if("unrestricted.logl" %in% fit.measures) {
@@ -679,22 +665,23 @@ lav_fit_measures <- function(object, fit.measures="all",
             }
 
             # logl H0
-            logl.H0.group <- numeric(G)
-            if(logl.ok) {
-                for(g in 1:G) {
-                    Ng <- object@SampleStats@nobs[[g]]
-                    logl.H0.group[g] <- -Ng * (fx.group[g] -
-                                               logl.H1.group[g]/Ng)
-                }
-                if(G > 1) {
-                    logl.H0 <- sum(logl.H0.group)
-                } else {
-                    logl.H0 <- logl.H0.group[1]
-                }
-            } else if(object@Options$estimator == "MML") {
-                logl.H0 <- -1 * fx
+            if(.hasSlot(object, "loglik")) {
+                logl.H0.group <- object@loglik$loglik.group
+                logl.H0       <- object@loglik$loglik
+                AIC           <- object@loglik$AIC
+                BIC           <- object@loglik$BIC
+                BIC2          <- object@loglik$BIC2
             } else {
-                logl.H0 <- as.numeric(NA)
+                out <- lav_model_loglik(lavdata        = object@Data,
+                                        lavsamplestats = object@SampleStats,
+                                        lavimplied     = object@implied,
+                                        lavmodel       = object@Model,
+                                        lavoptions     = object@Options)
+                logl.H0.group <- out$loglik.group
+                logl.H0       <- out$loglik
+                AIC           <- out$AIC
+                BIC           <- out$BIC
+                BIC2          <- out$BIC2   
             }
 
             if("logl" %in% fit.measures) {
@@ -702,7 +689,6 @@ lav_fit_measures <- function(object, fit.measures="all",
             }
 
             # AIC
-            AIC <-  -2*logl.H0 + 2*npar
             if("aic" %in% fit.measures) {
                 indices["aic"] <- AIC
             }
@@ -710,15 +696,9 @@ lav_fit_measures <- function(object, fit.measures="all",
             # BIC
             if("bic" %in% fit.measures ||
                "bic2" %in% fit.measures) {
-                BIC <- -2*logl.H0 + npar*log(N)
                 indices["bic"] <- BIC
-
-                # add sample-size adjusted bic
-                N.star <- (N + 2) / 24
-                BIC2 <- -2*logl.H0 + npar*log(N.star)
                 indices["bic2"] <- BIC2
             }
-
 
             # scaling factor for MLR
             if(object@Options$test == "yuan.bentler") {
@@ -763,27 +743,29 @@ lav_fit_measures <- function(object, fit.measures="all",
                 # scaling factor
                 c.hat <- TEST[[2]]$scaling.factor
             }
+
+            RMSEA <- sqrt( max( c((X2/N)/df - 1/N, 0) ) )
+            if(scaled && test != "scaled.shifted") {
+                RMSEA.scaled <-
+                     sqrt( max( c((X2/N)/d - 1/N, 0) ) )
+                RMSEA.robust <-
+                     sqrt( max( c((X2/N)/df - c.hat/N, 0) ) )
+            } else if(test == "scaled.shifted") {
+                RMSEA.scaled <-
+                     sqrt( max( c((X2.scaled/N)/df - 1/N, 0)))
+                RMSEA.robust <-
+                     sqrt( max( c((X2/N)/df - c.hat/N, 0) ) )
+            }
+
+            #  multiple group correction
             if(object@Options$mimic %in% c("Mplus", "lavaan")) {
-                RMSEA <- sqrt( max( c((X2/N)/df - 1/N, 0) ) ) * sqrt(G)
-                if(scaled && test != "scaled.shifted") {
-                    RMSEA.scaled <-
-                         sqrt( max( c((X2/N)/d - 1/N, 0) ) ) * sqrt(G)
-                    RMSEA.robust <-
-                         sqrt( max( c((X2/N)/df - c.hat/N, 0) ) ) * sqrt(G)
-                } else if(test == "scaled.shifted") {
-                    RMSEA.scaled <-
-                         sqrt( max( c((X2.scaled/N)/df - 1/N, 0))) * sqrt(G)
-                    RMSEA.robust <-
-                         sqrt( max( c((X2/N)/df - c.hat/N, 0) ) ) * sqrt(G)
-                }
-            } else {
-                # no multiple group correction
-                RMSEA <- sqrt( max( c((X2/N)/df - 1/N, 0) ) )
+                RMSEA <- RMSEA * sqrt(G)
                 if(scaled) {
-                    RMSEA.scaled <- sqrt( max( c((X2/N)/d - 1/N, 0) ) )
-                    RMSEA.robust <- sqrt( max( c((X2/N)/df - c.hat/N, 0) ) )
+                    RMSEA.scaled <- RMSEA.scaled * sqrt(G)
+                    RMSEA.robust <- RMSEA.robust * sqrt(G)
                 }
             }
+
         } else {
             RMSEA <- RMSEA.scaled <- RMSEA.robust <- 0
         }
@@ -1019,7 +1001,7 @@ lav_fit_measures <- function(object, fit.measures="all",
         }
     }
 
-    if(any(c("rmr","srmr") %in% fit.measures)) {
+    if(any(c("rmr","srmr") %in% fit.measures) &&  object@Data@nlevels == 1L) {
         # RMR and SRMR
         rmr.group <- numeric(G)
         rmr_nomean.group <- numeric(G)
@@ -1167,6 +1149,72 @@ lav_fit_measures <- function(object, fit.measures="all",
         indices["rmr_nomean"]          <- RMR_NOMEAN
     }
 
+    # multilevel version
+    if(any(c("srmr_within", "srmr_between", "srmr") %in% fit.measures) &&  
+       object@Data@nlevels > 1L) {
+
+        nlevels <-  object@Data@nlevels > 1L
+        SRMR.within  <- numeric(G)
+        SRMR.between <- numeric(G)
+        for(g in 1:G) {
+            # observed
+            S.within  <- object@h1$implied$cov[[  (g-1)*nlevels + 1 ]]
+            M.within  <- object@h1$implied$mean[[ (g-1)*nlevels + 1 ]]
+            S.between <- object@h1$implied$cov[[  (g-1)*nlevels + 2 ]]
+            M.between <- object@h1$implied$mean[[ (g-1)*nlevels + 2 ]]
+
+            # estimated
+            Sigma.within  <- object@implied$cov[[  (g-1)*nlevels + 1 ]]
+            Mu.within     <- object@implied$mean[[ (g-1)*nlevels + 1 ]]
+            Sigma.between <- object@implied$cov[[  (g-1)*nlevels + 2 ]]
+            Mu.between    <- object@implied$mean[[ (g-1)*nlevels + 2 ]]
+
+            # force pd for between
+            #    S.between <- lav_matrix_symmetric_force_pd(S.between)
+            Sigma.between <- lav_matrix_symmetric_force_pd(Sigma.between)
+        
+            # Bollen approach: simply using cov2cor ('residual correlations')
+            S.within.cor  <- cov2cor(S.within)
+            S.between.cor <- cov2cor(S.between)
+            Sigma.within.cor <- cov2cor(Sigma.within)
+            if(all(diag(Sigma.between) > 0)) {
+                Sigma.between.cor <- cov2cor(Sigma.between)
+            } else {
+                Sigma.between.cor <- matrix(as.numeric(NA),
+                                         nrow = nrow(Sigma.between),
+                                         ncol = ncol(Sigma.between))
+            }
+            R.within.cor <- (S.within.cor - Sigma.within.cor)
+            R.between.cor <- (S.between.cor - Sigma.between.cor)
+
+            nvar.within <- NCOL(S.within)
+            nvar.between <- NCOL(S.between)
+            pstar.within <- nvar.within*(nvar.within+1)/2
+            pstar.between <- nvar.between*(nvar.between+1)/2
+            
+            # SRMR
+            SRMR.within[g] <-  sqrt( sum(lav_matrix_vech(R.within.cor)^2) / 
+                                     pstar.within )
+            SRMR.between[g] <- sqrt( sum(lav_matrix_vech(R.between.cor)^2) /
+                                     pstar.between )
+        }
+
+        if(G > 1) {
+            SRMR_WITHIN  <- as.numeric( (unlist(object@SampleStats@nobs) %*% 
+                              SRMR.within)  / object@SampleStats@ntotal )
+            SRMR_BETWEEN <- as.numeric( (unlist(object@SampleStats@nobs) %*%
+                              SRMR.between) / object@SampleStats@ntotal )
+        } else {
+            SRMR_WITHIN  <- SRMR.within[1]
+            SRMR_BETWEEN <- SRMR.between[1]
+        }
+
+        indices["srmr"] <- SRMR_WITHIN + SRMR_BETWEEN
+        indices["srmr_within"]  <- SRMR_WITHIN
+        indices["srmr_between"] <- SRMR_BETWEEN
+    }
+
+
     if(any(c("cn_05", "cn_01") %in% fit.measures)) {
         # catch df=0, X2=0
         if(df == 0 && X2 == 0) {
@@ -1190,10 +1238,13 @@ lav_fit_measures <- function(object, fit.measures="all",
     if(any(c("gfi","agfi","pgfi") %in% fit.measures)) {
         gfi.group <- numeric(G)
         WLS.obs <- object@SampleStats@WLS.obs
-        WLS.V   <- lav_model_wls_v(lavmodel       = object@Model,
-                                   lavsamplestats = object@SampleStats,
-                                   structured     = TRUE,
-                                   lavdata        = object@Data)
+        #WLS.V   <- lav_model_wls_v(lavmodel       = object@Model,
+        #                           lavsamplestats = object@SampleStats,
+        #                           structured     = TRUE,
+        #                           lavdata        = object@Data)
+        # WLS.V == h1 expected information
+        #WLS.V   <- lav_model_h1_information(lavobject = object)
+        WLS.V   <- lav_object_inspect_wls_v(object)
         WLS.est <- lav_object_inspect_wls_est(object)
         for(g in 1:G) {
             wls.obs <- WLS.obs[[g]]
@@ -1244,12 +1295,12 @@ lav_fit_measures <- function(object, fit.measures="all",
 
     # ECVI - cross-validation index (Brown & Cudeck, 1989)
     # not defined for multiple groups and/or models with meanstructures
+    # TDJ: According to Dudgeon (2004, p. 317), "ECVI requires no adjustment
+    #      when a model is fitted simultaneously in multiple samples."
+    #      And I think the lack of mean structure in Brown & Cudeck (1989)
+    #      was a matter of habitual simplification back then, not necessity.
     if("ecvi" %in% fit.measures) {
-        if(G > 1 || meanstructure) {
-            ECVI <- as.numeric(NA)
-        } else {
-            ECVI <- X2/N + (2*npar)/N
-        }
+        ECVI <- X2/N + (2*npar)/N
         indices["ecvi"] <- ECVI
     }
 
@@ -1605,7 +1656,7 @@ print.fit.measures <- function(x) {
    }
 
     # SRMR
-    if(any(c("rmr","srmr") %in% names.x)) {
+    if(any(c("rmr","srmr") %in% names.x) && ! "srmr_within" %in% names.x) {
         cat("\nStandardized Root Mean Square Residual:\n\n")
 
         if("rmr" %in% names.x) {
@@ -1630,6 +1681,23 @@ print.fit.measures <- function(x) {
             t0.txt <- sprintf("  %-40s", "SRMR (No Mean)")
             t1.txt <- sprintf("  %10.3f", x["srmr_nomean"])
             t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["srmr_nomean"]), "")
+            cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
+        }
+    }
+
+    # SRMR -- multilevel
+    if(any(c("srmr_within","srmr_between") %in% names.x)) {
+        cat("\nStandardized Root Mean Square Residual (corr metric):\n\n")
+        if("srmr_within" %in% names.x) {
+            t0.txt <- sprintf("  %-40s", "SRMR (within covariance matrix)")
+            t1.txt <- sprintf("  %10.3f", x["srmr_within"])
+            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["srmr_within"]), "")
+            cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
+        }
+        if("srmr_between" %in% names.x) {
+            t0.txt <- sprintf("  %-40s", "SRMR (between covariance matrix)")
+            t1.txt <- sprintf("  %10.3f", x["srmr_between"])
+            t2.txt <- ifelse(scaled, sprintf("  %10.3f", x["srmr_between"]), "")
             cat(t0.txt, t1.txt, t2.txt, "\n", sep="")
         }
     }

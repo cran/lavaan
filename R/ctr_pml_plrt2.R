@@ -1,5 +1,6 @@
 ctr_pml_plrt2 <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
                           lavsamplestats = NULL, lavpartable = NULL,
+                          lavpta = NULL,
                           lavoptions = NULL, x = NULL, VCOV = NULL,
                           lavcache = NULL) {
 
@@ -10,6 +11,10 @@ ctr_pml_plrt2 <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
         lavsamplestats <- lavobject@SampleStats
         lavcache <- lavobject@Cache
         lavpartable <- lavobject@ParTable
+        lavpta <- lavobject@pta
+    }
+    if(is.null(lavpta)) {
+        lavpta <- lav_partable_attributes(lavpartable)
     }
 
 
@@ -31,6 +36,7 @@ ctr_pml_plrt2 <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
     ModelSat <- lav_partable_unrestricted(lavobject      = NULL,
                                           lavdata        = lavdata,
                                           lavoptions     = lavoptions,
+                                          lavpta         = lavpta,
                                           lavsamplestats = lavsamplestats)
 
     # FIXME: se="none", test="none"??
@@ -54,6 +60,7 @@ ctr_pml_plrt2 <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
         lav_partable_unrestricted(lavobject      = NULL,
                                   lavdata        = lavdata,
                                   lavoptions     = lavoptions,
+                                  lavpta         = lavpta,
                                   lavsamplestats = NULL,
                                   sample.cov     = computeSigmaHat(lavmodel),
                                   sample.mean    = computeMuHat(lavmodel), 
@@ -92,10 +99,9 @@ ctr_pml_plrt2 <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
 
 # inverted observed information ('H.inv')
 if(is.null(VCOV)) {
-    H0.inv <- lav_model_information(lavmodel = lavmodel, 
+    H0.inv <- lav_model_information_observed(lavmodel = lavmodel, 
                   lavsamplestats = lavsamplestats, lavdata = lavdata, 
-                  lavcache = lavcache, information = "observed", 
-                  augmented = TRUE, inverted = TRUE)
+                  lavcache = lavcache, augmented = TRUE, inverted = TRUE)
 } else {
     H0.inv <- attr(VCOV, "E.inv")
 }

@@ -77,7 +77,7 @@ lav_partable_flat <- function(FLAT = NULL,
             nth <- varTable$nlev[ varTable$name == o ] - 1L
             nth.in.partable <- sum(FLAT$op == "|" & FLAT$lhs == o)
             if(nth != nth.in.partable) {
-                stop("lavaan ERROR: expected ", nth, 
+                stop("lavaan ERROR: expected ", max(0,nth), 
                      " threshold(s) for variable ",
                      sQuote(o), "; syntax contains ", nth.in.partable, "\n")
             }
@@ -86,6 +86,12 @@ lav_partable_flat <- function(FLAT = NULL,
 
     if(length(ov.names.ord) > 0L)
         categorical <- TRUE
+
+    # std.lv = TRUE, group.equal includes "loadings": give warning
+    if(ngroups > 1L && std.lv && "loadings" %in% group.equal) {
+        # suggested by Michael Hallquist
+        warning("lavaan WARNING: std.lv = TRUE forces all variances to be unity in all groups, despite group.equal = \"loadings\"")
+    }
 
     lhs <- rhs <- character(0)
 
@@ -135,7 +141,7 @@ lav_partable_flat <- function(FLAT = NULL,
     }
 
     # d) exogenous x covariates: VARIANCES + COVARIANCES
-    if(!conditional.x && (nx <- length(ov.names.x)) > 0L) {
+    if((nx <- length(ov.names.x)) > 0L) {
         idx <- lower.tri(matrix(0, nx, nx), diag=TRUE)
         lhs <- c(lhs, rep(ov.names.x,  each=nx)[idx]) # fill upper.tri
         rhs <- c(rhs, rep(ov.names.x, times=nx)[idx])
@@ -159,11 +165,11 @@ lav_partable_flat <- function(FLAT = NULL,
 
     # 3. INTERCEPTS
     if(meanstructure) {
-        if(conditional.x) {
-            ov.int <- ov.names.nox
-        } else {
+        #if(conditional.x) {
+        #    ov.int <- ov.names.nox
+        #} else {
             ov.int <- ov.names
-        }
+        #}
         # auto-remove ordinal variables
         #idx <- which(ov.int %in% ov.names.ord)
         #if(length(idx)) ov.int <- ov.int[-idx]
@@ -194,34 +200,6 @@ lav_partable_flat <- function(FLAT = NULL,
 
     lv.names     <- lav_partable_vnames(FLAT, type="lv")     # latent variables
     ov.names     <- lav_partable_vnames(FLAT, type="ov")     # observed variables
-
-    # check order of covariances: we only fill the upper.tri!
-    cov.idx <- which(op == "~~" & lhs != rhs)
-    for(i in cov.idx) {
-        lv.ov.names <- c(lv.names, ov.names) ### FIXME!!! OK??
-        lv.idx <- match(c(lhs[i], rhs[i]), lv.ov.names)
-        if(lv.idx[1] > lv.idx[2]) { # swap!
-            tmp <- lhs[i]; lhs[i] <- rhs[i]; rhs[i] <- tmp
-        }
-        if(lhs[i] %in% lv.names && rhs[i] %in% lv.names) {
-            lv.idx <- match(c(lhs[i], rhs[i]), lv.names)
-            if(lv.idx[1] > lv.idx[2]) { # swap!
-                tmp <- lhs[i]; lhs[i] <- rhs[i]; rhs[i] <- tmp
-            }
-        } else if(lhs[i] %in% ov.names && rhs[i] %in% ov.names) {
-            ov.idx <- match(c(lhs[i], rhs[i]), ov.names)
-            if(ov.idx[1] > ov.idx[2]) { # swap!
-                tmp <- lhs[i]; lhs[i] <- rhs[i]; rhs[i] <- tmp
-            }
-        } else { # mixed!! # we allow this since 0.4-10
-            lv.ov.names <- c(lv.names, ov.names) ### FIXME!!! OK??
-            lv.idx <- match(c(lhs[i], rhs[i]), lv.ov.names)
-            if(lv.idx[1] > lv.idx[2]) { # swap!
-                tmp <- lhs[i]; lhs[i] <- rhs[i]; rhs[i] <- tmp
-            }
-        }
-    }
-
     USER <- data.frame(lhs=lhs, op=op, rhs=rhs, mod.idx=mod.idx,
                        stringsAsFactors=FALSE)
 
@@ -387,9 +365,9 @@ lav_partable_flat <- function(FLAT = NULL,
             ustart[exo.var.idx] <- as.numeric(NA) # should be overriden later!
               free[exo.var.idx] <- 0L
                exo[exo.var.idx] <- 1L
-        } else if(conditional.x) {
-               exo[exo.var.idx] <- 1L
-        }
+        } #else if(conditional.x) {
+          #     exo[exo.var.idx] <- 1L
+        #}
 
         # 2. intercepts
         exo.int.idx  <- which(op == "~1" &
@@ -399,9 +377,9 @@ lav_partable_flat <- function(FLAT = NULL,
             ustart[exo.int.idx] <- as.numeric(NA) # should be overriden later!
               free[exo.int.idx] <- 0L
                exo[exo.int.idx] <- 1L
-        } else if(conditional.x) {
-               exo[exo.int.idx] <- 1L
-        }
+        } #else if(conditional.x) {
+          #     exo[exo.int.idx] <- 1L
+        #}
 
         # 3. regressions ov + lv
         exo.reg.idx <- which(op == "~" &
@@ -416,6 +394,7 @@ lav_partable_flat <- function(FLAT = NULL,
     if(length(ov.names.ord) > 0L) {
         ord.idx <- which(lhs %in% ov.names.ord &
                          op == "~~" &
+                         user == 0L & ## New in 0.6-1
                          lhs == rhs)
         ustart[ord.idx] <- 1L ## FIXME!! or 0?? (0 breaks ex3.12)
           free[ord.idx] <- 0L
@@ -424,7 +403,8 @@ lav_partable_flat <- function(FLAT = NULL,
     # 5c latent response scales of ordinal variables?
     #    by default, all fixed to 1.0
     if(length(ov.names.ord) > 0L) {
-        delta.idx <- which(op == "~*~")
+        delta.idx <- which(op == "~*~" &
+                           user == 0L) ## New in 0.6-1
         ustart[delta.idx] <- 1.0
           free[delta.idx] <- 0L
     }

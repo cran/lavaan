@@ -74,8 +74,7 @@ Model matrices:
         Alias: \code{"starting.values"}.}
     \item{\code{"est"}:}{A list of model matrices. The values represent
         the estimated model parameters. Aliases:
-        \code{"estimates"}, \code{"coef"}, \code{"coefficients"} and
-        \code{"x"}.}
+        \code{"estimates"}, and \code{"x"}.}
     \item{\code{"dx.free"}:}{A list of model matrices. The values represent
         the gradient (first derivative) values of the model parameters.
         If two parameters are constrained to be equal, they will have the
@@ -216,6 +215,8 @@ Optimizer information:
         optimizer.}
     \item{\code{"optim"}:}{List. All available information regarding the
         optimization results.}
+    \item{\code{"npar"}:}{Integer. Number of free parameters (ignoring constraints).}
+    \item{\code{"coef"}:}{Numeric. The estimated parameter vector.}
 }
 
 Gradient, Hessian, observed, expected and first.order information matrices:
@@ -229,7 +230,7 @@ Gradient, Hessian, observed, expected and first.order information matrices:
         parameters.}
     \item{\code{"information"}:}{Matrix containing either the observed or
         the expected information matrix (depending on the information option
-        of the fitted model.}
+        of the fitted model). This is unit-information, not total-information.}
     \item{\code{"information.expected"}:}{Matrix containing the expected
         information matrix for the free model parameters.}
     \item{\code{"information.observed"}:}{Matrix containing the observed
@@ -287,6 +288,8 @@ Miscellaneous:
         matrices as used by the Satorra-Bentler correction. The trace of
         this matrix, divided by the degrees of freedom, gives the scaling 
         factor.}
+    \item{\code{"UfromUGamma"}:}{Matrix containing the 'U' matrix
+        as used by the Satorra-Bentler correction. Alias: \code{"U"}.}
     \item{\code{"list"}:}{The parameter table. The same output as given
         by \code{parTable()}.}
     \item{\code{"fit"}:}{The fit measures. Aliases: \code{"fitmeasures"},

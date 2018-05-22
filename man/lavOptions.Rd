@@ -87,7 +87,7 @@ Data options:
       standardized before entering the analysis.}
     \item{\code{missing}:}{If \code{"listwise"}, cases with missing values 
       are removed listwise from the data frame before analysis. If 
-      \code{direct} or \code{"ml"} or \code{"fiml"} and the estimator is 
+      \code{"direct"} or \code{"ml"} or \code{"fiml"} and the estimator is 
       maximum likelihood, Full Information Maximum Likelihood (FIML) 
       estimation is used using all available data in the data frame. This is 
       only valid if the data are missing completely at random (MCAR) or 
@@ -147,7 +147,8 @@ Estimation options:
       with robust standard errors and a robust (scaled) test statistic. For
       \code{"MLM"}, \code{"MLMV"}, \code{"MLMVS"}, classic robust standard
       errors are used (\code{se="robust.sem"}); for \code{"MLF"}, standard
-      errors are based on first-order derivatives (\code{se="first.order"});
+      errors are based on first-order derivatives 
+      (\code{information = "first.order"});
       for \code{"MLR"}, `Huber-White' robust standard errors are used
       (\code{se="robust.huber.white"}). In addition, \code{"MLM"} will compute
       a Satorra-Bentler scaled (mean adjusted) test statistic
@@ -157,7 +158,8 @@ Estimation options:
       and variance adjusted test statistic (scaled and shifted)
       (\code{test="scaled.shifted"}), and \code{"MLR"} will
       compute a test statistic which is asymptotically
-      equivalent to the Yuan-Bentler T2-star test statistic. Analogously,
+      equivalent to the Yuan-Bentler T2-star test statistic
+      (\code{test="yuan.bentler.mplus"}). Analogously,
       the estimators \code{"WLSM"} and \code{"WLSMV"} imply the \code{"DWLS"}
       estimator (not the \code{"WLS"} estimator) with robust standard errors
       and a mean or mean and variance adjusted test statistic. Estimators
@@ -180,13 +182,27 @@ Estimation options:
       change).}
     \item{\code{information}:}{If \code{"expected"}, the expected 
       information matrix is used (to compute the standard errors). If 
-      \code{"observed"}, the observed information matrix is used. If 
-      \code{"default"}, the value is set depending on the estimator and the 
-      mimic option.}
+      \code{"observed"}, the observed information matrix is used. 
+      If \code{"first.order"}, the information matrix is based on the
+      outer product of the casewise scores. See also the options
+      \code{"h1.information"} and \code{"observed.information"} for
+      further control. If \code{"default"}, the value is set depending 
+      on the estimator, the missing argument, and the mimic option.}
+   \item{\code{h1.information}:}{If \code{"structured"} (the default), the
+      unrestricted (h1) information part of the (expected, first.order or 
+      observed if h1 is used) information matrix is based on the structured, 
+      or model-implied statistics (model-implied covariance matrix, 
+      model-implied mean vector, etc.). 
+      If \code{"unstructured"}, the unrestricted (h1) information part is
+      based on sample-based statistics (observed covariance matrix, observed
+      mean vector, etc.)}
+   \item{\code{observed.information}:}{If \code{"hessian"}, the observed
+      information matrix is based on the hessian of the objective function.
+      If \code{"h1"}, an approximation is used that is based on 
+      the observed information matrix of the unrestricted (h1) model.}
    \item{\code{se}:}{If \code{"standard"}, conventional standard errors
-      are computed based on inverting the (expected or observed) information
-      matrix. If \code{"first.order"}, standard errors are computed based on
-      first-order derivatives. If \code{"robust.sem"}, conventional robust
+      are computed based on inverting the (expected, observed or first.order) 
+      information matrix. If \code{"robust.sem"}, conventional robust
       standard errors are computed.  If \code{"robust.huber.white"},
       standard errors are computed based on the `mlr' (aka pseudo ML,
       Huber-White) approach.
@@ -201,7 +217,10 @@ Estimation options:
    \item{\code{test}:}{If \code{"standard"}, a conventional chi-square test 
      is computed. If \code{"Satorra.Bentler"}, a Satorra-Bentler scaled test 
      statistic is computed. If \code{"Yuan.Bentler"}, a Yuan-Bentler scaled 
-     test statistic is computed. If \code{"mean.var.adjusted"} or 
+     test statistic is computed. If \code{"Yuan.Bentler.Mplus"}, a 
+     test statistic is computed that is asymptotically equal to the
+     Yuan-Bentler scaled
+     test statistic. If \code{"mean.var.adjusted"} or 
      \code{"Satterthwaite"}, a mean and variance adjusted test statistic is 
      compute. If \code{"scaled.shifted"}, an alternative mean and variance 
      adjusted test statistic is computed (as in Mplus version 6 or higher).
@@ -264,7 +283,7 @@ Starting values options:
       estimated using the fabin3 estimator (tsls) per factor. 
       If \code{start} is a fitted object of class \code{\linkS4class{lavaan}}, 
       the estimated values of the corresponding parameters will be extracted. 
-      If it is a model list, for example the output of the 
+      If it is a parameter table, for example the output of the 
       \code{paramaterEstimates()} function, the values of the \code{est} or 
       \code{start} or \code{ustart} column (whichever is found first) will be 
       extracted.}

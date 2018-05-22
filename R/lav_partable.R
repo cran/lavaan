@@ -15,7 +15,7 @@
 
 lavaanify <- lavParTable <- function(
 
-                      model            = NULL, 
+                      model            = NULL,
                       meanstructure    = FALSE,
                       int.ov.free      = FALSE,
                       int.lv.free      = FALSE,
@@ -81,9 +81,16 @@ lavaanify <- lavParTable <- function(
         print( str(CON) )
     }
 
+    # bogus varTable? (if data.type == "none")
+    if(!is.null(varTable)) {
+        if(all(varTable$nobs == 0)) {
+            varTable <- NULL
+        }
+    }
+
     # check for wrongly specified variances/covariances/intercepts
     # of exogenous variables in model syntax (if fixed.x=TRUE)
-    if(fixed.x) { # we ignore the groups here!
+    if(fixed.x && warn) { # we ignore the groups here!
         # we only call this function for the warning message
         tmp <- lav_partable_vnames(FLAT, "ov.x", warn = TRUE); rm(tmp)
     }
@@ -245,6 +252,46 @@ lavaanify <- lavParTable <- function(
         cat("[lavaan DEBUG]: parameter LIST without MODIFIERS:\n")
         print( as.data.frame(LIST, stringsAsFactors=FALSE) )
     }
+
+    # handle multilevel-specific constraints
+    multilevel <- FALSE
+    if(!is.null(LIST$level)) {
+        nlevels <- lav_partable_nlevels(LIST)
+        if(nlevels > 1L) {
+            multilevel <- TRUE
+        }
+    }
+    if(multilevel && any(LIST$op == "~1")) {
+        # fix ov intercepts for all within ov that also appear at level 2
+        # FIXME: not tested with > 2 levels
+        ov.names <- lav_partable_vnames(LIST, "ov") ## all names
+        level.values <- lav_partable_level_values(LIST)
+        other.names <- LIST$lhs[ LIST$op == "~1" &
+                                 LIST$level %in% level.values[-1L] &
+                                 LIST$lhs %in% ov.names]
+        fix.names.idx <- which(LIST$op == "~1" &
+                               LIST$level %in% level.values[1L] &
+                               LIST$lhs %in% other.names)
+        if(length(fix.names.idx) > 0L) {
+            LIST$free[fix.names.idx] <- 0L
+            LIST$ustart[fix.names.idx] <- 0
+        }
+    }
+    if(multilevel && any(LIST$op == "|")) {
+        # fix ALL thresholds at level 1
+        level.values <- lav_partable_level_values(LIST)
+        th.idx <- which(LIST$op == "|" &
+                        LIST$level %in% level.values[1L])
+        LIST$free[th.idx] <- 0L
+        LIST$ustart[th.idx] <- 0
+
+       # fix ALL scaling parmaters at higher levels
+       scale.idx <- which(LIST$op == "~*~" &
+                          LIST$level %in% level.values[-1L])
+       LIST$free[scale.idx] <- 0L
+       LIST$ustart[scale.idx] <- 1
+    }
+
 
     # apply user-specified modifiers
     if(length(MOD)) {

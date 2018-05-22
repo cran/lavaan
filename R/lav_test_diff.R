@@ -3,7 +3,12 @@
 lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
                                       A = NULL,
                                       Satterthwaite = FALSE,
+                                      scaled.shifted = FALSE,
                                       debug = FALSE) {
+
+    if(scaled.shifted) {
+        Satterthwaite <- TRUE
+    }
 
     # extract information from m1 and m2
     T1 <- m1@test[[1]]$stat
@@ -16,6 +21,11 @@ lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
     m <- r0 - r1
      
     Gamma <- lavTech(m1, "Gamma") # the same for m1 and m0
+    # check for NULL
+    if(is.null(Gamma)) {
+        stop("lavaan ERROR: can not compute Gamma matrix; perhaps missing = \"ml\"?")
+    }
+
     if(H1) {
         WLS.V <- lavTech(m1, "WLS.V")
         PI <- computeDelta(m1@Model)
@@ -24,16 +34,15 @@ lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
         P.inv <- lav_model_information_augment_invert(m1@Model,
                                                       information = P,
                                                       inverted = TRUE)
-        if(inherits(P.inv, "try-error")) {
-             return(list(T.delta = NA, scaling.factor = NA, df.delta = NA))
-        }
-        #P.inv <- solve(P)
-    
         # compute 'A' matrix 
         # NOTE: order of parameters may change between H1 and H0, so be
         # careful!
         if(is.null(A)) {
             A <- lav_test_diff_A(m1, m0, method = A.method, reference = "H1")
+            # take into account equality constraints m1
+            if(m1@Model@eq.constraints) {
+                A <- A %*% t(m1@Model@eq.constraints.K)
+            }
             if(debug) print(A)
         }
     } else {
@@ -46,10 +55,6 @@ lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
         P.inv <- lav_model_information_augment_invert(m0@Model,
                                                       information = P,
                                                       inverted = TRUE)
-        if(inherits(P.inv, "try-error")) {
-             return(list(T.delta = NA, scaling.factor = NA, df.delta = NA))
-        }
-        #P.inv <- solve(P)
 
         # compute 'A' matrix 
         # NOTE: order of parameters may change between H1 and H0, so be
@@ -57,6 +62,10 @@ lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
         if(is.null(A)) {
             # m1, m0 OR m0, m1 (works for delta, but not for exact)
             A <- lav_test_diff_A(m1, m0, method = A.method, reference = "H0")
+            # take into account equality constraints m1
+            if(m0@Model@eq.constraints) {
+                A <- A %*% t(m0@Model@eq.constraints.K)
+            }
             if(debug) print(A)
         }
     }
@@ -67,22 +76,23 @@ lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
 
     # safety check: A %*% P.inv %*% t(A) should NOT contain all-zero
     # rows/columns
+    # FIXME: is this really needed? As we use ginv later on
     APA <- A %*% P.inv %*% t(A)
     cSums <- colSums(APA)
     rSums <- rowSums(APA)
     empty.idx <- which( abs(cSums) < .Machine$double.eps^0.5 & 
-                        abs(rSums) < .Machine$double.eps ^0.5 )
+                        abs(rSums) < .Machine$double.eps^0.5 )
     if(length(empty.idx) > 0) {
         A <- A[-empty.idx,, drop = FALSE]
     }
 
     # PAAPAAP
-    PAAPAAP <- P.inv %*% t(A) %*% solve(A %*% P.inv %*% t(A)) %*% A %*% P.inv
+    PAAPAAP <- P.inv %*% t(A) %*% MASS::ginv(A %*% P.inv %*% t(A)) %*% A %*% P.inv
 
     trace.UGamma  <- numeric(ngroups)
     trace.UGamma2 <- numeric(ngroups)
     for(g in 1:ngroups) {
-        UG.group <- WLS.V[[g]] %*% Gamma[[g]] %*% WLS.V[[g]] %*% 
+        UG.group <- WLS.V[[g]] %*% Gamma[[g]] %*% WLS.V[[g]] %*%
                     PI[[g]] %*% PAAPAAP %*% t(PI[[g]])
         trace.UGamma[g]  <- sum(diag(UG.group))
         if(Satterthwaite) {
@@ -93,18 +103,32 @@ lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
     # compute scaling factor
     fg <- unlist(m1@SampleStats@nobs)/m1@SampleStats@ntotal
 
+    trace.UGamma <- sum(fg * trace.UGamma)
     if(Satterthwaite) {
-        cd <- sum(fg * trace.UGamma2) / sum(fg * trace.UGamma)
-        df.delta <- (sum(fg * trace.UGamma))^2 / sum(fg * trace.UGamma2)
-    } else {
-        cd <- 1/m * sum(fg * trace.UGamma)
-        df.delta <- m
+        trace.UGamma2 <- sum(fg * trace.UGamma2)
     }
 
-    # compute scaled difference test      
-    T.delta <- (T0 - T1)/cd
+    if(Satterthwaite && !scaled.shifted) {
+        cd <- trace.UGamma2 / trace.UGamma
+        df.delta <- trace.UGamma^2 / trace.UGamma2
+        T.delta <- (T0 - T1)/cd
+        a <- as.numeric(NA); b <- as.numeric(NA)
+    } else if(Satterthwaite && scaled.shifted) {
+        a <- sqrt(m/trace.UGamma2)
+        #b <- m - sqrt(m * trace.UGamma^2 / trace.UGamma2)
+        b <- m - a * trace.UGamma
+        df.delta <- m
+        T.delta <- (T0 - T1)*a + b
+        cd <- as.numeric(NA)
+    } else {
+        cd <- 1/m * trace.UGamma
+        df.delta <- m
+        T.delta <- (T0 - T1)/cd
+        a <- as.numeric(NA); b <- as.numeric(NA)
+    }
 
-    list(T.delta = T.delta, scaling.factor = cd, df.delta = df.delta)
+    list(T.delta = T.delta, scaling.factor = cd, df.delta = df.delta, 
+         a = a, b = b)
 }
 
 lav_test_diff_SatorraBentler2001 <- function(m1, m0) {
@@ -167,16 +191,39 @@ lav_test_diff_SatorraBentler2010 <- function(m1, m0, H1 = FALSE) {
         M01 <- lav_test_diff_m10(m0, m1, test = TRUE)
         c01 <- M01@test[[2]]$scaling.factor
 
-        # compute c_d
-        # cd.01 <- (r0 * c01 - r1 * c0) / m ???
-        cd <- (r0 * c0 - r1 * c01) / m
+        # check if vcov is positive definite (new in 0.6) 
+        # if not, we may get negative values
+        eigvals <- eigen(lavTech(M10, "information"),
+                         symmetric=TRUE, only.values=TRUE)$values
+        if(any(eigvals < -1 * .Machine$double.eps^(3/4))) {
+            warning(
+  "lavaan WARNING: information matrix of the M10 model is not positive definite.\n",
+"                  As a result, the scale-factor can not be computed.")
+            cd <- as.numeric(NA)
+        } else {
+            # compute c_d
+            # cd.01 <- (r0 * c01 - r1 * c0) / m ???
+            cd <- (r0 * c0 - r1 * c01) / m
+        }
+
     } else {
         # M1 with M0 parameters (as in Satorra & Bentler 2010)
         M10 <- lav_test_diff_m10(m1, m0, test = TRUE)
         c10 <- M10@test[[2]]$scaling.factor
 
-        # compute c_d
-        cd <- (r0 * c0 - r1 * c10) / m
+        # check if vcov is positive definite (new in 0.6) 
+        # if not, we may get negative values
+        eigvals <- eigen(lavTech(M10, "information"),
+                         symmetric=TRUE, only.values=TRUE)$values
+        if(any(eigvals < -1 * .Machine$double.eps^(3/4))) {
+            warning(
+  "lavaan WARNING: information matrix of the M10 model is not positive definite.\n",
+"                  As a result, the scale-factor can not be computed.")
+            cd <- as.numeric(NA)
+        } else {
+            # compute c_d
+            cd <- (r0 * c0 - r1 * c10) / m
+        }
     }
 
     # compute scaled difference test
@@ -203,12 +250,14 @@ lav_test_diff_m10 <- function(m1, m0, test = FALSE) {
     PT.M1 <- m1@ParTable
 
     # `extend' PT.M1 partable to include all `fixed-to-zero parameters'
-    PT.M1.FULL <- lav_partable_full(PT.M1, free = TRUE, start = TRUE)
+    PT.M1.FULL <- lav_partable_full(partable = PT.M1, lavpta = m1@pta, 
+                                    free = TRUE, start = TRUE)
     PT.M1.extended <- lav_partable_merge(PT.M1, PT.M1.FULL,
                                          remove.duplicated = TRUE, warn = FALSE)
 
     # `extend' PT.M0 partable to include all `fixed-to-zero parameters'
-    PT.M0.FULL <- lav_partable_full(PT.M0, free = TRUE, start = TRUE)
+    PT.M0.FULL <- lav_partable_full(partable = PT.M0, lavpta = m0@pta,
+                                    free = TRUE, start = TRUE)
     PT.M0.extended <- lav_partable_merge(PT.M0, PT.M0.FULL,
                                          remove.duplicated = TRUE, warn = FALSE)
 
@@ -224,8 +273,9 @@ lav_test_diff_m10 <- function(m1, m0, test = FALSE) {
 
     Options$optim.method          = "none"
     Options$optim.force.converged = TRUE
+    Options$start                 = PE.M0.extended # new in 0.6!
     m10 <- lavaan(model = PT.M1.extended,
-                  start = PE.M0.extended,
+                  #start = PE.M0.extended,
                   slotOptions     = Options,
                   slotSampleStats = m1@SampleStats,
                   slotData        = m1@Data,
@@ -239,7 +289,7 @@ lav_test_diff_m10 <- function(m1, m0, test = FALSE) {
 #
 # 
 #
-lav_test_diff_A <- function(m1, m0, method = "exact", reference = "H1") {
+lav_test_diff_A <- function(m1, m0, method = "delta", reference = "H1") {
 
     # FIXME!!!!
 
@@ -265,27 +315,16 @@ lav_test_diff_A <- function(m1, m0, method = "exact", reference = "H1") {
 
         # take into account equality constraints m0
         if(m0@Model@eq.constraints) {
-            # the normalization creates a lot of distortion...
             Delta0 <- Delta0 %*% m0@Model@eq.constraints.K
         }
 
         # take into account equality constraints m1
         if(m1@Model@eq.constraints) {
-            # we need a better solution here...
-            warning("lavaan WARNING: H1 contains equality constraints; this routine can not handle this (yet)")
+            Delta1 <- Delta1 %*% m1@Model@eq.constraints.K
         }
 
-        # take into account equality constraints m1
-        #tDelta1Delta1 <- crossprod(Delta1)
-        #tDelta1Delta1.inv <- 
-        #    lav_model_information_augment_invert(m1@Model,
-        #                                         information = tDelta1Delta1,
-        #                                         inverted = TRUE)
         #H <- solve(t(Delta1) %*% Delta1) %*% t(Delta1) %*% Delta0
-        #H <- tDelta1Delta1.inv %*% t(Delta1) %*% Delta0 ## still wrong?
-        #                                                ## Delta1 not corrected
-
-        H <- solve(t(Delta1) %*% Delta1) %*% t(Delta1) %*% Delta0
+        H <- MASS::ginv(Delta1) %*% Delta0
         A <- t(lav_matrix_orthogonal_complement(H))
     }
  
@@ -341,12 +380,14 @@ lav_test_diff_af_h1 <- function(m1, m0) {
     PT.M1 <- rbind(PT.M1.part1, PT.M1.part2)
     
     # `extend' PT.M1 partable to include all `fixed-to-zero parameters'
-    PT.M1.FULL <- lav_partable_full(PT.M1, free = TRUE, start = TRUE)
+    PT.M1.FULL <- lav_partable_full(partable = PT.M1, lavpta = m1@pta, 
+                                    free = TRUE, start = TRUE)
     PT.M1.extended <- lav_partable_merge(PT.M1, PT.M1.FULL,
                                          remove.duplicated = TRUE, warn = FALSE)
 
     # `extend' PT.M0 partable to include all `fixed-to-zero parameters'
-    PT.M0.FULL <- lav_partable_full(PT.M0, free = TRUE, start = TRUE)
+    PT.M0.FULL <- lav_partable_full(partable = PT.M0, lavpta = m0@pta,
+                                    free = TRUE, start = TRUE)
     PT.M0.extended <- lav_partable_merge(PT.M0, PT.M0.FULL,
                                          remove.duplicated = TRUE, warn = FALSE)
 

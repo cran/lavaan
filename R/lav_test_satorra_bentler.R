@@ -1,9 +1,7 @@
-##
-## FIXME: does not work yet if WLS.V is diagonal/numeric!!!
-##
 lav_test_satorra_bentler <- function(lavobject      = NULL,
                                      lavsamplestats = NULL,
                                      lavmodel       = NULL,
+                                     lavimplied     = NULL,
                                      lavoptions     = NULL,
                                      lavdata        = NULL,
                                      TEST.unscaled  = NULL,
@@ -14,6 +12,7 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
                                      test           = "satorra.bentler",
                                      mimic          = "lavaan",
                                      method         = "default",
+                                     return.u       = FALSE,
                                      return.ugamma  = FALSE) {
 
     TEST <- list()
@@ -23,8 +22,11 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
         lavmodel       <- lavobject@Model
         lavoptions     <- lavobject@Options
         lavpartable    <- lavobject@ParTable
+        lavimplied     <- lavobject@implied
         lavdata        <- lavobject@Data
         TEST$standard  <- lavobject@test[[1]]
+    } else {
+        TEST$standard  <- TEST.unscaled
     }
 
     # check test
@@ -32,16 +34,20 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
                         "scaled.shifted",
                         "mean.var.adjusted"))) {
         warning("lavaan WARNING: test must be one of `satorra.bentler', `scaled.shifted' or `mean.var.adjusted'; will use `satorra.bentler' only")
-        test <- "satorra.benter"
+        test <- "satorra.bentler"
+    }
+
+    if(return.u) {
+        method <- "original"
     }
 
     # check method
     if(method == "default") {
-        method <- "original"
+        method <- "ABA"
     } else if(!all(method %in% c("original", "orthogonal.complement", 
                                  "ABA"))) {
-        warning("lavaan WARNING: method must be one of `original', `orthogonal.complement'; will use `original'")
-        method <- "original"
+        warning("lavaan WARNING: method must be one of `original', `ABA', `orthogonal.complement'; will use `original'")
+        method <- "ABA"
     }
 
     # do we have E.inv, Delta, WLS.V?
@@ -51,16 +57,17 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
                      augmented = FALSE, inverted = FALSE,
                      lavsamplestats=lavsamplestats, extra = TRUE)
         } else {
-            E <- lav_model_information_expected(lavmodel = lavmodel,
+            E <- lav_model_information(lavmodel = lavmodel, 
+                     lavimplied = lavimplied,
                      lavsamplestats = lavsamplestats, lavdata = lavdata,
-                     extra = TRUE)
+                     lavoptions = lavoptions, extra = TRUE)
         }
         E.inv <- try(lav_model_information_augment_invert(lavmodel,
                          information = E, inverted = TRUE), silent=TRUE)
         if(inherits(E.inv, "try-error")) {
             TEST <- list(test = test, stat = as.numeric(NA),
                 stat.group = rep(as.numeric(NA), lavsamplestats@ngroups),
-                df = TEST.unscaled$df, refdistr = TEST.unscaled$refdistr, 
+                df = TEST.unscaled$df, refdistr = TEST.unscaled$refdistr,
                 pvalue = as.numeric(NA), scaling.factor = as.numeric(NA))
             warning("lavaan WARNING: could not invert information matrix\n")
             return(TEST)
@@ -69,11 +76,16 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
         WLS.V <- attr(E, "WLS.V")
     }
 
-    stopifnot(is.matrix(WLS.V[[1]]))
-
     # Gamma
     if(is.null(Gamma)) {
         Gamma <- lavsamplestats@NACOV
+    }
+
+    if(mimic == "Mplus" && lavmodel@categorical) {
+        for(g in 1:lavsamplestats@ngroups) {
+            Ng <- lavsamplestats@nobs[[g]]
+            Gamma[[g]] <- Gamma[[g]] / Ng * (Ng - 1L)
+        }
     }
 
     # ngroups
@@ -89,7 +101,7 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
         out <- lav_test_satorra_bentler_trace_original(Gamma = Gamma,
                    Delta = Delta, WLS.V = WLS.V, E.inv = E.inv, 
                    ngroups = ngroups, nobs = lavsamplestats@nobs, 
-                   ntotal = lavsamplestats@ntotal, 
+                   ntotal = lavsamplestats@ntotal, return.u = return.u,
                    return.ugamma = return.ugamma,
                    Satterthwaite = Satterthwaite)
     } else if(method == "orthogonal.complement") {
@@ -127,7 +139,7 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
         # scaled test statistic global
         stat <- sum(stat.group)
 
-        TEST$satorra.benter <-
+        TEST$satorra.bentler <-
             list(test            = "satorra.bentler",
                  stat            = stat,
                  stat.group      = stat.group,
@@ -209,6 +221,10 @@ lav_test_satorra_bentler <- function(lavobject      = NULL,
         TEST$UGamma <- out$UGamma
     }
 
+    if(return.u) {
+        TEST$UfromUGamma <- out$UfromUGamma
+    }
+
     TEST
 }
 
@@ -221,11 +237,15 @@ lav_test_satorra_bentler_trace_original <- function(Gamma         = NULL,
                                                     ngroups       = NULL,
                                                     nobs          = NULL,
                                                     ntotal        = NULL,
+                                                    return.u      = FALSE,
                                                     return.ugamma = FALSE,
                                                     Satterthwaite = FALSE) {
  
     # trace of UGamma per group
     trace.UGamma  <- trace.UGamma2 <- rep(as.numeric(NA), ngroups)
+
+    # U
+    UfromUGamma <- vector("list", ngroups)
 
     # per group
     for(g in 1:ngroups) {
@@ -234,9 +254,19 @@ lav_test_satorra_bentler_trace_original <- function(Gamma         = NULL,
         Delta.g <- Delta[[g]]
         WLS.Vg  <- WLS.V[[g]] * fg
 
+        # check if WLS.Vg is a matrix
+        if(!is.matrix(WLS.Vg)) {
+            # create matrix
+            WLS.Vg <- diag(WLS.Vg)
+        }
+
         U <- (WLS.Vg - WLS.Vg %*% Delta[[g]] %*% E.inv %*% 
                                 t(Delta[[g]]) %*% WLS.Vg) 
         trace.UGamma[g] <- sum(U * Gamma.g)
+
+        if(return.u) {
+            UfromUGamma[[g]] <- U
+        }
 
         UG <- NULL
         if(Satterthwaite || return.ugamma) {
@@ -250,7 +280,7 @@ lav_test_satorra_bentler_trace_original <- function(Gamma         = NULL,
     trace.UGamma2 <- sum(trace.UGamma2)
 
     list(trace.UGamma = trace.UGamma, trace.UGamma2 = trace.UGamma2, 
-         UGamma = UG)
+         UGamma = UG, UfromUGamma = UfromUGamma)
 }
 
 # using the orthogonal complement of Delta: Delta.c
@@ -274,6 +304,12 @@ lav_test_satorra_bentler_trace_complement <- function(Gamma         = NULL,
         Gamma.g <- Gamma[[g]] / fg  ## ?? check this
         Delta.g <- Delta[[g]]
         WLS.Vg  <- WLS.V[[g]] * fg
+
+        # check if WLS.Vg is a matrix
+        if(!is.matrix(WLS.Vg)) {
+            # create matrix
+            WLS.Vg <- diag(WLS.Vg)
+        }
 
         # handle equality constraints
         if(lavmodel@eq.constraints) {
@@ -308,14 +344,20 @@ lav_test_satorra_bentler_trace_complement <- function(Gamma         = NULL,
 # UG = Gamma %*% [V - V %*% Delta %*% E.inv %*% tDelta %*% V]
 #    = Gamma %*% V  - Gamma %*% V %*% Delta %*% E.inv %*% tDelta %*% V
 #    = Gamma %*% A1 - Gamma %*% A1 %*% Delta %*% E.inv %*% tDelta %*% A1
-# (B1 = A1 %*% Gamma %*% A1)
-#    = B1 %*% A1.inv - B1 %*% A1.inv %*% Delta %*% E.inv %*% tDelta %*% A1
+# (define AGA1 := A1 %*% Gamma %*% A1)
+# Note this is not identical to 'B1', (model-based) first-order information
+#
+#    = A1.inv %*% A1 %*% Gamma %*% A1 -
+#      A1.inv %*% A1 %*% Gamma %*% A1 %*% Delta %*% E.inv %*% tDelta %*% A1
+#
+#    = A1.inv %*% AGA1 -
+#      A1.inv %*% AGA1 %*% Delta %*% E.inv %*% tDelta %*% A1
 #    
 # if only the trace is needed, we can use reduce the rhs (after the minus)
-# to B1 %*% Delta %*% E.inv %*% tDelta (eliminating A1 and A1.inv)
+# to AGA1 %*% Delta %*% E.inv %*% tDelta (eliminating A1 and A1.inv)
 
-# we write it like this to allow for fixed.x covariates which affect A1
-# and B1
+# we write it like this to highlight the connection with MLR
+#
 lav_test_satorra_bentler_trace_ABA <- function(Gamma         = NULL,
                                                Delta         = NULL,
                                                WLS.V         = NULL,
@@ -334,39 +376,26 @@ lav_test_satorra_bentler_trace_ABA <- function(Gamma         = NULL,
         fg <- nobs[[g]]/ntotal
         Gamma.g <- Gamma[[g]] / fg  ## ?? check this
         Delta.g <- Delta[[g]]
-        WLS.Vg  <- WLS.V[[g]] * fg
 
         # diagonal WLS.V? we check for this since 0.5-17
         diagonal <- FALSE
         if(is.matrix(WLS.V[[g]])) {
             A1 <- WLS.V[[g]] * fg
-            B1 <- A1 %*% Gamma.g %*% A1
+            AGA1 <- A1 %*% Gamma.g %*% A1
         } else {
             diagonal <- TRUE
             a1 <- WLS.V[[g]] * fg # numeric vector!
-            B1 <- Gamma.g * tcrossprod(a1)
+            AGA1 <- Gamma.g * tcrossprod(a1)
         }
 
-        # mask independent 'fixed-x' variables
-        # note: this only affects the saturated H1 model
-        #if(length(x.idx[[g]]) > 0L) {
-        #    nvar <- ncol(lavsamplestats@cov[[g]])
-        #    idx <- eliminate.pstar.idx(nvar=nvar, el.idx=x.idx[[g]],
-        #                               meanstructure=TRUE, type="all")
-        #    if(diagonal) {
-        #        a1 <- a1[idx]
-        #    } else {
-        #        A1 <- A1[idx,idx]
-        #    }
-        #    B1      <- B1[idx,idx]
-        #    Delta.g <- Delta.g[idx,]
-        #}
-
+        # note: we have AGA1 at the end, to avoid ending up with
+        # a transposed matrix (both parts are non-symmetric)
         if(diagonal) {
-            UG <- t((1/a1) * B1) - (B1 %*% Delta.g %*% tcrossprod(E.inv, Delta.g))
+            UG <- t(Gamma.g * a1) - 
+                  (Delta.g %*% tcrossprod(E.inv, Delta.g) %*% AGA1)
         } else {
-            A1.inv <- solve(A1)
-            UG <- (B1 %*% A1.inv) - (B1 %*% Delta.g %*% tcrossprod(E.inv, Delta.g))
+            UG <- (Gamma.g %*% A1) - 
+                  (Delta.g %*% tcrossprod(E.inv, Delta.g) %*% AGA1)
         }
 
         trace.UGamma[g] <- sum(diag(UG))

@@ -3,6 +3,7 @@
 
 modindices <- function(object, 
                        standardized = TRUE, 
+                       cov.std = TRUE,
 
                        # power statistics?
                        power = FALSE, 
@@ -38,7 +39,9 @@ modindices <- function(object,
     if(object@Model@fixed.x && object@Model@categorical) {
         strict.exo <- TRUE ## truly conditional.x
     }
-    FULL <- lav_partable_full(object@ParTable, free = TRUE, start = TRUE,
+    FULL <- lav_partable_full(partable = object@ParTable,
+                              lavpta = object@pta,
+                              free = TRUE, start = TRUE,
                               strict.exo = strict.exo)
     FULL$free <- rep(1L, nrow(FULL))
     FULL$user <- rep(10L, nrow(FULL))
@@ -51,7 +54,7 @@ modindices <- function(object,
     information <- lavTech(FIT, "information.expected")
 
     # compute gradient 'extended model'
-    score <- lavTech(FIT, "gradient")
+    score <- lavTech(FIT, "gradient.logl")
 
     # Saris, Satorra & Sorbom 1987
     # partition Q into Q_11, Q_22 and Q_12/Q_21
@@ -82,7 +85,7 @@ modindices <- function(object,
     I22 <- information[model.idx, model.idx, drop = FALSE]
 
     # ALWAYS use *expected* information (for now)
-    I22.inv <- lavTech(object, "inverted.information.expected")
+    I22.inv <- try(lavTech(object, "inverted.information.expected"), silent = TRUE)
     # just in case...
     if(inherits(I22.inv, "try-error")) {
         stop("lavaan ERROR: could not compute modification indices; information matrix is singular")
@@ -98,7 +101,20 @@ modindices <- function(object,
     }
 
     # create and fill in mi
-    N <- object@SampleStats@ntotal
+    if(object@Data@nlevels == 1L) {
+        N <- object@SampleStats@ntotal
+        if(object@Model@estimator %in% ("ML")) {
+            score <- -1 * score # due to gradient.logl
+        }
+    } else {
+        # total number of clusters (over groups)   
+        N <- 0                      
+        for(g in 1:object@SampleStats@ngroups) {
+            N <- N + object@Data@Lp[[g]]$nclusters[[2]]
+        }
+        #score <- score * (2 * object@SampleStats@ntotal) / N
+        score <- score / 2 # -2 * LRT
+    }
     mi <- numeric( length(score) )
     mi[extra.idx] <- N * (score[extra.idx]*score[extra.idx]) / V.diag
     if(length(model.idx) > 0L) {
@@ -116,9 +132,9 @@ modindices <- function(object,
     #}
   
     # scaled?
-    if(length(object@test) > 1L) {
-        LIST$mi.scaled <- LIST$mi / object@test[[2]]$scaling.factor
-    }
+    #if(length(object@test) > 1L) {
+    #    LIST$mi.scaled <- LIST$mi / object@test[[2]]$scaling.factor
+    #}
 
     # EPC
     d <- (-1 * N) * score
@@ -129,13 +145,21 @@ modindices <- function(object,
 
     # standardize?
     if(standardized) {
+
+        EPC <- LIST$epc
+
+        if(cov.std) {
+            # replace epc values for variances by est values
+            var.idx <- which(LIST$op == "~~" & LIST$lhs == LIST$rhs &
+                             LIST$exo == 0L)
+            EPC[ var.idx ] <- LIST$est[ var.idx ]
+        }
+
         # two problems: 
         #   - EPC of variances can be negative, and that is
         #     perfectly legal
         #   - EPC (of variances) can be tiny (near-zero), and we should 
         #     not divide by tiny variables
- 
-        EPC <- LIST$epc
         small.idx <- which(LIST$op == "~~" & 
                            LIST$lhs == LIST$rhs &
                            abs(EPC) < sqrt( .Machine$double.eps ) )
@@ -149,21 +173,21 @@ modindices <- function(object,
         LIST$sepc.lv <- EPC.sign * standardize.est.lv(object, 
                                                       partable = LIST, 
                                                       est = abs(EPC),
-                                                      cov.std = FALSE)
+                                                      cov.std = cov.std)
         if(length(small.idx) > 0L) {
             LIST$sepc.lv[small.idx] <- 0
         }
         LIST$sepc.all <- EPC.sign * standardize.est.all(object, 
                                                         partable = LIST, 
                                                         est = abs(EPC),
-                                                        cov.std = FALSE)
+                                                        cov.std = cov.std)
         if(length(small.idx) > 0L) {
             LIST$sepc.all[small.idx] <- 0
         }
         LIST$sepc.nox <- EPC.sign * standardize.est.all.nox(object, 
                                                             partable = LIST,
                                                             est = abs(EPC),
-                                                            cov.std = FALSE)
+                                                            cov.std = cov.std)
         if(length(small.idx) > 0L) {
             LIST$sepc.nox[small.idx] <- 0
         }
@@ -201,6 +225,12 @@ modindices <- function(object,
         #LIST$decision[ which(mi.significant & !high.power) ] <- "***"
         #LIST$decision[ which(!mi.significant & !high.power) ] <- "(i)"
     }
+
+    # remove rows corresponding to 'fixed.x' exogenous parameters
+    #exo.idx <- which(LIST$exo == 1L & nchar(LIST$plabel) > 0L)
+    #if(length(exo.idx) > 0L) {
+    #    LIST <- LIST[-exo.idx,]
+    #}
 
     # remove some columns
     LIST$id <- LIST$ustart <- LIST$exo <- LIST$label <- LIST$plabel <- NULL

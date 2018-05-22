@@ -1,6 +1,10 @@
 # YR - 26 Nov 2013: generate partable for the unrestricted model
+# YR - 19 Mar 2017: handle twolevel model
+
 lav_partable_unrestricted <- function(lavobject      = NULL,
+                                      # if no object is available,
                                       lavdata        = NULL,
+                                      lavpta         = NULL,
                                       lavoptions     = NULL,
                                       lavsamplestats = NULL,
                                       # optional user-provided sample stats
@@ -8,7 +12,35 @@ lav_partable_unrestricted <- function(lavobject      = NULL,
                                       sample.mean    = NULL,
                                       sample.slopes  = NULL,
                                       sample.th      = NULL,
-                                      sample.th.idx  = NULL) {
+                                      sample.th.idx  = NULL,
+                                      sample.cov.x   = NULL,
+                                      sample.mean.x  = NULL) {
+
+    lav_partable_indep_or_unrestricted(lavobject = lavobject, 
+        lavdata = lavdata, lavpta = lavpta, lavoptions = lavoptions, 
+        lavsamplestats = lavsamplestats, sample.cov = sample.cov, 
+        sample.mean = sample.mean , sample.slopes = sample.slopes, 
+        sample.th = sample.th, sample.th.idx = sample.th.idx, 
+        independent = FALSE)
+
+}
+
+
+lav_partable_indep_or_unrestricted <- function(lavobject      = NULL,
+                                      # if no object is available,
+                                      lavdata        = NULL,
+                                      lavpta         = NULL,
+                                      lavoptions     = NULL,
+                                      lavsamplestats = NULL,
+                                      # optional user-provided sample stats
+                                      sample.cov     = NULL,
+                                      sample.mean    = NULL,
+                                      sample.slopes  = NULL,
+                                      sample.th      = NULL,
+                                      sample.th.idx  = NULL,
+                                      sample.cov.x   = NULL,
+                                      sample.mean.x  = NULL,
+                                      independent    = FALSE) {
 
     # grab everything from lavaan lavobject
     if(!is.null(lavobject)) {
@@ -17,6 +49,7 @@ lav_partable_unrestricted <- function(lavobject      = NULL,
         lavdata <- lavobject@Data
         lavoptions <- lavobject@Options
         lavsamplestats <- lavobject@SampleStats
+        lavpta <- lavobject@pta
     }
 
     # conditional.x ? check res.cov[[1]] slot
@@ -27,224 +60,507 @@ lav_partable_unrestricted <- function(lavobject      = NULL,
         conditional.x <- TRUE
     }
 
-    # if user-based moments are given, use these
-    if(is.null(sample.cov) && !is.null(lavsamplestats)) {
+    # we use CAPS below for the list version, so we can use 'small caps'
+    # within the for() loop
+
+    # get sample statistics, all groups
+    SAMPLE.cov <- sample.cov
+    if(is.null(SAMPLE.cov) && !is.null(lavsamplestats)) {
         if(conditional.x) {
-            sample.cov <- lavsamplestats@res.cov
+            SAMPLE.cov <- lavsamplestats@res.cov
         } else {
-            sampl.ecov <- lavsamplestats@cov
+            SAMPLE.cov <- lavsamplestats@cov
         }
     }
-    if(is.null(sample.mean) && !is.null(lavsamplestats)) {
+
+    SAMPLE.mean <- sample.mean
+    if(is.null(SAMPLE.mean) && !is.null(lavsamplestats)) {
         if(conditional.x) {
-            sample.mean <- lavsamplestats@res.int
+            SAMPLE.mean <- lavsamplestats@res.int
         } else {
-            sample.mean <- lavsamplestats@mean
+            SAMPLE.mean <- lavsamplestats@mean
         }
     }
-    if(conditional.x && is.null(sample.slopes) && !is.null(lavsamplestats)) {
-        sample.slopes <- lavsamplestats@res.slopes
+
+    SAMPLE.slopes <- sample.slopes
+    if(conditional.x && is.null(SAMPLE.slopes) && !is.null(lavsamplestats)) {
+        SAMPLE.slopes <- lavsamplestats@res.slopes
     }
-    if(is.null(sample.th) && !is.null(lavsamplestats)) {
+
+    SAMPLE.th <- sample.th
+    if(is.null(SAMPLE.th) && !is.null(lavsamplestats)) {
         if(conditional.x) {
-             sample.th <- lavsamplestats@res.th
+             SAMPLE.th <- lavsamplestats@res.th
          } else {
-             sample.th <- lavsamplestats@th
+             SAMPLE.th <- lavsamplestats@th
          }
     }
 
-    if(is.null(sample.th.idx) && !is.null(lavsamplestats)) {
-         sample.th.idx <- lavsamplestats@th.idx
+    SAMPLE.th.idx <- sample.th.idx
+    if(is.null(SAMPLE.th.idx) && !is.null(lavsamplestats)) {
+         SAMPLE.th.idx <- lavsamplestats@th.idx
     }
 
-    ov.names      <- lavdata@ov.names
+    SAMPLE.cov.x <- sample.cov.x
+    if(is.null(SAMPLE.cov.x) && !is.null(lavsamplestats)) {
+        SAMPLE.cov.x <- lavsamplestats@cov.x
+    }
+
+    SAMPLE.mean.x <- sample.mean.x
+    if(is.null(SAMPLE.mean.x) && !is.null(lavsamplestats)) {
+        SAMPLE.mean.x <- lavsamplestats@mean.x
+    }
+
+
+
     ov            <- lavdata@ov
-    ov.names.x    <- lavdata@ov.names.x
     meanstructure <- lavoptions$meanstructure
     categorical   <- any(ov$type == "ordered")
-    ngroups <- length(ov.names)
+    ngroups       <- lavdata@ngroups
+    nlevels       <- lavdata@nlevels
 
     # what with fixed.x? 
     # - does not really matter; fit will be saturated any way
     # - fixed.x = TRUE may avoid convergence issues with non-numeric 
     #             x-covariates
-    if(lavoptions$mimic %in% c("lavaan", "Mplus")) {
+    #if(lavoptions$mimic %in% c("lavaan", "Mplus")) {
         fixed.x = lavoptions$fixed.x
-    } else if(lavoptions$mimic == "EQS") {
+    #} else if(lavoptions$mimic == "EQS") {
         # always ignore fixed.x
-        ov.names.x = NULL
-        fixed.x = FALSE
-    } else if(lavoptions$mimic == "LISREL") {
-        # always ignore fixed.x??? CHECKME!!
-        ov.names.x = NULL
-        fixed.x = FALSE
-    }
+    #    ov.names.x = NULL
+    #    fixed.x = FALSE
+    #} else if(lavoptions$mimic == "LISREL") {
+    #    # always ignore fixed.x??? CHECKME!!
+    #    ov.names.x = NULL
+    #    fixed.x = FALSE
+    #}
 
-    if(conditional.x) {
-        ov.names.nox <- lapply(seq_len(ngroups), function(g)
-                ov.names[[g]][ !ov.names[[g]] %in% ov.names.x[[g]] ])
+    # if multilevel
+    if(nlevels > 1L) {
+        #fixed.x       <- FALSE # for now
+        conditional.x <- FALSE # for now
+        categorical   <- FALSE # for now
     }
 
     lhs <- rhs <- op <- character(0)
-    group <- free <- exo <- integer(0)
+    group <- block <- level <- free <- exo <- integer(0)
     ustart <- numeric(0)
 
+    # block number
+    b <- 0L
     for(g in 1:ngroups) {
 
-        # a) VARIANCES (all ov's, if !conditional.x, also exo's)
-        nvar  <- length(ov.names[[g]])
+        # only for multilevel
+        if(nlevels > 1L) {
+            OV.NAMES <- lavdata@ov.names[[g]]
+            YLp <-  lavsamplestats@YLp[[g]]
+            Lp <- lavdata@Lp[[g]]
+        }
 
-        lhs   <- c(lhs, ov.names[[g]])
-         op   <- c(op, rep("~~", nvar))
-        rhs   <- c(rhs, ov.names[[g]])
-        group <- c(group, rep(g,  nvar))
-        free  <- c(free,  rep(1L, nvar))
-        exo   <- c(exo,   rep(0L, nvar))
+        # local copy
+        sample.cov    <- SAMPLE.cov[[g]]
+        sample.mean   <- SAMPLE.mean[[g]]
+        sample.slopes <- SAMPLE.slopes[[g]]
+        sample.th     <- SAMPLE.th[[g]]
+        sample.th.idx <- SAMPLE.th.idx[[g]]
+        sample.cov.x  <- SAMPLE.cov.x[[g]]
+        sample.mean.x <- SAMPLE.mean.x[[g]]
 
-        # starting values -- variances
+        # force local sample.cov to be pd -- just for starting values anyway
         if(!is.null(sample.cov)) {
-            ustart <- c(ustart, diag(sample.cov[[g]]))
-        } else {
-            ustart <- c(ustart, rep(as.numeric(NA), nvar))
+            sample.cov <- lav_matrix_symmetric_force_pd(sample.cov)
         }
 
-        # COVARIANCES!
-        pstar <- nvar*(nvar-1)/2
-        if(pstar > 0L) { # only if more than 1 variable
-            tmp <- utils::combn(ov.names[[g]], 2)
-            lhs <- c(lhs, tmp[1,]) # to fill upper.tri
-             op <- c(op,   rep("~~", pstar))
-            rhs <- c(rhs, tmp[2,])
-            group <- c(group, rep(g,  pstar))
-            free  <- c(free,  rep(1L, pstar))
-            exo   <- c(exo,   rep(0L, pstar))
-        }
+        for(l in 1:nlevels) {
 
-        # starting values -- covariances
-        if(!is.null(sample.cov)) {
-            ustart <- c(ustart, lav_matrix_vech(sample.cov[[g]], 
-                                                diagonal = FALSE))
-        } else {
-            ustart <- c(ustart, rep(as.numeric(NA), pstar))
-        }
+            # block
+            b <- b + 1L
 
-        # ordered? fix variances, add thresholds
-        ord.names <- character(0L)
-        if(categorical) {
-            ord.names <- ov$name[ ov$type == "ordered" ]
-            # only for this group
-            ord.names <- ov.names[[g]][ which(ov.names[[g]] %in% ord.names) ]
-            
-            if(length(ord.names) > 0L) {
-                # fix variances to 1.0
-                idx <- which(lhs %in% ord.names & op == "~~" & lhs == rhs)
-                ustart[idx] <- 1.0
-                free[idx] <- 0L
-
-                # add thresholds
-                lhs.th <- character(0); rhs.th <- character(0)
-                for(o in ord.names) {
-                    nth  <- ov$nlev[ ov$name == o ] - 1L
-                    if(nth < 1L) next
-                    lhs.th <- c(lhs.th, rep(o, nth))
-                    rhs.th <- c(rhs.th, paste("t", seq_len(nth), sep=""))
+            # ov.names for this block
+            if(is.null(lavpta)) { # only data was used
+                ov.names     <- lavdata@ov.names[[g]]
+                ov.names.x   <- lavdata@ov.names.x[[g]]
+                ov.names.nox <- ov.names[!ov.names %in% ov.names.x]
+            } else {
+                if(conditional.x) {
+                    ov.names <- lavpta$vnames$ov.nox[[b]]
+                } else {
+                    ov.names <- lavpta$vnames$ov[[b]]
                 }
-                nel   <- length(lhs.th)
-                lhs   <- c(lhs, lhs.th)
-                rhs   <- c(rhs, rhs.th)
-                 op   <- c(op, rep("|", nel))
-                group <- c(group, rep(g, nel))
-                 free <- c(free, rep(1L, nel))
-                  exo <- c(exo, rep(0L, nel))
+                ov.names.x   <- lavpta$vnames$ov.x[[b]]
+                ov.names.nox <- lavpta$vnames$ov.nox[[b]]
+            }
+
+            # only for multilevel, overwrite sample.cov and sample.mean
+            if(nlevels > 1L) {
+
+                if(independent) {
+                    ov.names.x <- lavpta$vnames$ov.x[[b]]
+                    ov.names.nox <- lavpta$vnames$ov.nox[[b]]
+                    sample.cov.x <- NULL # we will estimate them
+                    sample.mean.x <- NULL
+                } else {
+                    ov.names.x <- character(0L)
+                    ov.names.nox <- ov.names
+                }
+
+                block.idx <- match(ov.names, OV.NAMES)
+
+                if(l == 1L) {
+                    sample.cov  <- YLp[[2]]$Sigma.W[block.idx, block.idx, 
+                                                    drop = FALSE]
+                    sample.mean <- YLp[[2]]$Mu.W[block.idx]
+                } else {
+                    sample.cov  <- YLp[[2]]$Sigma.B[block.idx, block.idx, 
+                                                    drop = FALSE]
+                    sample.mean <- YLp[[2]]$Mu.B[block.idx]
+                }
+
+                # force local sample.cov to be strictly pd (and exaggerate)
+                # just for starting values anyway, but at least the first
+                # evaluation will be feasible
+                sample.cov <- lav_matrix_symmetric_force_pd(sample.cov, 
+                                                            tol = 1e-03)
+            }
+
+
+            # a) VARIANCES (all ov's, if !conditional.x, also exo's)
+            nvar  <- length(ov.names)
+    
+            lhs   <- c(lhs, ov.names)
+             op   <- c(op, rep("~~", nvar))
+            rhs   <- c(rhs, ov.names)
+            block <- c(block, rep(b,  nvar))
+            group <- c(group, rep(g,  nvar))
+            level <- c(level, rep(l,  nvar))
+            free  <- c(free,  rep(1L, nvar))
+            exo   <- c(exo,   rep(0L, nvar))
+
+            # starting values -- variances
+            if(!is.null(sample.cov)) {
+                ustart <- c(ustart, diag(sample.cov))
+            } else {
+                ustart <- c(ustart, rep(as.numeric(NA), nvar))
+            }
+
+            # COVARIANCES!
+            if(!independent) {
+                pstar <- nvar*(nvar-1)/2
+                if(pstar > 0L) { # only if more than 1 variable
+                    tmp <- utils::combn(ov.names, 2)
+                    lhs <- c(lhs, tmp[1,]) # to fill upper.tri
+                     op <- c(op,   rep("~~", pstar))
+                    rhs <- c(rhs, tmp[2,])
+                    block <- c(block, rep(b,  pstar))
+                    group <- c(group, rep(g,  pstar))
+                    level <- c(level, rep(l,  pstar))
+                    free  <- c(free,  rep(1L, pstar))
+                    exo   <- c(exo,   rep(0L, pstar))
+                }
+    
+                # starting values -- covariances
+                if(!is.null(sample.cov)) {
+                    ustart <- c(ustart, lav_matrix_vech(sample.cov, 
+                                                        diagonal = FALSE))
+                } else {
+                    ustart <- c(ustart, rep(as.numeric(NA), pstar))
+                }
+            }
+    
+            # ordered? fix variances, add thresholds
+            ord.names <- character(0L)
+            if(categorical) {
+                ord.names <- ov$name[ ov$type == "ordered" ]
+                # only for this group
+                ord.names <- ov.names[ which(ov.names %in% ord.names) ]
+                
+                if(length(ord.names) > 0L) {
+                    # fix variances to 1.0
+                    idx <- which(lhs %in% ord.names & op == "~~" & lhs == rhs)
+                    ustart[idx] <- 1.0
+                    free[idx] <- 0L
+    
+                    # add thresholds
+                    lhs.th <- character(0); rhs.th <- character(0)
+                    for(o in ord.names) {
+                        nth  <- ov$nlev[ ov$name == o ] - 1L
+                        if(nth < 1L) next
+                        lhs.th <- c(lhs.th, rep(o, nth))
+                        rhs.th <- c(rhs.th, paste("t", seq_len(nth), sep=""))
+                    }
+                    nel   <- length(lhs.th)
+                    lhs   <- c(lhs, lhs.th)
+                    rhs   <- c(rhs, rhs.th)
+                     op   <- c(op, rep("|", nel))
+                    block <- c(block, rep(b,  nel))
+                    group <- c(group, rep(g,  nel))
+                    level <- c(level, rep(l,  nel))
+                     free <- c(free, rep(1L, nel))
+                      exo <- c(exo, rep(0L, nel))
+    
+                    # starting values
+                    if(!is.null(sample.th) && !is.null(sample.th.idx)) {
+                        th.start <- sample.th[ sample.th.idx > 0L ]
+                        ustart <- c(ustart, th.start)
+                    } else {
+                        ustart <- c(ustart, rep(as.numeric(NA), nel))
+                    }
+
+                    # fixed-to-zero intercepts (since 0.5.17)
+                    ov.int <- ord.names
+                    nel   <- length(ov.int)
+                    lhs   <- c(lhs, ov.int)
+                     op   <- c(op, rep("~1", nel))
+                    rhs   <- c(rhs, rep("", nel))
+                    block <- c(block, rep(b,  nel))
+                    group <- c(group, rep(g,  nel))
+                    level <- c(level, rep(l,  nel))
+                    free  <- c(free,  rep(0L, nel))
+                    exo   <- c(exo,   rep(0L, nel))
+                   ustart <- c(ustart, rep(0, nel))
+
+                    # ~*~ (since 0.6-1)
+                    nel <- length(ov.int)
+                    lhs   <- c(lhs, ov.int)
+                     op   <- c(op, rep("~*~", nel))
+                    rhs   <- c(rhs, ov.int)
+                    block <- c(block, rep(b,  nel))
+                    group <- c(group, rep(g,  nel))
+                    level <- c(level, rep(l,  nel))
+                    free  <- c(free,  rep(0L, nel))
+                    exo   <- c(exo,   rep(0L, nel))
+                   ustart <- c(ustart, rep(1, nel))
+                }
+            } # categorical
+ 
+
+            # meanstructure?
+            if(meanstructure) {
+                # auto-remove ordinal variables
+                ov.int <- ov.names
+                idx <- which(ov.int %in% ord.names)
+                if(length(idx)) ov.int <- ov.int[-idx]
+
+                nel <- length(ov.int)
+                lhs   <- c(lhs, ov.int)
+                 op   <- c(op, rep("~1", nel))
+                rhs   <- c(rhs, rep("", nel))
+                block <- c(block, rep(b,  nel))
+                group <- c(group, rep(g,  nel))
+                level <- c(level, rep(l,  nel))
+                # if multilevel, level=1 has fixed zeroes
+                if(nlevels > 1L && l == 1L) {
+                    WITHIN <- rep(0L, nel)
+                    WITHIN[Lp$within.idx[[2]]] <- 1L
+                    free  <- c(free, WITHIN)
+                } else {
+                    free  <- c(free,  rep(1L, nel))
+                }
+                exo   <- c(exo,   rep(0L, nel))
 
                 # starting values
-                if(!is.null(sample.th) && !is.null(sample.th.idx)) {
-                    th.start <- sample.th[[g]][ sample.th.idx[[g]] > 0L ]
-                    ustart <- c(ustart, th.start)
+                if(!is.null(sample.mean)) {
+                    sample.int.idx <- match(ov.int, ov.names)
+                    ustart <- c(ustart, sample.mean[sample.int.idx])
+                } else {
+                    ustart <- c(ustart, rep(as.numeric(NA), length(ov.int)))
+                }
+            }
+
+
+            # fixed.x exogenous variables?
+            if(!conditional.x && (nx <- length(ov.names.x)) > 0L) {
+
+                if(independent) {
+                    # add covariances for eXo
+                    pstar <- nx*(nx-1)/2
+                    if(pstar > 0L) { # only if more than 1 variable
+                        tmp <- utils::combn(ov.names.x, 2)
+                        lhs <- c(lhs, tmp[1,]) # to fill upper.tri
+                         op <- c(op,   rep("~~", pstar))
+                        rhs <- c(rhs, tmp[2,])
+                        block <- c(block, rep(b,  pstar))
+                        group <- c(group, rep(g,  pstar))
+                        level <- c(level, rep(l,  pstar))
+                        free  <- c(free,  rep(1L, pstar))
+                        exo   <- c(exo,   rep(0L, pstar))
+
+                        # starting values
+                        if(!is.null(sample.cov.x)) {
+                            rhs.idx <- match(tmp[1,], ov.names.x)
+                            lhs.idx <- match(tmp[2,], ov.names.x)
+                            ustart <- c(ustart,
+                                        sample.cov.x[ cbind(rhs.idx, lhs.idx) ])
+                        } else {
+                            ustart <- c(ustart, rep(as.numeric(NA), pstar))
+                        }
+                    }
+                }
+
+                if(fixed.x) {
+                    # fix variances/covariances 
+                    exo.idx <- which(rhs %in% ov.names.x &
+                                     lhs %in% ov.names.x &
+                                     op == "~~" & group == g)
+                    exo[exo.idx] <- 1L
+                    free[exo.idx] <- 0L
+    
+                    # fix means
+                    exo.idx <- which(lhs %in% ov.names.x &
+                                     op == "~1" & group == g)
+                    exo[exo.idx] <- 1L
+                    free[exo.idx] <- 0L
+                }
+
+            }
+
+            # conditional.x?
+            if(conditional.x && (nx <- length(ov.names.x)) > 0L) {
+
+                # eXo variances
+                nel  <- length(ov.names.x)
+                lhs   <- c(lhs, ov.names.x)
+                op    <- c(op, rep("~~", nel))
+                rhs   <- c(rhs, ov.names.x)
+                block <- c(block, rep(b,  nel))
+                group <- c(group, rep(g,  nel))
+                level <- c(level, rep(l,  nel))
+                if(fixed.x) {
+                    free  <- c(free,  rep(0L, nel))
+                    exo   <- c(exo,   rep(1L, nel))
+                } else {
+                    free  <- c(free,  rep(1L, nel))
+                    exo   <- c(exo,   rep(0L, nel))
+                }
+
+                # starting values
+                if(!is.null(sample.cov.x)) {
+                    ustart <- c(ustart, diag(sample.cov.x))
                 } else {
                     ustart <- c(ustart, rep(as.numeric(NA), nel))
                 }
-            }
-        }
 
-        # meanstructure?
-        if(meanstructure) {
-            # auto-remove ordinal variables
-            ov.int <- ov.names[[g]]
-            idx <- which(ov.int %in% ord.names)
-            if(length(idx)) ov.int <- ov.int[-idx]
 
-            nel <- length(ov.int)
-            lhs   <- c(lhs, ov.int)
-             op   <- c(op, rep("~1", nel))
-            rhs   <- c(rhs, rep("", nel))
-            group <- c(group, rep(g,  nel))
-            free  <- c(free,  rep(1L, nel))
-            exo   <- c(exo,   rep(0L, nel))
-            # starting values
-            if(!is.null(sample.mean)) {
-                sample.int.idx <- match(ov.int, ov.names[[g]])
-                ustart <- c(ustart, sample.mean[[g]][sample.int.idx])
-            } else {
-                ustart <- c(ustart, rep(as.numeric(NA), length(ov.int)))
-            }
-        }
+                # eXo covariances
+                pstar <- nx*(nx-1)/2
+                if(pstar > 0L) { # only if more than 1 variable
+                    tmp <- utils::combn(ov.names.x, 2)
+                    lhs <- c(lhs, tmp[1,]) # to fill upper.tri
+                     op <- c(op,   rep("~~", pstar))
+                    rhs <- c(rhs, tmp[2,])
+                    block <- c(block, rep(b,  pstar))
+                    group <- c(group, rep(g,  pstar))
+                    level <- c(level, rep(l,  pstar))
+                    if(fixed.x) {
+                        free  <- c(free,  rep(0L, pstar))
+                        exo   <- c(exo,   rep(1L, pstar))
+                    } else {
+                        free  <- c(free,  rep(1L, pstar))
+                        exo   <- c(exo,   rep(0L, pstar))
+                    }
 
-        # categorical? insert means as fixed-to-zero parameters
-        # since 0.5-17
-        if(categorical) {
-            ov.int <- ov.names[[g]]
-            idx <- which(ov.int %in% ord.names)
-            ov.int <- ov.int[idx]
+                    # starting values
+                    if(!is.null(sample.cov.x)) {
+                        rhs.idx <- match(tmp[1,], ov.names.x)
+                        lhs.idx <- match(tmp[2,], ov.names.x)
+                        ustart <- c(ustart,
+                                    sample.cov.x[ cbind(rhs.idx, lhs.idx) ])
+                    } else {
+                        ustart <- c(ustart, rep(as.numeric(NA), pstar))
+                    }
+                }
 
-            nel <- length(ov.int)
-            lhs   <- c(lhs, ov.int)
-             op   <- c(op, rep("~1", nel))
-            rhs   <- c(rhs, rep("", nel))
-            group <- c(group, rep(g,  nel))
-            free  <- c(free,  rep(0L, nel))
-            exo   <- c(exo,   rep(0L, nel))
-           ustart <- c(ustart, rep(0L, nel))
-        }
- 
+                # eXo means
+                if(meanstructure) {
+                    ov.int <- ov.names.x
 
-        # fixed.x exogenous variables?
-        if(!conditional.x && 
-           fixed.x && (nx <- length(ov.names.x[[g]])) > 0L) {
-            # fix variances/covariances 
-            exo.idx <- which(rhs %in% ov.names.x[[g]] &
-                             lhs %in% ov.names.x[[g]] &
-                             op == "~~" & group == g)
-            exo[exo.idx] <- 1L
-            free[exo.idx] <- 0L
+                    nel   <- length(ov.int)
+                    lhs   <- c(lhs, ov.int)
+                    op    <- c(op, rep("~1", nel))
+                    rhs   <- c(rhs, rep("", nel))
+                    group <- c(group, rep(g,  nel))
+                    block <- c(block, rep(b,  nel))
+                    level <- c(level, rep(l,  nel))
+                    if(fixed.x) {
+                        free  <- c(free,  rep(0L, nel))
+                        exo   <- c(exo,   rep(1L, nel))
+                    } else {
+                        free  <- c(free,  rep(1L, nel))
+                        exo   <- c(exo,   rep(0L, nel))
+                    }
 
-            # fix means
-            exo.idx <- which(rhs %in% ov.names.x[[g]] &
-                             op == "~1" & group == g)
-            exo[exo.idx] <- 1L
-            free[exo.idx] <- 0L
-        }
+                    # starting values
+                    if(!is.null(sample.mean.x)) {
+                        sample.int.idx <- match(ov.int, ov.names.x)
+                        ustart <- c(ustart, sample.mean.x[sample.int.idx])
+                    } else {
+                       ustart <- c(ustart, rep(as.numeric(NA), length(ov.int)))
+                    }
+                }
 
-        # conditional.x?
-        if(conditional.x && (nx <- length(ov.names.x[[g]])) > 0L) {
-            nnox <- length(ov.names.nox[[g]])
-            nel  <- nnox * nx
 
-            lhs <- c(lhs, rep(ov.names.nox[[g]], times = nx))
-             op <- c(op,  rep("~", nel))
-            rhs <- c(rhs, rep(ov.names.x[[g]], each = nnox))
-          group <- c(group, rep(g,  nel))
-           free <- c(free,  rep(1L, nel))
-            exo <- c(exo,   rep(1L, nel))
+                # slopes
+                if(independent) {
+                    lhs <- c(lhs, rep("dummy", nx))
+                     op <- c( op, rep("~", nx))
+                    rhs <- c(rhs, ov.names.x)
 
-            # starting values -- slopes
-            if(!is.null(sample.slopes)) {
-                ustart <- c(ustart, lav_matrix_vec(sample.slopes[[g]]))
-            } else {
-                ustart <- c(ustart, rep(as.numeric(NA), nel))
-            }
-        }
+                    # add dummy latent
+                    lhs <- c(lhs,"dummy")
+                     op <- c(op, "=~")
+                    rhs <- c(rhs, "dummy")
+                    lhs <- c(lhs,"dummy")
+                     op <- c(op, "~~")
+                    rhs <- c(rhs, "dummy")
 
+                    exo <- c(exo,    rep(1L, nx))
+                    exo <- c(exo,   c(0L,0L))
+                  group <- c(group,  rep(g,  nx + 2L))
+                  block <- c(block,  rep(b,  nx + 2L))
+                  level <- c(level,  rep(l,  nx + 2L))
+                   free <- c(free,   rep(0L, nx + 2L))
+                 ustart <- c(ustart, rep(0,  nx + 2L))
+
+                    if(meanstructure) {
+                        lhs <- c(lhs,"dummy")
+                         op <- c(op, "~1")
+                        rhs <- c(rhs, "")
+
+                        exo    <- c(exo,    0L)
+                        group  <- c(group,  g)
+                        block  <- c(block,  b)
+                        level  <- c(level,  l)
+                        free   <- c(free,   0L)
+                        ustart <- c(ustart, 0)
+                    }
+                } else {
+                    # unrestricted
+                    nnox <- length(ov.names.nox)
+                    nel  <- nnox * nx
+    
+                    lhs <- c(lhs, rep(ov.names.nox, times = nx))
+                     op <- c(op,  rep("~", nel))
+                    rhs <- c(rhs, rep(ov.names.x, each = nnox))
+                    block <- c(block, rep(b,  nel))
+                    group <- c(group, rep(g,  nel))
+                    level <- c(level, rep(l,  nel))
+                    free <- c(free,  rep(1L, nel))
+                    exo <- c(exo,   rep(1L, nel))
+  
+                    # starting values -- slopes
+                    if(!is.null(sample.slopes)) {
+                        ustart <- c(ustart, lav_matrix_vec(sample.slopes))
+                    } else {
+                        ustart <- c(ustart, rep(as.numeric(NA), nel))
+                    }
+                }
+
+            } # conditional.x
+
+
+
+
+        } # levels
     } # ngroups
 
     # free counter
@@ -256,9 +572,9 @@ lav_partable_unrestricted <- function(lavobject      = NULL,
                         op          = op,
                         rhs         = rhs,
                         user        = rep(1L,  length(lhs)),
-                        block       = group, # for now
+                        block       = block,
                         group       = group,
-                        #mod.idx     = rep(0L,  length(lhs)),
+                        level       = level,
                         free        = free,
                         ustart      = ustart,
                         exo         = exo #,
@@ -267,6 +583,11 @@ lav_partable_unrestricted <- function(lavobject      = NULL,
                         #unco        = free
                    )
 
+    
+    # keep level column if no levels? (no for now)
+    if(nlevels < 2L) {
+        LIST$level <- NULL
+    }
 
     LIST
 

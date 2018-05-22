@@ -28,6 +28,7 @@ Objects can be created via the
 }
 \section{Slots}{
   \describe{
+    \item{\code{version}:}{The lavaan package version used to create this objects}
     \item{\code{call}:}{The function call as returned by \code{match.call()}.}
     \item{\code{timing}:}{The elapsed time (user+system) for various parts of 
       the program as a list, including the total time.}
@@ -43,12 +44,16 @@ about the data.}
       internal (matrix) representation of the model}
     \item{\code{Cache}:}{List using objects that we try to compute only once, and reuse many times.}
     \item{\code{Fit}:}{Object of internal class \code{"Fit"}: the 
-      results of fitting the model}
+      results of fitting the model. No longer used.}
     \item{\code{boot}:}{List. Results and information about the bootstrap.}
     \item{\code{optim}:}{List. Information about the optimization.}
+    \item{\code{loglik}:}{List. Information about the loglikelihood of the model (if maximum likelihood was used).}
     \item{\code{implied}:}{List. Model implied statistics.}
     \item{\code{vcov}:}{List. Information about the variance matrix (vcov) of the model parameters.}
     \item{\code{test}:}{List. Different test statistics.}
+    \item{\code{h1}:}{List. Information about the unrestricted h1 model (if available).}
+    \item{\code{baseline}:}{List. Information about a baseline model (often
+the independence model) (if available).}
     \item{\code{external}:}{List. Empty slot to be used by add-on packages.}
   }
 }
@@ -105,11 +110,14 @@ about the data.}
       are compared in a sequential order. Test statistics are based on the 
       likelihood ratio test. For more details and
       further options, see the \code{\link{lavTestLRT}} page.} 
-    \item{update}{\code{signature(object = "lavaan", model, ..., 
+    \item{update}{\code{signature(object = "lavaan", model, add, ..., 
         evaluate=TRUE)}: update a fitted lavaan object and evaluate it
         (unless \code{evaluate=FALSE}). Note that we use the environment
         that is stored within the lavaan object, which is not necessarily
-        the parent frame.}
+        the parent frame. The \code{add} argument is analogous to the one
+        described in the \code{\link{lavTestScore}} page, and can be used to
+        add parameters to the specified model rather than passing an entirely
+        new \code{model} argument.}
     \item{nobs}{\code{signature(object = "lavaan")}: returns the effective
       number of observations used when fitting the model. In a multiple group
       analysis, this is the sum of all observations per group.}
@@ -119,7 +127,10 @@ about the data.}
       methods automatically work via \code{logLik()}.}
     \item{show}{\code{signature(object = "lavaan")}: Print a short summary 
       of the model fit}
-    \item{summary}{\code{signature(object = "lavaan", header = TRUE, fit.measures=FALSE, estimates = TRUE, ci = FALSE, fmi = FALSE, standardized = FALSE, rsquare=FALSE, std.nox = FALSE, modindices=FALSE, ci=FALSE, nd = 3L)}: 
+    \item{summary}{\code{signature(object = "lavaan", header = TRUE, 
+     fit.measures = FALSE, estimates = TRUE, ci = FALSE, fmi = FALSE, 
+     standardized = FALSE, cov.std = TRUE, rsquare = FALSE, std.nox = FALSE, 
+     modindices = FALSE, ci = FALSE, nd = 3L)}: 
       Print a nice summary of the model estimates. 
       If \code{header = TRUE}, the header section (including fit measures) is
       printed.  

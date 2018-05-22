@@ -1,5 +1,6 @@
 ctr_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
                          lavsamplestats = NULL, lavpartable = NULL,
+                         lavpta = NULL,
                          lavoptions = NULL, x = NULL, VCOV = NULL,
                          lavcache = NULL) {
 
@@ -10,6 +11,10 @@ ctr_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
         lavsamplestats <- lavobject@SampleStats
         lavcache <- lavobject@Cache
         lavpartable <- lavobject@ParTable
+        lavpta <- lavobject@pta
+    }
+    if(is.null(lavpta)) {
+        lavpta <- lav_partable_attributes(lavpartable)
     }
 
 
@@ -31,6 +36,7 @@ ctr_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
     ModelSat <- lav_partable_unrestricted(lavobject      = NULL,
                                           lavdata        = lavdata,
                                           lavoptions     = lavoptions,
+                                          lavpta         = lavpta,
                                           lavsamplestats = lavsamplestats)
 
     # FIXME: se="none", test="none"??
@@ -54,6 +60,7 @@ ctr_pml_plrt <- function(lavobject = NULL, lavmodel = NULL, lavdata = NULL,
         lav_partable_unrestricted(lavobject      = NULL,
                                   lavdata        = lavdata,
                                   lavoptions     = lavoptions,
+                                  lavpta         = lavpta,
                                   lavsamplestats = NULL,
                                   sample.cov     = computeSigmaHat(lavmodel),
                                   sample.mean    = computeMuHat(lavmodel), 
@@ -117,13 +124,13 @@ if(is.null(VCOV)) {
                            lavpartable    = lavpartable,
                            lavcache       = lavcache)
 }
-InvG_to_psipsi_attheta0 <- (lavsamplestats@ntotal * VCOV )[index.par, index.par]  #G^psipsi(theta0)
+InvG_to_psipsi_attheta0 <- (lavsamplestats@ntotal * VCOV )[index.par, index.par, drop = FALSE]  #G^psipsi(theta0)
 #below the lavaan function getHessian is used
 #Hattheta0 <- (-1) * H0.Hessian
 #Hattheta0 <- H0.Hessian
 #InvHattheta0 <- solve(Hattheta0)
 InvHattheta0 <- attr(VCOV, "E.inv")
-InvH_to_psipsi_attheta0 <- InvHattheta0[index.par, index.par]   #H^psipsi(theta0)
+InvH_to_psipsi_attheta0 <- InvHattheta0[index.par, index.par, drop = FALSE]   #H^psipsi(theta0)
 if(lavmodel@eq.constraints) {
     IN <- InvH_to_psipsi_attheta0
     IN.npar <- ncol(IN)
@@ -196,7 +203,8 @@ var_tzz <- 2* sum(diag(H1tmp_prod2))#variance of the second quadratic quantity
 
 drhodpsi_MAT <- vector("list", length = lavsamplestats@ngroups)
 for(g in 1:lavsamplestats@ngroups) {
-    delta.g <- computeDelta(lavmodel)[[g]] # [[1]] to be substituted by g?
+
+    #delta.g <- computeDelta(lavmodel)[[g]] # [[1]] to be substituted by g?
     # The above gives the derivatives of thresholds and polychoric correlations
     # with respect to SEM param (including thresholds) evaluated under H0.
     # From deltamat we need to exclude the rows and columns referring to thresholds.
@@ -218,17 +226,44 @@ for(g in 1:lavsamplestats@ngroups) {
     # computeDelta
     #th.names <- lavobject@pta$vnames$th[[g]]
     #ov.names <- lavobject@pta$vnames$ov[[g]]
-    th.names <- lavNames(lavpartable, "th")
-    ov.names <- lavNames(lavpartable, "ov.nox")
-    tmp <- utils::combn(ov.names, 2)
-    cor.names <- paste(tmp[1,], "~~", tmp[2,], sep = "")
-    NAMES <- c(th.names, cor.names)
+    #th.names <- lavNames(lavpartable, "th")
+    #ov.names <- lavNames(lavpartable, "ov.nox")
+    #ov.names.x <- lavNames(lavpartable, "ov.x")
+    #tmp <- utils::combn(ov.names, 2)
+    #cor.names <- paste(tmp[1,], "~~", tmp[2,], sep = "")
+
+    # added by YR - 22 Okt 2017 #####################################
+    #ov.names.x <- lavNames(lavpartable, "ov.x")
+    #if(length(ov.names.x)) {
+    #    slope.names <- apply(expand.grid(ov.names, ov.names.x), 1L,
+    #                             paste, collapse = "~")
+    #} else {
+    #    slope.names <- character(0L)
+    #}
+    #################################################################
+
+    #NAMES <- c(th.names, slope.names, cor.names)
+
+    # added by YR - 26 April 2018, for 0.6-1
+    # we now can get 'labelled' delta rownames
+    delta.g <- lav_object_inspect_delta_internal(lavmodel = lavmodel,
+                   lavdata = lavdata, lavpartable = lavpartable,
+                   lavpta = lavpta, add.labels = TRUE, add.class = FALSE,
+                   drop.list.single.group = FALSE)[[g]]
+    NAMES <- rownames(delta.g)
     if(g > 1L) {
         NAMES <- paste(NAMES, ".g", g, sep = "")
     }
 
     par.idx <- match(PARLABEL, NAMES)
-    drhodpsi_MAT[[g]] <- delta.g[par.idx, index.par]
+    if(any(is.na(par.idx))) {
+        warning("lavaan WARNING: [ctr_pml_plrt] mismatch between DELTA labels and PAR labels!\n", "PARLABEL:\n", paste(PARLABEL, collapse = " "), 
+       "\nDELTA LABELS:\n", paste(NAMES, collapse = " "))
+    }
+
+
+
+    drhodpsi_MAT[[g]] <- delta.g[par.idx, index.par, drop = FALSE]
 }
 drhodpsi_mat <- do.call(rbind, drhodpsi_MAT)
 
@@ -246,7 +281,13 @@ if(asym_mean_PLRTH0Sat == 0) {
     asym_var_PLRTH0Sat <- 0
     scaling.factor <- as.numeric(NA)
     FSA_PLRT_SEM <- as.numeric(NA)
-    adjusted_df  <- as.numeric(NA)
+    adjusted_df  <- as.integer(NA)
+    pvalue <- as.numeric(NA)
+} else if(any(is.na(c(var_tzz, var_tww, cov_tzztww)))) {
+    asym_var_PLRTH0Sat <- as.numeric(NA)
+    scaling.factor <- as.numeric(NA)
+    FSA_PLRT_SEM <- as.numeric(NA)
+    adjusted_df  <- as.integer(NA)
     pvalue <- as.numeric(NA)
 } else {
     asym_var_PLRTH0Sat  <- var_tzz + var_tww -2*cov_tzztww

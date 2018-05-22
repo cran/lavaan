@@ -18,9 +18,12 @@ setClass("lavData",
         norig="list",              # original number of observations
         ov.names="list",           # variable names (per group)
         ov.names.x="list",         # exo variable names (per group)
+        ov.names.l="list",         # names per level
         #ov.types="list",           # variable types (per group)
         #ov.idx="list",             # column indices (all observed variables)
         ordered="character",       # ordered variables
+        weights="list",            # sampling weights (per group)
+        sampling.weights="character", # sampling weights variable
         ov="list",                 # variable table
         case.idx="list",           # case indices per group
         missing="character",       # "listwise" or not?
@@ -64,7 +67,9 @@ setClass("lavSampleStats",         # sample moments
         cov.log.det="list",        # log det of observed cov (per group)
         res.icov="list",
         res.cov.log.det="list",
-        ridge="numeric",           # ridge constant
+        #ridge.constant="numeric",  # ridge constant (per group)
+        #ridge.constant.x="numeric",# ridge constant (per group) for eXo
+        ridge="numeric",
         WLS.obs="list",            # all relevant observed stats in a vector
         WLS.V="list",              # weight matrix for GLS/WLS
         WLS.VD="list",             # diagonal of weight matrix only
@@ -91,6 +96,7 @@ setClass("lavModel",          # MATRIX representation of the sem model
         representation="character",  # stub, until we define more classes
         meanstructure="logical",
         categorical="logical",
+        multilevel="logical",
         group.w.free="logical",
         link="character",
 
@@ -175,6 +181,7 @@ setClass("Fit",
 
 setClass("lavaan",
     representation(
+        version     = "character",       # lavaan version
         call        = "call",            # matched call
         timing      = "list",            # timing information
         Options     = "list",            # lavOptions
@@ -187,9 +194,12 @@ setClass("lavaan",
         Fit         = "Fit",             # fitted results 
         boot        = "list",            # bootstrap results
         optim       = "list",            # optimizer results
+        loglik      = "list",            # loglik values and info
         implied     = "list",            # model implied moments
         vcov        = "list",            # vcov
         test        = "list",            # test
+        h1          = "list",            # unrestricted model results
+        baseline    = "list",            # baseline model results
         external    = "list"             # optional slot, for add-on packages
     ) 
 )

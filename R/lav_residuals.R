@@ -59,7 +59,7 @@ function(object, type="raw", labels=TRUE) {
         stop("lavaan ERROR: can not compute standardized residuals if there are no free parameters in the model")
     }
 
-    G <- object@Model@nblocks
+    G <- object@Model@ngroups
     meanstructure <- object@Model@meanstructure
     ov.names <- object@Data@ov.names
 
@@ -86,12 +86,16 @@ function(object, type="raw", labels=TRUE) {
             augUser$free[      idx ] <- max(augUser$free) + 1:length(idx) 
             #augUser$unco[idx ] <- max(augUser$unco) + 1:length(idx) 
             augModel <- lav_model(lavpartable    = augUser,
-                                  lavoptions     = object@Options)
+                                  lavoptions     = object@Options,
+                                  cov.x          = object@SampleStats@cov.x,
+                                  mean.x         = object@SampleStats@mean.x)
             VarCov <- lav_model_vcov(lavmodel       = augModel, 
                                      lavsamplestats = object@SampleStats,
                                      lavdata        = object@Data,
                                      lavpartable    = object@ParTable,
-                                     lavoptions     = object@Options)
+                                     lavoptions     = object@Options,
+                                     lavimplied     = object@implied,
+                                     lavh1          = object@h1)
             # set cov between free and fixed.x elements to zero
             ###
             ### FIXME: should we not do this on the information level,
@@ -108,7 +112,9 @@ function(object, type="raw", labels=TRUE) {
                                      lavdata        = object@Data,
                                      lavpartable    = object@ParTable,
                                      lavsamplestats = object@SampleStats,
-                                     lavoptions     = object@Options)
+                                     lavoptions     = object@Options,
+                                     lavimplied     = object@implied,
+                                     lavh1          = object@h1)
             Delta  <- computeDelta(lavmodel = object@Model)
         }   
     }
@@ -231,6 +237,7 @@ function(object, type="raw", labels=TRUE) {
                     # data complete, under h1, expected == observed
                     A1 <- lav_mvnorm_h1_information_observed_samplestats(
                       sample.cov     = lavsamplestats@cov[[g]],
+                      x.idx          = lavsamplestats@x.idx[[g]],
                       sample.cov.inv = lavsamplestats@icov[[g]])
                 }
 
@@ -244,6 +251,7 @@ function(object, type="raw", labels=TRUE) {
                     B1 <- lav_mvnorm_h1_information_firstorder(
                           Y     = lavdata@X[[g]],
                           Gamma = lavsamplestats@NACOV[[g]],
+                          x.idx = lavsamplestats@x.idx[[g]],
                           sample.cov = lavsamplestats@cov[[g]],
                           sample.cov.inv = lavsamplestats@icov[[g]])
                 }
@@ -262,6 +270,7 @@ function(object, type="raw", labels=TRUE) {
                     B1 <- lav_mvnorm_h1_information_firstorder(
                           Y     = lavdata@X[[g]],
                           Gamma = lavsamplestats@NACOV[[g]],
+                          x.idx = lavsamplestats@x.idx[[g]],
                           sample.cov = lavsamplestats@cov[[g]],
                           sample.cov.inv = lavsamplestats@icov[[g]])
                 }
@@ -332,7 +341,7 @@ function(object, type="raw", labels=TRUE) {
     if(G == 1) {
         R <- R[[1]]
     } else {
-        names(R) <- unlist(object@Data@block.label)
+        names(R) <- unlist(object@Data@group.label)
     }
 
     R

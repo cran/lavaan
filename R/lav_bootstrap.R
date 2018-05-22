@@ -274,7 +274,6 @@ bootstrap.internal <- function(object          = NULL,
 
         # verbose
         if(verbose) cat("  ... bootstrap draw number:", sprintf("%4d", b))
-
         bootSampleStats <- try(lav_samplestats_from_data(
                                lavdata       = NULL,
                                DataX         = dataX,
@@ -282,6 +281,7 @@ bootstrap.internal <- function(object          = NULL,
                                DataOv        = lavdata@ov,
                                DataOvnames   = lavdata@ov.names,
                                DataOvnamesx  = lavdata@ov.names.x,
+                               DataWT        = lavdata@weights,
                                missing       = lavoptions$missing,
                                rescale       = (lavoptions$estimator == "ML" &&
                                                 lavoptions$likelihood == "normal"),
@@ -294,7 +294,10 @@ bootstrap.internal <- function(object          = NULL,
                                missing.h1    = TRUE,
                                verbose       = FALSE), silent=TRUE) 
         if(inherits(bootSampleStats, "try-error")) {
-            if(verbose) cat("     FAILED: creating sample statistics\n")
+            if(verbose) {
+                cat("     FAILED: creating sample statistics\n")
+                cat(bootSampleStats[1])
+            }
             options(old_options)
             return(NULL)
         }
@@ -353,6 +356,9 @@ bootstrap.internal <- function(object          = NULL,
 
     # this is from the boot function in package boot
     RR <- R
+    if(verbose) {
+        cat("\n")
+    }
     res <- if (ncpus > 1L && (have_mc || have_snow)) {
         if (have_mc) {
             parallel::mclapply(seq_len(RR), fn, mc.cores = ncpus)

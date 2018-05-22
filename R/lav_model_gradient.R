@@ -4,7 +4,7 @@ lav_model_gradient <- function(lavmodel       = NULL,
                                GLIST          = NULL, 
                                lavsamplestats = NULL, 
                                lavdata        = NULL,
-                               lavcache       = NULL, 
+                               lavcache       = NULL,
                                type           = "free", 
                                verbose        = FALSE, 
                                forcePD        = TRUE, 
@@ -55,7 +55,7 @@ lav_model_gradient <- function(lavmodel       = NULL,
         # compute moments for all groups
         #if(conditional.x) {
         #    Sigma.hat <- computeSigmaHatJoint(lavmodel = lavmodel,
-        #                     GLIST = GLIST, lavsamplestats = lavsamplestats,
+        #                     GLIST = GLIST,
         #                     extra = (estimator %in% c("ML", "REML","NTRLS")))
         #} else {
             Sigma.hat <- computeSigmaHat(lavmodel = lavmodel, GLIST = GLIST,
@@ -63,26 +63,24 @@ lav_model_gradient <- function(lavmodel       = NULL,
         #}
 
         # ridge here?
-        if(meanstructure && !categorical) {
+        if(meanstructure) {
             #if(conditional.x) {
-            #    Mu.hat <- computeMuHat(lavmodel = lavmodel, GLIST = GLIST,
-            #                           lavsamplestats = lavsamplestats)
+            #    Mu.hat <- computeMuHat(lavmodel = lavmodel, GLIST = GLIST)
             #} else { 
                 Mu.hat <- computeMuHat(lavmodel = lavmodel, GLIST = GLIST)
             #}
-        } else if(categorical) {
+        } 
+
+        if(categorical) {
             TH <- computeTH(lavmodel = lavmodel, GLIST = GLIST)
         }
+
         if(conditional.x) {
             PI <- computePI(lavmodel = lavmodel, GLIST = GLIST)
+        } else if(estimator == "PML") {
+            PI <- vector("list", length = lavmodel@nblocks)
         }
-        if(estimator == "PML") {
-            if(lavmodel@nexo > 0L) {
-                PI <- computePI(lavmodel = lavmodel)
-            } else {
-                PI <- vector("list", length = lavmodel@nblocks)
-            }
-        }
+
         if(group.w.free) {
             GW <- computeGW(lavmodel = lavmodel, GLIST = GLIST)
         }
@@ -102,6 +100,7 @@ lav_model_gradient <- function(lavmodel       = NULL,
 
     # 1. ML approach
     if( (estimator == "ML" || estimator == "REML") && 
+        lavdata@nlevels == 1L &&
         !lavmodel@conditional.x ) {
 
         if(meanstructure) {
@@ -314,7 +313,9 @@ lav_model_gradient <- function(lavmodel       = NULL,
             # NOTE: the vecr here, unlike lav_mvreg_dlogl_beta
             #       this is because DELTA has used vec(t(BETA)), 
             #       instead of vec(BETA)
-            POST.beta <- 2 * lav_matrix_vecr(d.BETA)
+            #POST.beta <- 2 * lav_matrix_vecr(d.BETA)
+            # NOT any longer, since 0.6-1!!! 
+            POST.beta <- 2 * lav_matrix_vec(d.BETA)
 
             #POST.sigma1 <- lav_matrix_duplication_pre(
             #        (Sigma.inv %x% Sigma.inv)  %*% t(AB)  %*% (t(a) %x% b) )
@@ -334,6 +335,9 @@ lav_model_gradient <- function(lavmodel       = NULL,
 
             group.dx <- as.numeric( -1 * crossprod(Delta[[g]], POST) )
 
+            # because we still use obj/2, we need to divide by 2!
+            group.dx <- group.dx / 2 # fixed in 0.6-1
+
             group.dx <- group.w[g] * group.dx
             if(g == 1) {
                 dx <- group.dx
@@ -352,6 +356,43 @@ lav_model_gradient <- function(lavmodel       = NULL,
                                     x.el.idx = x.el.idx)
         }
     } # ML + conditional.x
+
+    else if(estimator == "ML" && lavdata@nlevels > 1L) {
+        if(type != "free") {
+            stop("FIXME: type != free in lav_model_gradient for estimator ML for nlevels > 1")
+        } else {
+            Delta <- computeDelta(lavmodel = lavmodel, GLIST. = GLIST)
+        }
+
+        # for each upper-level group....
+        for(g in 1:lavmodel@ngroups) {
+            DX <- lav_mvnorm_cluster_dlogl_2l_samplestats(
+                       YLp = lavsamplestats@YLp[[g]],
+                       Lp  = lavdata@Lp[[g]],
+                       Mu.W    = Mu.hat[[(g-1)*2 + 1]],
+                       Sigma.W = Sigma.hat[[(g-1)*2 + 1]],
+                       Mu.B    = Mu.hat[[(g-1)*2 + 2]],
+                       Sigma.B = Sigma.hat[[(g-1)*2 + 2]],
+                       Sinv.method  = "eigen")
+
+            group.dx <- as.numeric( DX %*% Delta[[g]] )
+
+            # group weights (if any)
+            group.dx <- group.w[g] * group.dx
+            if(g == 1) {
+                dx <- group.dx
+            } else {
+                dx <- dx + group.dx
+            }
+        } # g
+
+        # divide by 2 * N
+        dx <- dx / (2 * lavsamplestats@ntotal)
+
+        #cat("dx1 (numerical) = \n"); print( zapsmall(dx1) )
+        #cat("dx  (analytic)  = \n"); print( zapsmall(dx ) )
+            
+    } # ML + two-level
 
     else if(estimator == "PML" || estimator == "FML" ||
             estimator == "MML") {
@@ -373,20 +414,40 @@ lav_model_gradient <- function(lavmodel       = NULL,
             # compute partial derivative of logLik with respect to 
             # thresholds/means, slopes, variances, correlations
             if(estimator == "PML") {
-                d1 <- pml_deriv1(Sigma.hat  = Sigma.hat[[g]],
-                                 TH         = TH[[g]],
-                                 th.idx     = th.idx[[g]],
-                                 num.idx    = num.idx[[g]],
-                                 X          = lavdata@X[[g]],
-                                 lavcache   = lavcache[[g]],
-                                 eXo        = lavdata@eXo[[g]],
-                                 PI         = PI[[g]],
-                                 missing    = lavdata@missing)
+
+                if(lavdata@nlevels  > 1L) {
+                    stop("lavaan ERROR: PL gradient + multilevel not implemented; try optim.gradient = \"numerical\"")
+                } else if(conditional.x) {
+                    d1 <- pml_deriv1(Sigma.hat  = Sigma.hat[[g]],
+                                     Mu.hat     = Mu.hat[[g]],
+                                     TH         = TH[[g]],
+                                     th.idx     = th.idx[[g]],
+                                     num.idx    = num.idx[[g]],
+                                     X          = lavdata@X[[g]],
+                                     lavcache   = lavcache[[g]],
+                                     eXo        = lavdata@eXo[[g]],
+                                     PI         = PI[[g]],
+                                     missing    = lavdata@missing)
+                } else {
+                    d1 <- pml_deriv1(Sigma.hat  = Sigma.hat[[g]],
+                                     Mu.hat     = Mu.hat[[g]],
+                                     TH         = TH[[g]],
+                                     th.idx     = th.idx[[g]],
+                                     num.idx    = num.idx[[g]],
+                                     X          = lavdata@X[[g]],
+                                     lavcache   = lavcache[[g]],
+                                     eXo        = NULL,
+                                     PI         = NULL,
+                                     missing    = lavdata@missing)
+                } # not conditional.x
+
                 # chain rule (fmin)
                 group.dx <- 
                     as.numeric(t(d1) %*% Delta[[g]])
 
-            } else if(estimator == "FML") {
+           } # PML
+
+           else if(estimator == "FML") {
                 d1 <- fml_deriv1(Sigma.hat = Sigma.hat[[g]],
                                  TH        = TH[[g]],
                                  th.idx    = th.idx[[g]],
@@ -634,27 +695,38 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
                     DELTA <- rbind(DELTA[var.idx,,drop=FALSE], 
                                    DELTA[cor.idx,,drop=FALSE])
                 }
+
                 if(!categorical) {
-                    if(lavmodel@meanstructure) {
+                    if(conditional.x && lavmodel@nexo[g] > 0L) {
+                        # ATTENTION: we need to change the order here
+                        # lav_mvreg_scores_* uses 'Beta' where the
+                        # the intercepts are just the first row
+                        # using the col-major approach, we need to
+                        # interweave the intercepts with the slopes!
                         DELTA.mu <- derivative.mu.LISREL(m=mname,
                                idx=m.el.idx[[mm]], MLIST=GLIST[ mm.in.group ])
-                        if(conditional.x && lavmodel@nexo[g] > 0L) {
-                            DELTA.pi <- derivative.pi.LISREL(m=mname,
+                        DELTA.pi <- derivative.pi.LISREL(m=mname,
                              idx=m.el.idx[[mm]], MLIST=GLIST[ mm.in.group ])
-                            DELTA <- rbind(DELTA.mu, DELTA.pi, DELTA)
-                        } else {
+
+                        nEls <- NROW(DELTA.mu) + NROW(DELTA.pi)
+                        # = (nexo + 1 int) * nvar
+
+                        # intercepts on top
+                        tmp <- rbind(DELTA.mu, DELTA.pi)
+                        # change row index
+                        row.idx <- lav_matrix_vec(matrix(seq.int(nEls),
+                            nrow = lavmodel@nexo[g] + 1L,
+                            ncol = lavmodel@nvar[g], byrow = TRUE))
+                        DELTA.beta <- tmp[row.idx,,drop = FALSE]
+                        DELTA <- rbind(DELTA.beta, DELTA)
+                    } else if(!conditional.x && lavmodel@meanstructure) {
+                            DELTA.mu <- derivative.mu.LISREL(m=mname,
+                               idx=m.el.idx[[mm]], MLIST=GLIST[ mm.in.group ])
                             DELTA <- rbind(DELTA.mu, DELTA)
-                        }
-                    } else {
-                        if(conditional.x && lavmodel@nexo[g] > 0L) {
-                            DELTA.pi <- derivative.pi.LISREL(m=mname,
-                             idx=m.el.idx[[mm]], MLIST=GLIST[ mm.in.group ])
-                            DELTA <- rbind(DELTA.pi, DELTA)
-                        } else {
-                            # nothing to do
-                        }
                     }
-                } else if(categorical) {
+                } 
+
+                else if(categorical) {
                     DELTA.th <- derivative.th.LISREL(m=mname,
                                                      idx=m.el.idx[[mm]],
                                                      th.idx=th.idx[[g]],
@@ -676,7 +748,7 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
                             DELTA.th[no.num.idx,,drop=FALSE] +
                             (dth.dDelta %*% dDelta.dx)[no.num.idx,,drop=FALSE]
                     }
-                    if(lavmodel@nexo[g] > 0L) {
+                    if(conditional.x && lavmodel@nexo[g] > 0L) {
                         DELTA.pi <- 
                             derivative.pi.LISREL(m=mname,
                                                  idx=m.el.idx[[mm]],
@@ -726,6 +798,16 @@ computeDelta <- function(lavmodel = NULL, GLIST. = NULL,
         Delta[[g]] <- Delta.group
 
     } # g
+
+    # if multilevel, rbind levels within group
+    if(.hasSlot(lavmodel, "multilevel") && lavmodel@multilevel) {
+        DELTA <- vector("list", length = lavmodel@ngroups)
+        for(g in 1:lavmodel@ngroups) {
+            DELTA[[g]] <- rbind( Delta[[(g-1)*2 + 1]],
+                                 Delta[[(g-1)*2 + 2]] )
+        }
+        Delta <- DELTA
+    }
 
     Delta
 }

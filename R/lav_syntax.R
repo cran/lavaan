@@ -32,6 +32,26 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
     model.simple <- gsub("\\(.*\\)\\*", "MODIFIER*", model)
   
     start.idx <- grep("[~=<>:|%]", model.simple)
+
+    # check for empty start.idx: no operator found (new in 0.6-1)
+    if(length(start.idx) == 0L) {
+        stop("lavaan ERROR: model does not contain lavaan syntax (no operators found)")
+    }
+
+    # check for non-empty string, without an operator in the first lines
+    # (new in 0.6-1)
+    if(start.idx[1] > 1L) {
+        # two possibilities:
+        # - we have an empty line (ok)
+        # - the element contains no operator (warn!)
+        for(el in 1:(start.idx[1] - 1L)) {
+            # not empty?
+            if(nchar(model.simple[el]) > 0L) {
+                warning("lavaan WARNING: no operator found in this syntax line: ", model.simple[el], "\n", "                  This syntax line will be ignored!")
+            }
+        }
+    }
+
     end.idx <- c( start.idx[-1]-1, length(model) )
     model.orig    <- model
     model <- character( length(start.idx) )
@@ -321,10 +341,16 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
 
     # change op for intercepts (for convenience only)
     int.idx <- which(FLAT$op == "~" & FLAT$rhs == "")
-    if(length(int.idx) > 0L)
+    if(length(int.idx) > 0L) {
         FLAT$op[int.idx] <- "~1"
+    }
+
+    # new in 0.6, reorder covariances here!
+    FLAT <- lav_partable_covariance_reorder(FLAT)
   
-    if(as.data.frame.) FLAT <- as.data.frame(FLAT, stringsAsFactors=FALSE)
+    if(as.data.frame.) {
+        FLAT <- as.data.frame(FLAT, stringsAsFactors=FALSE)
+    }
   
     attr(FLAT, "modifiers") <- MOD
     attr(FLAT, "constraints") <- CON

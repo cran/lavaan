@@ -163,7 +163,7 @@ function(x, diagonal = TRUE) {
 }
 
 
-# vechr.reverse vechu.reversie (aka `lower2full)
+# vechr.reverse vechu.reversie (aka `lower2full')
 #
 # given the output of vechr(S) --or vechu(S) which is identical--
 # reconstruct S
@@ -189,7 +189,7 @@ lav_matrix_lower2full <- function(x, diagonal = TRUE) {
 # return the *vector* indices of the diagonal elements of a symmetric
 # matrix of size 'n'
 lav_matrix_diag_idx <- function(n = 1L) {
-    if(n < 1L) return(integer(0L))
+    # if(n < 1L) return(integer(0L))
     1L + (seq_len(n) - 1L)*(n + 1L)
 }
 
@@ -210,6 +210,55 @@ lav_matrix_antidiag_idx <- function(n = 1L) {
     1L + seq_len(n)*(n-1L)
 }
 
+# return the *vector* indices of 'idx' elements in a vech() matrix
+#
+# eg if n = 4 and type == "and" and idx = c(2,4)
+#    we create matrix A = 
+#       [,1]  [,2]  [,3]  [,4]
+# [1,] FALSE FALSE FALSE FALSE
+# [2,] FALSE  TRUE FALSE  TRUE
+# [3,] FALSE FALSE FALSE FALSE
+# [4,] FALSE  TRUE FALSE  TRUE
+# 
+# and the result is c(5,7,10)
+#
+# eg if n = 4 and type == "or" and idx = c(2,4)
+#    we create matrix A = 
+#       [,1] [,2]  [,3] [,4]
+# [1,] FALSE TRUE FALSE TRUE
+# [2,]  TRUE TRUE  TRUE TRUE
+# [3,] FALSE TRUE FALSE TRUE
+# [4,]  TRUE TRUE  TRUE TRUE
+#
+# and the result is c(2, 4, 5, 6, 7, 9, 10)
+#
+lav_matrix_vech_which_idx <- function(n = 1L, diagonal = TRUE,
+                                    idx = integer(0L), type = "and") {
+    if(length(idx) == 0L) return(integer(0L))
+    n <- as.integer(n)
+    A <- matrix(FALSE, n, n)
+    if(type == "and") {
+        A[idx, idx] <- TRUE
+    } else if(type == "or") {
+        A[idx, ] <- TRUE
+        A[ ,idx] <- TRUE
+    }
+    which(lav_matrix_vech(A, diagonal = diagonal))
+}
+
+# similar to lav_matrix_vech_which_idx(), but
+# - only 'type = and'
+# - order of idx matters!
+lav_matrix_vech_match_idx <- function(n = 1L, diagonal = TRUE, 
+                                     idx = integer(0L)) {
+    if (length(idx) == 0L) 
+        return(integer(0L))
+    n <- as.integer(n)
+    pstar <- n*(n+1)/2
+    A <- lav_matrix_vech_reverse(seq_len(pstar))
+    B <- A[idx, idx, drop = FALSE]
+    lav_matrix_vech(B, diagonal = diagonal)
+}
 
 
 # create the duplication matrix (D_n): it 'duplicates' the elements
@@ -356,7 +405,7 @@ lav_matrix_duplication_pre <- function(A = matrix(0,0,0)) {
     # dup idx
     idx1 <- lav_matrix_vech_idx(n); idx2 <- lav_matrix_vechru_idx(n)
 
-    OUT <- A[idx1,,drop=FALSE] + A[idx2,,drop=FALSE]
+    OUT <- A[idx1, , drop = FALSE] + A[idx2 , , drop = FALSE]
     u <- which(idx1 %in% idx2); OUT[u,] <- OUT[u,] / 2.0
     
     OUT
@@ -401,7 +450,7 @@ lav_matrix_duplication_post <- function(A = matrix(0,0,0)) {
     # dup idx
     idx1 <- lav_matrix_vech_idx(n); idx2 <- lav_matrix_vechru_idx(n)
 
-    OUT <- A[,idx1] + A[,idx2]
+    OUT <- A[, idx1, drop = FALSE] + A[, idx2, drop = FALSE]
     u <- which(idx1 %in% idx2); OUT[,u] <- OUT[,u] / 2.0
 
     OUT
@@ -423,9 +472,9 @@ lav_matrix_duplication_pre_post <- function(A = matrix(0,0,0)) {
     # dup idx
     idx1 <- lav_matrix_vech_idx(n); idx2 <- lav_matrix_vechru_idx(n)
 
-    OUT <- A[idx1,,drop=FALSE] + A[idx2,,drop=FALSE]
-    u <- which(idx1 %in% idx2);     OUT[u,] <- OUT[u,] / 2.0
-    OUT <- OUT[,idx1,drop=FALSE] + OUT[,idx2,drop=FALSE]
+    OUT <- A[idx1, , drop = FALSE] + A[idx2, , drop = FALSE]
+    u <- which(idx1 %in% idx2); OUT[u,] <- OUT[u,] / 2.0
+    OUT <- OUT[, idx1, drop = FALSE] + OUT[, idx2, drop = FALSE]
     OUT[,u] <- OUT[,u] / 2.0
 
     OUT
@@ -510,7 +559,7 @@ lav_matrix_duplication_ginv_pre <- function(A = matrix(0,0,0)) {
     nstar <- n * (n+1)/2
 
     idx1 <- lav_matrix_vech_idx(n); idx2 <- lav_matrix_vechru_idx(n)
-    OUT <- (A[idx1,,drop=FALSE] + A[idx2,,drop=FALSE]) / 2
+    OUT <- (A[idx1, , drop = FALSE] + A[idx2, , drop = FALSE]) / 2
     OUT
 }
 
@@ -530,7 +579,7 @@ lav_matrix_duplication_ginv_post <- function(A = matrix(0,0,0)) {
     n <- sqrt(n2)
 
     idx1 <- lav_matrix_vech_idx(n); idx2 <- lav_matrix_vechru_idx(n)
-    OUT <- (A[,idx1,drop=FALSE] + A[,idx2,drop=FALSE]) / 2
+    OUT <- (A[, idx1, drop = FALSE] + A[, idx2, drop = FALSE]) / 2
     OUT
 }
 
@@ -550,8 +599,8 @@ lav_matrix_duplication_ginv_pre_post <- function(A = matrix(0,0,0)) {
     n <- sqrt(n2)
    
     idx1 <- lav_matrix_vech_idx(n); idx2 <- lav_matrix_vechru_idx(n)
-    OUT <- (A[idx1,,drop=FALSE] + A[idx2,,drop=FALSE]) / 2
-    OUT <- (OUT[,idx1,drop=FALSE] + OUT[,idx2,drop=FALSE]) / 2
+    OUT <- (A[idx1, , drop = FALSE] + A[idx2, , drop = FALSE]) / 2
+    OUT <- (OUT[, idx1, drop = FALSE] + OUT[, idx2, drop = FALSE]) / 2
     OUT
 }
 
@@ -619,9 +668,9 @@ lav_matrix_commutation_pre <- function(A = matrix(0,0,0)) {
 
     # compute row indices
     #row.idx <- as.integer(t(matrix(1:n2, n, n)))
-    row.idx <- rep(1:n, each=n) + (0:(n-1L))*n
+    row.idx <- rep(1:n, each = n) + (0:(n-1L))*n
 
-    OUT <- A[row.idx,,drop=FALSE]
+    OUT <- A[row.idx, , drop = FALSE]
     OUT   
 }
 
@@ -635,9 +684,9 @@ lav_matrix_commutation_mn_pre <- function(A, m = 1L, n = 1L) {
 
     # compute row indices
     # row.idx <- as.integer(t(matrix(1:mn, m, n)))
-    row.idx <- rep(1:m, each=n) + (0:(n-1L))*m
+    row.idx <- rep(1:m, each = n) + (0:(n-1L))*m
 
-    OUT <- A[row.idx,,drop=FALSE]
+    OUT <- A[row.idx, , drop = FALSE]
     OUT
 }
 
@@ -711,10 +760,13 @@ lav_matrix_tS2_SxS_S2 <- function(S2, S, check = TRUE) {
     crossprod(A, A2)
 }
 
-# shortcut for the idiom 't(D) %*% (S %x% S) %*% S'
+# shortcut for the idiom 't(D) %*% (S %x% S) %*% D'
 # where S is symmetric, and D is the duplication matrix
-lav_matrix_tD_SxS_D <- function(S) {
-}
+#lav_matrix_tD_SxS_D <- function(S) {
+
+# TODO!!
+
+#}
 
 # square root of a positive definite symmetric matrix
 lav_matrix_symmetric_sqrt <- function(S = matrix(0,0,0)) {
@@ -885,7 +937,9 @@ lav_matrix_crossprod <- function(A, B) {
     if(missing(B)) {
         B <- A
     }
-    apply(A, 2L, function(x) colSums(B * x, na.rm=TRUE))
+    out <- apply(A, 2L, function(x) colSums(B * x, na.rm = TRUE))
+
+    as.matrix(out)
 }
 
 
@@ -983,16 +1037,41 @@ lav_matrix_orthogonal_complement2 <- function(A,
 }
 
 
-# inverse of a positive-definite symmetric matrix
+# inverse of a non-singular (not necessarily positive-definite) symmetric matrix
 # FIXME: error handling?
 lav_matrix_symmetric_inverse <- function(S, logdet = FALSE, 
                                          Sinv.method = "eigen") {
 
-    if(Sinv.method == "eigen") {
+    P <- NCOL(S)
+
+    if(P == 0L) {
+        S.inv <- matrix(0,0,0)
+        if(logdet) {
+            attr(S.inv, "logdet") <- 0
+        }
+        return(S.inv)
+    } else if(P == 1L) {
+        tmp <- S[1,1]
+        S.inv <- matrix(1/tmp, 1, 1)
+        if(logdet) {
+            attr(S.inv, "logdet") <- log(tmp)
+        }
+    } else if(P == 2L) {
+        a11 <- S[1,1]; a12 <- S[1,2]; a21 <- S[2,1]; a22 <- S[2,2]
+        tmp <- a11*a22 - a12*a21
+        if(tmp == 0) {
+        } else {
+            S.inv <- matrix(c(a22/tmp, -a21/tmp, -a12/tmp, a11/tmp), 2, 2)
+            if(logdet) {
+                attr(S.inv, "logdet") <- log(tmp)
+            }
+        }
+    } else if(Sinv.method == "eigen") {
         EV <- eigen(S, symmetric = TRUE)
         # V %*% diag(1/d) %*% V^{-1}, where V^{-1} = V^T
-        S.inv <- tcrossprod(sweep(EV$vector, 2L, 
-                                  STATS = (1/EV$values), FUN="*"), EV$vector)
+        S.inv <- 
+            tcrossprod(EV$vector / rep(EV$values, each = length(EV$values)),
+                       EV$vector)
         if(logdet) {
             if(all(EV$values >= 0)) {
                 attr(S.inv, "logdet") <- sum(log(EV$values))
@@ -1194,3 +1273,59 @@ lav_matrix_symmetric_logdet_update <- function(S.logdet, S.inv,
     out
 }
 
+# force a symmetric matrix to be positive definite
+# simple textbook version (see Matrix::nearPD for a more sophisticated version)
+#
+lav_matrix_symmetric_force_pd <- function(S, tol = 1e-06) {
+
+    if(ncol(S) == 1L) {
+        return(matrix(max(S[1,1], tol), 1L, 1L))
+    }
+
+    # eigen decomposition
+    S.eigen <- eigen(S, symmetric = TRUE)
+   
+    # eigen values
+    ev <- S.eigen$values
+
+    # replace small/negative eigen values
+    ev[ev/abs(ev[1]) < tol] <- tol*abs(ev[1])
+
+    # reconstruct
+    out <- S.eigen$vectors %*% diag(ev) %*% t(S.eigen$vectors)
+
+    out
+}
+
+# compute sample covariance matrix, divided by 'N' (not N-1, as in cov)
+lav_matrix_cov <- function(Y, ybar = NULL) {
+    NY <- NROW(Y)
+    if(is.null(ybar)) {
+        ybar <- colMeans(Y)
+    }
+    S <- 1/NY * crossprod(Y) - tcrossprod(ybar)
+    S
+}
+
+# transform a matrix to match a given target mean/covariance
+lav_matrix_transform_mean_cov <- function(Y, 
+                                          target.mean = numeric( NCOL(Y) ),
+                                          target.cov = diag( NCOL(Y) )) {
+
+    # convert to vector
+    target.mean <- as.vector(target.mean)
+
+    S <- lav_matrix_cov(Y)
+    S.inv <- solve(S)
+    S.inv.sqrt <- lav_matrix_symmetric_sqrt(S.inv)
+    target.cov.sqrt <- lav_matrix_symmetric_sqrt(target.cov)
+    
+    # transform cov
+    X <- Y %*% S.inv.sqrt %*% target.cov.sqrt
+
+    # shift mean
+    xbar <- colMeans(X)
+    X <- t( t(X) - xbar + target.mean )
+    
+    X
+}

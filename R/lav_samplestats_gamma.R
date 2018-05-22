@@ -74,9 +74,12 @@ lavGamma <- function(object, group = NULL, missing = "listwise",
 #  - if conditional.x = TRUE, we ignore fixed.x (can be TRUE or FALSE)
 
 # NORMAL-THEORY
-lav_samplestats_Gamma_NT <- function(Y              = NULL,
-                                     COV            = NULL,
-                                     MEAN           = NULL,
+lav_samplestats_Gamma_NT <- function(Y              = NULL, # should include
+                                                            # eXo if 
+                                                            #conditional.x=TRUE
+                                     wt             = NULL,
+                                     COV            = NULL, # joint!
+                                     MEAN           = NULL, # joint!
                                      rescale        = FALSE,
                                      x.idx          = integer(0L),
                                      fixed.x        = FALSE,
@@ -95,17 +98,26 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL,
     
         # coerce to matrix
         Y <- unname(as.matrix(Y)); N <- nrow(Y)
-        COV <- cov(Y)
+        if(is.null(wt)) {
+            COV <- cov(Y)
+        } else {
+            out <- stats::cov.wt(Y, wt = wt, method = "ML")
+            COV <- out$cov
+        }
     }
 
-    if(rescale) {
+    if(rescale && is.null(wt)) {
         COV <- COV * (N-1) / N # ML version
     }
 
     if(conditional.x && length(x.idx) > 0L && is.null(MEAN) &&
        (meanstructure || slopestructure)) {
        stopifnot(!is.null(Y))
-       MEAN <- colMeans(Y)
+       if(is.null(wt)) {
+           MEAN <- colMeans(Y)
+       } else {
+           MEAN <- out$center
+       }
     }
 
     # rename
@@ -174,13 +186,16 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL,
 
         if(meanstructure) {
             if(slopestructure) {
-                A11 <- solve(C3) %x% Cov.YbarX
+                #A11 <- solve(C3) %x% Cov.YbarX
+                A11 <- Cov.YbarX %x% solve(C3)
             } else {
-                A11 <- solve(C3)[1, 1, drop=FALSE] %x% Cov.YbarX
+                #A11 <- solve(C3)[1, 1, drop=FALSE] %x% Cov.YbarX
+                A11 <- Cov.YbarX %x% solve(C3)[1, 1, drop=FALSE]
             }
         } else {
             if(slopestructure) {
-                A11 <- solve(C3)[-1, -1, drop=FALSE] %x% Cov.YbarX
+                #A11 <- solve(C3)[-1, -1, drop=FALSE] %x% Cov.YbarX
+                A11 <- Cov.YbarX %x% solve(C3)[-1, -1, drop=FALSE]
             } else {
                 A11 <- matrix(0,0,0)
             }
@@ -198,18 +213,43 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL,
 #       2) fixed.x       (conditional.x = FALSE, fixed.x = TRUE)
 #       3) conditional.x (conditional.x = TRUE)
 #  - if conditional.x = TRUE, we ignore fixed.x (can be TRUE or FALSE)
+#
+#  - new in 0.6-1: if Mu/Sigma is provided, compute 'model-based' Gamma
+#                  (only if conditional.x = FALSE, for now)
 
 # ADF THEORY
-lav_samplestats_Gamma <- function(Y, 
-                                  x.idx          = integer(0L),
-                                  fixed.x        = FALSE,
-                                  conditional.x  = FALSE,
-                                  meanstructure  = FALSE,
-                                  slopestructure = FALSE, 
-                                  Mplus.WLS      = FALSE,
-                                  add.attributes = FALSE) {
+lav_samplestats_Gamma <- function(Y,
+                                  Mu                 = NULL,
+                                  Sigma              = NULL,
+                                  x.idx              = integer(0L),
+                                  fixed.x            = FALSE,
+                                  conditional.x      = FALSE,
+                                  meanstructure      = FALSE,
+                                  slopestructure     = FALSE, 
+                                  gamma.n.minus.one  = FALSE,
+                                  Mplus.WLS          = FALSE,
+                                  add.attributes     = FALSE) {
     # coerce to matrix
-    Y <- unname(as.matrix(Y)); N <- nrow(Y)
+    Y <- unname(as.matrix(Y)); N <- nrow(Y); p <- ncol(Y)
+
+    # model-based?
+    if(!is.null(Sigma)) {
+        stopifnot(!conditional.x)
+        model.based <- TRUE
+        if(meanstructure) {
+            stopifnot(!is.null(Mu))
+            sigma <- c(as.numeric(Mu), lav_matrix_vech(Sigma))
+        } else {
+            sigma <- lav_matrix_vech(Sigma)
+        }
+    } else {
+        model.based <- FALSE
+    }
+
+    # denominator
+    if(gamma.n.minus.one) {
+        N <- N - 1
+    }
 
     # check arguments
     if(length(x.idx) == 0L) {
@@ -220,45 +260,105 @@ lav_samplestats_Gamma <- function(Y,
         stopifnot(!conditional.x, !fixed.x)
     }
 
-    if(!conditional.x) {
-        # center only, so we can use crossprod instead of cov
-        Yc <- base::scale(Y, center = TRUE, scale = FALSE)
-        p <- ncol(Y)
+    if(!conditional.x && !fixed.x) {
+        # center, so we can use crossprod instead of cov
+        if(model.based) {
+            Yc <- t( t(Y) - as.numeric(Mu) )
+        } else {
+            Yc <- t( t(Y) - colMeans(Y) )
+        }
 
         # create Z where the rows_i contain the following elements:
-        #  - intercepts (if meanstructure is TRUE)
+        #  - Y_i (if meanstructure is TRUE)
         #  - vech(Yc_i' %*% Yc_i) where Yc_i are the residuals
         idx1 <- lav_matrix_vech_col_idx(p)
         idx2 <- lav_matrix_vech_row_idx(p)
         if(meanstructure) {
-            Z <- cbind(Yc, Yc[,idx1] * Yc[,idx2])
+            Z <- cbind(Y, Yc[,idx1, drop = FALSE] * 
+                          Yc[,idx2, drop = FALSE] )
         } else {
-            Z <- Yc[,idx1] * Yc[,idx2]
+            Z <- ( Yc[,idx1, drop = FALSE] * 
+                   Yc[,idx2, drop = FALSE] )
         }
 
-        # handle fixed.x = TRUE
-        if(fixed.x) {
-            YX <- Yc
-            # here, we do not need the intercepts, data is centered
-            QR <- qr(Yc[, x.idx, drop = FALSE])
-            RES <- qr.resid(QR, Yc[,-x.idx, drop = FALSE])
-            # substract residuals from original Yc's
-            YX[, -x.idx] <- Yc[, -x.idx, drop = FALSE] - RES
+        if(model.based) {
             if(meanstructure) {
-                Z2 <- cbind(YX, YX[,idx1] * YX[,idx2])
+                stopifnot(!is.null(Mu))
+                sigma <- c(as.numeric(Mu), lav_matrix_vech(Sigma))
             } else {
-                Z2 <- YX[,idx1] * YX[,idx2]
+                sigma <- lav_matrix_vech(Sigma)
             }
-            # substract Z2 from original Z
-            Z <- Z - Z2
+            Zc <- t( t(Z) - sigma )
+        } else {
+            Zc <- t( t(Z) - colMeans(Z) )
         }
 
-        #Gamma = (N-1)/N * cov(Z, use = "pairwise")
-        # we center so we can use crossprod instead of cov
-        Zc <- base::scale(Z, center = TRUE, scale = FALSE)
+        if(anyNA(Zc)) {
+            Gamma <- lav_matrix_crossprod(Zc) / N
+        } else {
+            Gamma <- base::crossprod(Zc) / N
+        }
+    } else if(!conditional.x && fixed.x) {
 
-        # note: centering is the same as substracting lav_matrix_vech(S),
-        # where S is the sample covariance matrix (divided by N)
+        if(model.based) {
+            Y.bar <- colMeans(Y)
+            res.cov <- ( Sigma[-x.idx, -x.idx, drop = FALSE] -
+                         Sigma[-x.idx, x.idx, drop = FALSE] %*%
+                          solve(Sigma[x.idx, x.idx, drop = FALSE]) %*%
+                         Sigma[x.idx, -x.idx, drop = FALSE] )
+            res.slopes <- ( solve(Sigma[x.idx, x.idx, drop = FALSE]) %*%
+                            Sigma[x.idx, -x.idx, drop = FALSE] )
+            res.int <- ( Y.bar[-x.idx] -
+                 as.numeric(colMeans(Y[,x.idx,drop = FALSE]) %*% res.slopes) )
+            x.bar <- Y.bar[x.idx]
+            yhat.bar <- as.numeric(res.int + as.numeric(x.bar) %*% res.slopes)
+            YHAT.bar <- numeric(p)
+            YHAT.bar[-x.idx] <- yhat.bar; YHAT.bar[x.idx] <- x.bar
+            YHAT.cov <- Sigma
+            YHAT.cov[-x.idx, -x.idx] <- Sigma[-x.idx, -x.idx] - res.cov
+
+
+            yhat <- cbind(1, Y[,x.idx]) %*% rbind(res.int, res.slopes)
+            YHAT <- cbind(yhat, Y[,x.idx])
+            YHATc <- t( t(YHAT) - YHAT.bar )
+            if(meanstructure) {
+                Z <- ( cbind(Y, Yc[,idx1, drop = FALSE] * 
+                                Yc[,idx2, drop = FALSE] ) -
+                       cbind(YHAT, YHATc[,idx1, drop = FALSE] * 
+                                   YHATc[,idx2, drop = FALSE]) )
+                sigma1 <- c(Mu, lav_matrix_vech(Sigma))
+                sigma2 <- c(YHAT.bar, lav_matrix_vech(YHAT.cov))
+            } else {
+                Z <- ( Yc[,idx1, drop = FALSE] *
+                       Yc[,idx2, drop = FALSE]  -
+                       YHATc[,idx1, drop = FALSE] *
+                       YHATc[,idx2, drop = FALSE] )
+                sigma1 <- lav_matrix_vech(Sigma)
+                sigma2 <- lav_matrix_vech(YHAT.cov)
+            }
+            Zc <- t( t(Z) - (sigma1 - sigma2) )
+        } else {
+            QR <- qr(cbind(1, Y[, x.idx, drop = FALSE]))
+            yhat <- qr.fitted(QR, Y[, -x.idx, drop = FALSE])
+            YHAT <- cbind(yhat, Y[,x.idx])
+
+            Yc <- t( t(Y) - colMeans(Y) )
+            YHATc <- t( t(YHAT) - colMeans(YHAT) )
+            idx1 <- lav_matrix_vech_col_idx(p)
+            idx2 <- lav_matrix_vech_row_idx(p)
+            if(meanstructure) {
+                Z <- ( cbind(Y, Yc[,idx1, drop = FALSE] * 
+                                Yc[,idx2, drop = FALSE]) - 
+                       cbind(YHAT, YHATc[,idx1, drop = FALSE] * 
+                                   YHATc[,idx2, drop = FALSE]) )
+            } else {
+                Z <- ( Yc[,idx1, drop = FALSE] * 
+                       Yc[,idx2, drop = FALSE] -
+                       YHATc[,idx1, drop = FALSE] * 
+                       YHATc[,idx2, drop = FALSE] )
+            }
+            Zc <- t( t(Z) - colMeans(Z) )
+        }
 
         if(anyNA(Zc)) {
             Gamma <- lav_matrix_crossprod(Zc) / N
@@ -293,8 +393,10 @@ lav_samplestats_Gamma <- function(Y,
 
         if(meanstructure) {
             if(slopestructure) {
-                 Xi.idx <- rep(seq_len(ncX), each  = ncY)
-                Res.idx <- rep(seq_len(ncY), times = ncX)
+                # Xi.idx <- rep(seq_len(ncX), each  = ncY)
+                #Res.idx <- rep(seq_len(ncY), times = ncX)
+                 Xi.idx <- rep(seq_len(ncX), times = ncY)
+                Res.idx <- rep(seq_len(ncY), each  = ncX)
                 Z <- cbind( Xi[, Xi.idx, drop = FALSE] *
                            RES[,Res.idx, drop = FALSE],
                            RES[,   idx1, drop = FALSE] * 
@@ -308,19 +410,26 @@ lav_samplestats_Gamma <- function(Y,
             }
         } else {
             if(slopestructure) {
-                 Xi.idx <- rep(seq_len(ncX), each  = ncY)
-                 Xi.idx <- Xi.idx[ -seq_len(ncY) ]
-                Res.idx <- rep(seq_len(ncY), times = (ncX - 1L))
+                # Xi.idx <- rep(seq_len(ncX), each  = ncY)
+                # Xi.idx <- Xi.idx[ -seq_len(ncY) ]
+                Xi.idx <- rep(seq(2,ncX), times = ncY)
+                #Res.idx <- rep(seq_len(ncY), times = (ncX - 1L))
+                Res.idx <- rep(seq_len(ncY), each = (ncX - 1L))
                 Z <- cbind( Xi[, Xi.idx, drop = FALSE] *
                            RES[,Res.idx, drop = FALSE],
                            RES[,   idx1, drop = FALSE] * 
                            RES[,   idx2, drop = FALSE] )
             } else {
-                Z <- RES[,idx1,drop = FALSE] * RES[,idx2,drop = FALSE]
+                Z <- RES[,idx1, drop = FALSE] * RES[,idx2, drop = FALSE]
             }
         }
 
-        Zc <- base::scale(Z, center = TRUE, scale = FALSE)
+        if(model.based) {
+            Zc <- t( t(Z) - sigma )
+        } else {
+            Zc <- t( t(Z) - colMeans(Z) )
+        }
+
         if(anyNA(Zc)) {
             Gamma <- lav_matrix_crossprod(Zc) / N
         } else {

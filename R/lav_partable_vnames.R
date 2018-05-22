@@ -94,13 +94,27 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
         dot.names <- names(dotdotdot)
         block.select <- rep(TRUE, length(partable$lhs))
         for(dot in seq_len(ndotdotdot)) {
-        
             # selection variable?
             block.var <- dot.names[dot]
             block.val <- dotdotdot[[block.var]]
             # do we have this 'block.var' in partable?
             if(is.null(partable[[block.var]])) {
-                stop("lavaan ERROR: selection variable `", block.var, " not found in the parameter table.")
+
+                # for historical reasons, treat "group = 1" special
+                if(block.var == "group" && block.val == 1L) {
+                    partable$group <- rep(1L, length(partable$lhs))
+                    # remove block == 0
+                    idx <- which(partable$block == 0L)
+                    if(length(idx) > 0L) {
+                        partable$group[idx] <- 0L
+                    }
+                    block.select <- ( block.select &
+                                  partable[[block.var]] %in% block.val )
+                } else {
+                    stop("lavaan ERROR: selection variable `", 
+                         block.var, " not found in the parameter table.")
+                }
+
             } else {
                 if(!all(block.val %in% partable[[block.var]])) {
                     stop("lavaan ERROR: ", block.var ,
@@ -266,7 +280,10 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
                                     !partable$lhs %in% lv.names ]
 
             ov.tmp <- c(ov.ind, ov.y, ov.x)
-            ov.extra <- unique(c(ov.cov, ov.int))
+            ov.extra <- unique(c(ov.cov, ov.int)) # must be in this order!
+                                                  # so that 
+                                                  # lav_partable_independence 
+                                                  # retains the same order
             ov.names <- c(ov.tmp, ov.extra[ !ov.extra %in% ov.tmp ])
         }
 
@@ -307,7 +324,7 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
 
 
         # exogenous `x' covariates
-        if(any(type %in% c("ov.x","ov.nox","ov.num", "ov.model",
+        if(any(type %in% c("ov.x","ov.nox", "ov.model",
                            "th.mean","lv.nonnormal"))) {
             # correction: is any of these ov.names.x mentioned as a variance,
             #             covariance, or intercept?
@@ -369,7 +386,7 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
         }
 
         # ov's withouth ov.x
-        if(any(type %in% c("ov.nox", "ov.num", "ov.model",
+        if(any(type %in% c("ov.nox", "ov.model",
                            "th.mean", "lv.nonnormal"))) {
             ov.names.nox <- ov.names[! ov.names %in% ov.names.x ]
         }
@@ -403,9 +420,9 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
             OUT$ov.ord[[b]] <- ord.names
         }
 
-        # ov's strictly numeric (but no x)
+        # ov's strictly numeric
         if(any(type %in% c("ov.num", "lv.nonnormal"))) {
-            ov.num <- ov.names.nox[! ov.names.nox %in% ord.names ]
+            ov.num <- ov.names[! ov.names %in% ord.names ]
         }
 
         if("ov.num" %in% type) {
@@ -451,7 +468,9 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
                                   TH <- unique(paste(TH.lhs[idx], "|",
                                                      TH.rhs[idx], sep=""))
                                   # make sure the th's are in increasing order
-                                  sort(TH)
+                                  # sort(TH)
+                                  # NO!, don't do that; t10 will be before t2
+                                  # fixed in 0.6-1 (bug report from Myrsini)
                              }))
             } else {
                 out <- character(0L)
@@ -461,15 +480,22 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
 
         # thresholds and mean/intercepts of numeric variables
         if("th.mean" %in% type) {
-            if(length(ov.names.nox) > 0L) {
+            # if fixed.x -> use ov.names.nox
+            # else -> use ov.names
+            if(is.null(partable$exo) || all(partable$exo == 0L)) {
+                OV.NAMES <- ov.names
+            } else {
+                OV.NAMES <- ov.names.nox
+            }
+            if(length(OV.NAMES) > 0L) {
                 # return in the right order (following ov.names.nox!)
-                out <- unlist(lapply(ov.names.nox, function(x) {
+                out <- unlist(lapply(OV.NAMES, function(x) {
                               if(x %in% ord.names) {
                                   idx <- which(x == TH.lhs)
                                   TH <- unique(paste(TH.lhs[idx], "|",
                                                      TH.rhs[idx], sep=""))
                                   # make sure the th's are in increasing order
-                                  sort(TH)
+                                  #sort(TH)
                               } else {
                                   x
                               }

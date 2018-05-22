@@ -1,4 +1,4 @@
-# main user-visible cfa/sem/growth functions 
+# main user-visible cfa/sem/growth functions
 #
 # initial version: YR 25/03/2009
 # added lavoptions YR 02/08/2010
@@ -15,6 +15,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
                    # variable information
                    ordered            = NULL,
+
+                   # sampling weights
+                   sampling.weights   = NULL,
 
                    # summary data
                    sample.cov         = NULL,
@@ -41,6 +44,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                    slotData           = NULL,
                    slotModel          = NULL,
                    slotCache          = NULL,
+                   sloth1             = NULL,
 
                    # options (dotdotdot)
                    ...
@@ -50,7 +54,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
     # 0a. store call
     mc  <- match.call(expand.dots = TRUE)
-    
+
     # handle dotdotdot
     dotdotdot <- list(...)
 
@@ -66,19 +70,19 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         }
         # control$optim.force.converged
         if(!is.null(dotdotdot$control$optim.force.converged)) {
-            dotdotdot$optim.force.converged <- 
+            dotdotdot$optim.force.converged <-
                 dotdotdot$control$optim.force.converged
         }
         # gradient
         if(!is.null(dotdotdot$control$gradient)) {
-            dotdotdot$optim.gradient <- dotdotdot$control$gradient    
+            dotdotdot$optim.gradient <- dotdotdot$control$gradient
         }
         if(!is.null(dotdotdot$gradient)) {
             dotdotdot$optim.gradient <- dotdotdot$gradient
         }
         # init_nelder_mead
         if(!!is.null(dotdotdot$control$init_nelder_mead)) {
-            dotdotdot$optim.init_nelder_mead <- 
+            dotdotdot$optim.init_nelder_mead <-
                 dotdotdot$control$init_nelder_mead
         }
     }
@@ -92,6 +96,26 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         FLAT <- slotParTable
     } else if(is.character(model)) {
         FLAT <- lavParseModelString(model)
+    } else if( inherits(model, "formula") ) {
+        # two typical cases:
+        # 1. regression type formula
+        # 2. no quotes, eg f =~ x1 + x2 + x3
+        tmp <- as.character(model)
+        if(tmp[1] == "~" && length(tmp) == 2L) {
+            # looks like an unquoted single factor model f =~ something
+            warning("lavaan WARNING: model seems to be a formula; please enclose the model syntax between quotes")
+            # create model and hope for the best
+            model.bis <- paste("f =", paste(tmp, collapse= " "), sep = "")
+            FLAT <- lavParseModelString(model.bis)
+        } else if(tmp[1] == "~" && length(tmp) == 3L) {
+            # looks like a (unquoted) regression formula
+            warning("lavaan WARNING: model seems to be a formula; please enclose the model syntax between quotes")
+            # create model and hope for the best
+            model.bis <- paste(tmp[2], tmp[1], tmp[3])
+            FLAT <- lavParseModelString(model.bis)
+        } else {
+            stop("lavaan ERROR: model seems to be a formula; please enclose the model syntax between quotes")
+        }
     } else if(inherits(model, "lavaan")) {
         # hm, a lavaan model; let's try to extract the parameter table
         # and see what happens
@@ -105,7 +129,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
            !is.null(model$rhs) && !is.null(model$free)) {
 
             # ok, we have something that looks like a parameter table
-            # FIXME: we need to check for redundant arguments 
+            # FIXME: we need to check for redundant arguments
             # (but if cfa/sem was used, we can not trust the call)
             # redundant <- c("meanstructure", "int.ov.free", "int.lv.free",
             #        "fixed.x", "orthogonal", "std.lv", "parameterization",
@@ -132,29 +156,33 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             missing.idx <- is.na(match(bare.minimum, names(model)))
             missing.txt <- paste(bare.minimum[missing.idx], collapse = ", ")
             stop("lavaan ERROR: model is a list, but not a parameterTable?",
-                 "\n  lavaan  NOTE: ", 
+                 "\n  lavaan  NOTE: ",
                  "missing column(s) in parameter table: [", missing.txt, "]")
         }
+    } else if(is.null(model)) {
+        stop("lavaan ERROR: model is NULL!")
     }
 
     # group blocks?
-    if(any(FLAT$op == ":" & FLAT$lhs == "group")) {
+    if(any(FLAT$op == ":" & tolower(FLAT$lhs) == "group")) {
         # here, we only need to figure out:
         # - ngroups
         # - ov's per group
         # - FIXME: we need a more efficient way, avoiding lavaanify/vnames
-        group.idx <- which(FLAT$op == ":" & FLAT$lhs == "group")
+        group.idx <- which(FLAT$op == ":" & tolower(FLAT$lhs) == "group")
+        # replace by 'group' (in case we got 'Group'):
+        FLAT$lhs[group.idx] <- "group"
         tmp.group.values <- unique(FLAT$rhs[group.idx])
         tmp.ngroups <- length(tmp.group.values)
-        tmp.lav <- lavaanify(FLAT, ngroups = tmp.ngroups)
-        ov.names <- ov.names.y <- ov.names.x <- vector("list", 
+        tmp.lav <- lavaanify(FLAT, ngroups = tmp.ngroups, warn = FALSE)
+        ov.names <- ov.names.y <- ov.names.x <- vector("list",
                                                        length = tmp.ngroups)
         for(g in seq_len(tmp.ngroups)) {
-            ov.names[[g]]   <- unique(unlist(lav_partable_vnames(tmp.lav, 
+            ov.names[[g]]   <- unique(unlist(lav_partable_vnames(tmp.lav,
                                 type = "ov", group = tmp.group.values[g])))
-            ov.names.y[[g]] <- unique(unlist(lav_partable_vnames(tmp.lav, 
+            ov.names.y[[g]] <- unique(unlist(lav_partable_vnames(tmp.lav,
                                 type = "ov.nox", group = tmp.group.values[g])))
-            ov.names.x[[g]] <- unique(unlist(lav_partable_vnames(tmp.lav, 
+            ov.names.x[[g]] <- unique(unlist(lav_partable_vnames(tmp.lav,
                                 type = "ov.x", group = tmp.group.values[g])))
         }
     } else {
@@ -162,6 +190,82 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         ov.names   <- lav_partable_vnames(FLAT, type = "ov")
         ov.names.y <- lav_partable_vnames(FLAT, type = "ov.nox")
         ov.names.x <- lav_partable_vnames(FLAT, type = "ov.x")
+    }
+
+    # handle ov.names.l
+    if(any(FLAT$op == ":" & tolower(FLAT$lhs) == "level")) {
+
+        # check for cluster argument
+        if(!is.null(data) && is.null(cluster)) {
+            stop("lavaan ERROR: cluster argument is missing.")
+        }
+
+        # here, we only need to figure out:
+        # - nlevels
+        # - ov's per level
+        # - FIXME: we need a more efficient way, avoiding lavaanify/vnames
+
+        group.idx <- which(FLAT$op == ":" & FLAT$lhs == "group")
+        tmp.group.values <- unique(FLAT$rhs[group.idx])
+        tmp.ngroups <- max(c(length(tmp.group.values), 1))
+
+        level.idx <- which(FLAT$op == ":" & tolower(FLAT$lhs) == "level")
+        # replace by "level" (in case we got 'Level')
+        FLAT$lhs[level.idx] <- "level"
+        tmp.level.values <- unique(FLAT$rhs[level.idx])
+        tmp.nlevels <- length(tmp.level.values)
+
+        # we need at least 2 levels (for now)
+        if(tmp.nlevels < 2L) {
+            stop("lavaan ERROR: when data is clustered, you must specify a model\n", "  for each level in the model syntax (for now); see example(Demo.twolevel)")
+        }
+
+        tmp.lav <- lavaanify(FLAT, ngroups = tmp.ngroups, warn = FALSE) 
+        # check for empty levels
+        if(max(tmp.lav$level) < 2L) {
+            stop("lavaan ERROR: at least one level has no model syntax; you must specify a model for each level in the model syntax (for now); see example(Demo.twolevel)")
+        }
+        ov.names.l <- vector("list", length = tmp.ngroups) # per group
+
+        for(g in seq_len(tmp.ngroups)) {
+                ov.names.l[[g]] <- vector("list", length = tmp.nlevels)
+            for(l in seq_len(tmp.nlevels)) {
+                if(tmp.ngroups > 1L) {
+                    ov.names.l[[g]][[l]] <- 
+                    unique(unlist(lav_partable_vnames(tmp.lav,
+                                                  type = "ov",
+                                                  group = tmp.group.values[g],
+                                                  level = tmp.level.values[l])))
+                } else {
+                    ov.names.l[[g]][[l]] <-
+                    unique(unlist(lav_partable_vnames(tmp.lav,
+                                                  type = "ov",
+                                                  level = tmp.level.values[l])))
+                }
+            } # levels
+        } # groups
+    } else {
+        # perhaps model is already a parameter table
+        nlevels <- lav_partable_nlevels(FLAT)
+        if(nlevels > 1L) {
+
+            # check for cluster argument (only if we have data)
+            if(!is.null(data) && is.null(cluster)) {
+                stop("lavaan ERROR: cluster argument is missing.")
+            }
+
+            ngroups <- lav_partable_ngroups(FLAT)
+            ov.names.l <- vector("list", length = ngroups)
+            for(g in 1:ngroups) {
+                ov.names.l[[g]] <- lavNames(FLAT, "ov", group = g)
+            }
+        } else {
+            # no level: in model syntax
+            ov.names.l <- list()
+            if(length(cluster) > 0L) {
+                stop("lavaan ERROR: when data is clustered, you must specify a model\n", "  for each level in the model syntax (for now); see example(Demo.twolevel)") 
+            }
+        }
     }
 
     # sanity check ordered argument (just in case, add lhs variables names)
@@ -177,33 +281,70 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     #######################
     if(!is.null(slotOptions)) {
         lavoptions <- slotOptions
+
+        # but what if other 'options' are given anyway (eg 'start = ')?
+        # give a warning!
+        if(length(dotdotdot) > 0L) {
+            dot.names <- names(dotdotdot)
+            op.idx <- which(dot.names %in% names(slotOptions))
+            warning("lavaan WARNING: the following argument(s) override(s) the options in slotOptions:\n\t\t", paste(dot.names[op.idx], collapse = " ")) 
+            lavoptions[ dot.names[op.idx] ] <- dotdotdot[ op.idx ]
+        }
     } else {
-        
+
         # load default options
         opt <- lav_options_default()
-        
+
+        # catch unknown options
+        ok.names <- names(opt)
+        dot.names <- names(dotdotdot)
+        wrong.idx <- which(!dot.names %in% ok.names)
+        if(length(wrong.idx) > 0L) {
+            idx <- wrong.idx[1L] # only show first one
+            # stop or warning?? stop for now (there could be more)
+            stop("lavaan ERROR: unknown argument `", dot.names[idx],"'")
+        }
+
         # modifyList
         opt <- modifyList(opt, dotdotdot)
+
+        # no data?
+        if(is.null(data) && is.null(sample.cov)) {
+            opt$fixed.x <- FALSE
+            opt$conditional.x <- FALSE
+        }
 
         # categorical mode?
         if(any(FLAT$op == "|")) {
             opt$categorical <- TRUE
         } else if(!is.null(data) && length(ordered) > 0L) {
             opt$categorical <- TRUE
-        } else if(is.data.frame(data) && 
+        } else if(is.data.frame(data) &&
             lav_dataframe_check_ordered(frame = data, ov.names = ov.names.y)) {
             opt$categorical <- TRUE
         } else {
             opt$categorical <- FALSE
         }
 
-        # constraints 
-        if(nchar(constraints) > 0L) {
+        # multilevel?
+        if(length(ov.names.l) > 0L) {
+            opt$multilevel <- TRUE
+        } else {
+            opt$multilevel <- FALSE
+        }
+
+        # sampling weights? force MLR
+        if(!is.null(sampling.weights)) {
+            opt$estimator <- "MLR"
+        }
+
+        # constraints
+        if(nchar(constraints) > 0L && opt$estimator %in% c("ML")) {
             opt$information <- "observed"
         }
 
         # meanstructure
-        if(any(FLAT$op == "~1")) {
+        if(any(FLAT$op == "~1") || !is.null(sample.mean)) {
             opt$meanstructure <- TRUE
         }
         if(!is.null(group) && is.null(dotdotdot$meanstructure)) {
@@ -211,13 +352,13 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         }
 
         # conditional.x
-        if( (is.list(ov.names.x) && 
+        if( (is.list(ov.names.x) &&
              sum(sapply(ov.names.x, FUN = length)) == 0L) ||
             (is.character(ov.names.x) && length(ov.names.x) == 0L) ) {
             # if explicitly set to TRUE, give warning
             if(is.logical(dotdotdot$conditional.x) && dotdotdot$conditional.x) {
                 warning("lavaan WARNING: no exogenous covariates; conditional.x will be set to FALSE")
-            }   
+            }
             opt$conditional.x <- FALSE
         }
 
@@ -236,46 +377,15 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         # fill in remaining "default" values
         lavoptions <- lav_options_set(opt)
     }
-    timing$InitOptions <- (proc.time()[3] - start.time)
+    timing$Options <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
 
-    # some additional checks for estimator="PML"
-    if(lavoptions$estimator == "PML") {
-        ovy <- unique( unlist(ov.names.y) )
-        ovx <- unique( unlist(ov.names.x) )
-        if(!is.null(slotData)) {
-            ov.types <- slotData@ov$type[ slotData@ov$name %in% ovy ]
-        } else {
-            ov.types <- lav_dataframe_check_vartype(data, ov.names=ov.names.y)
-        }
-        # ordered argument?
-        if(length(ordered) > 0L) {
-            ord.idx <- which(ovy %in% ordered)
-            ov.types[ord.idx] <- "ordered"
-        }
-        # 0. at least some variables must be ordinal
-        if(!any(ov.types == "ordered")) {
-            stop("lavaan ERROR: estimator=\"PML\" is only available if some variables are ordinal")
-        }
-        # 1. all variables must be ordinal (for now)
-        #    (the mixed continuous/ordinal case will be added later)
-        if(any(ov.types != "ordered")) {
-            stop("lavaan ERROR: estimator=\"PML\" can not handle mixed continuous and ordinal data (yet)")
-        }
-        
-        # 2. we can not handle exogenous covariates yet
-        #if(length(ovx) > 0L) {
-        #    stop("lavaan ERROR: estimator=\"PML\" can not handle exogenous covariates (yet)")
-        #}
+    # fixed.x = FALSE? set ov.names.x = character(0L)
+    # new in 0.6-1
+    if(!lavoptions$fixed.x) {
+        ov.names.x <- character(0L)
     }
-
-
-
-
-
-
-
 
 
     #####################
@@ -287,16 +397,18 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         if(lavoptions$conditional.x) {
             ov.names <- ov.names.y
         }
-        lavdata <- lavData(data        = data,
-                           group       = group,
-                           cluster     = cluster,
-                           ov.names    = ov.names,
-                           ov.names.x  = ov.names.x,
-                           ordered     = ordered,
-                           sample.cov  = sample.cov,
-                           sample.mean = sample.mean,
-                           sample.nobs = sample.nobs,
-                           lavoptions  = lavoptions)
+        lavdata <- lavData(data             = data,
+                           group            = group,
+                           cluster          = cluster,
+                           ov.names         = ov.names,
+                           ov.names.x       = ov.names.x,
+                           ov.names.l       = ov.names.l,
+                           ordered          = ordered,
+                           sampling.weights = sampling.weights,
+                           sample.cov       = sample.cov,
+                           sample.mean      = sample.mean,
+                           sample.nobs      = sample.nobs,
+                           lavoptions       = lavoptions)
     }
     # what have we learned from the data?
     if(lavdata@data.type == "none") {
@@ -309,19 +421,19 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         if(lavoptions$se == "bootstrap") {
             stop("lavaan ERROR: bootstrapping requires full data")
         }
-        if(lavoptions$estimator %in% c("MLM", "MLMV", "MLMVS", "MLR", "ULSM", 
+        if(lavoptions$estimator %in% c("MLM", "MLMV", "MLMVS", "MLR", "ULSM",
            "ULSMV", "ULSMVS") && is.null(NACOV)) {
-            stop("lavaan ERROR: estimator ", lavoptions$estimator, 
+            stop("lavaan ERROR: estimator ", lavoptions$estimator,
                  " requires full data or user-provided NACOV")
         }
-        if(lavoptions$estimator %in% 
+        if(lavoptions$estimator %in%
                c("WLS", "WLSM", "WLSMV", "WLSMVS", "DWLS") &&
            is.null(WLS.V)) {
-            stop("lavaan ERROR: estimator ", lavoptions$estimator, 
+            stop("lavaan ERROR: estimator ", lavoptions$estimator,
                  " requires full data or user-provided WLS.V")
         }
     }
-    timing$InitData <- (proc.time()[3] - start.time)
+    timing$Data <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
     if(lavoptions$debug) {
         print(str(lavdata))
@@ -329,10 +441,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
     # if lavdata@nlevels > 1L, adapt start option (for now)
     # until we figure out how to handle groups+blocks
-    if(lavdata@nlevels > 1L) {
-        lavoptions$start <- "simple"
-    }
-    
+    #if(lavdata@nlevels > 1L) {
+    #   lavoptions$start <- "simple"
+    #}
+
 
 
 
@@ -345,7 +457,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     ########################
     if(!is.null(slotParTable)) {
         lavpartable <- slotParTable
-    } else if(is.character(model)) {
+    } else if(is.character(model) || 
+              inherits(model, "formula")) {
         # check FLAT before we proceed
         if(lavoptions$debug) {
             print(as.data.frame(FLAT))
@@ -363,16 +476,16 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             tmp <- vnames(FLAT, type = "ov.x", ov.x.fatal = TRUE)
         }
 
-        lavpartable <- 
+        lavpartable <-
             lavaanify(model            = FLAT,
                       constraints      = constraints,
                       varTable         = lavdata@ov,
                       ngroups          = lavdata@ngroups,
 
-                      meanstructure    = lavoptions$meanstructure, 
+                      meanstructure    = lavoptions$meanstructure,
                       int.ov.free      = lavoptions$int.ov.free,
                       int.lv.free      = lavoptions$int.lv.free,
-                      orthogonal       = lavoptions$orthogonal, 
+                      orthogonal       = lavoptions$orthogonal,
                       conditional.x    = lavoptions$conditional.x,
                       fixed.x          = lavoptions$fixed.x,
                       std.lv           = lavoptions$std.lv,
@@ -384,7 +497,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                       auto.cov.y       = lavoptions$auto.cov.y,
                       auto.th          = lavoptions$auto.th,
                       auto.delta       = lavoptions$auto.delta,
-                      group.equal      = lavoptions$group.equal, 
+                      group.equal      = lavoptions$group.equal,
                       group.partial    = lavoptions$group.partial,
                       group.w.free     = lavoptions$group.w.free,
                       debug            = lavoptions$debug,
@@ -411,17 +524,26 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     # at this point, we should check if the partable is complete
     # or not; this is especially relevant if the lavaan() function
     # was used, but the user has forgotten some variances/intercepts...
-    junk <- lav_partable_check(lavpartable, 
+    junk <- lav_partable_check(lavpartable,
                                categorical = lavoptions$categorical,
                                warn = TRUE)
+
+    # for EM only (for now), force fixed-to-zero (residual) variances
+    # to be slightly larger than zero
+    if(lavoptions$optim.method == "em") {
+        zero.var.idx <- which(lavpartable$op == "~~" &
+                              lavpartable$lhs == lavpartable$rhs &
+                              lavpartable$free == 0L &
+                              lavpartable$ustart == 0)
+        if(length(zero.var.idx) > 0L) {
+            lavpartable$ustart[zero.var.idx] <- lavoptions$em.zerovar.offset    
+        }
+    }
 
     # 4b. get partable attributes
     lavpta <- lav_partable_attributes(lavpartable)
     timing$ParTable <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
-
-
-
 
 
 
@@ -435,7 +557,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         lavsamplestats <- lav_samplestats_from_data(
                        lavdata       = lavdata,
                        missing       = lavoptions$missing,
-                       rescale       = 
+                       rescale       =
                            (lavoptions$estimator %in% c("ML","REML","NTRLS") &&
                             lavoptions$likelihood == "normal"),
                        estimator     = lavoptions$estimator,
@@ -447,6 +569,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                        missing.h1    = (lavoptions$missing != "listwise"),
                        WLS.V             = WLS.V,
                        NACOV             = NACOV,
+                       gamma.n.minus.one = lavoptions$gamma.n.minus.one,
                        se                = lavoptions$se,
                        information       = lavoptions$information,
                        ridge             = lavoptions$ridge,
@@ -456,7 +579,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                        zero.cell.warn    = lavoptions$zero.cell.warn,
                        debug             = lavoptions$debug,
                        verbose           = lavoptions$verbose)
-                                                 
+
     } else if(lavdata@data.type == "moment") {
         lavsamplestats <- lav_samplestats_from_moments(
                            sample.cov    = sample.cov,
@@ -475,11 +598,12 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         # no data
         lavsamplestats <- new("lavSampleStats", ngroups=lavdata@ngroups,
                                  nobs=as.list(rep(0L, lavdata@ngroups)),
-                                 cov.x=vector("list",length=lavdata@ngroups),
-                                 th.idx=lavpta$vidx$th.mean,
+                                 #cov.x=vector("list",length=lavdata@ngroups),
+                                 #mean.x=vector("list",length=lavdata@ngroups),
+                                 th.idx=lavpta$th.idx,
                                  missing.flag=FALSE)
     }
-    timing$Sample <- (proc.time()[3] - start.time)
+    timing$SampleStats <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
     if(lavoptions$debug) {
         print(str(lavsamplestats))
@@ -487,6 +611,41 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
 
 
+    ###################
+    #### 5b. lavh1 ####
+    ###################
+    if(!is.null(sloth1)) {
+        lavh1 <- sloth1
+    } else {
+        lavh1 <- list()
+        if(is.logical(lavoptions$h1) && lavoptions$h1) {
+            if(length(lavsamplestats@ntotal) > 0L) { # lavsamplestats filled in
+
+                # implied h1 statistics
+                out <- lav_h1_implied_logl(lavdata        = lavdata,
+                                           lavsamplestats = lavsamplestats,
+                                           lavoptions     = lavoptions)
+                h1.implied      <- out$implied
+                h1.loglik       <- out$logl$loglik
+                h1.loglik.group <- out$logl$loglik.group
+    
+                # collect in h1 list
+                lavh1 <- list(implied      = h1.implied,
+                              loglik       = h1.loglik,
+                              loglik.group = h1.loglik.group)
+            } else {
+                # do nothing for now
+            }
+        } else {
+            if(!is.logical(lavoptions$h1)) {
+                stop("lavaan ERROR: argument `h1' must be logical (for now)")
+            }
+            # TODO: allow h1 to be either a model syntax, a parameter table,
+            # or a fitted lavaan object
+        }
+    }
+    timing$h1 <- (proc.time()[3] - start.time)
+    start.time <- proc.time()[3]
 
 
 
@@ -501,7 +660,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         # FIXME
         #lavaanStart <- lav_model_get_parameters(lavmodel, type="user")
         #lavpartable$start <- lavaanStart
-        timing$Start <- (proc.time()[3] - start.time)
+        timing$start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
         timing$Model <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
@@ -544,9 +703,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
             lavpartable$start <- START
         }
-        
 
-        timing$Start <- (proc.time()[3] - start.time)
+
+        timing$start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
 
 
@@ -556,14 +715,45 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     #####################
         lavmodel <- lav_model(lavpartable      = lavpartable,
                               lavoptions       = lavoptions,
-                              th.idx           = lavsamplestats@th.idx)
+                              th.idx           = lavsamplestats@th.idx,
+                              cov.x            = lavsamplestats@cov.x,
+                              mean.x           = lavsamplestats@mean.x)
         timing$Model <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
-  
+
         # if no data, call lav_model_set_parameters once (for categorical case)
         if(lavdata@data.type == "none" && lavmodel@categorical) {
-            lavmodel <- lav_model_set_parameters(lavmodel = lavmodel, 
-                            x = lav_model_get_parameters(lavmodel)) 
+            lavmodel <- lav_model_set_parameters(lavmodel = lavmodel,
+                            x = lav_model_get_parameters(lavmodel))
+            # re-adjust parameter table
+            lavpartable$start <- lav_model_get_parameters(lavmodel, type="user")
+
+            # check/warn if theta/delta values make sense
+            if(!all(lavpartable$start == lavpartable$ustart)) {
+                if(lavmodel@parameterization == "delta") {
+                    # did the user specify theta values? 
+                    user.var.idx <- which(lavpartable$op == "~~" &
+                           lavpartable$lhs == lavpartable$rhs &
+                           lavpartable$lhs %in% unlist(lavpta$vnames$ov.ord) &
+                           lavpartable$user == 1L)
+                    if(length(user.var.idx)) {
+                        warning("lavaan WARNING: ", 
+              "variance (theta) values for categorical variables are ignored", 
+              "\n\t\t  if parameterization = \"delta\"!")
+                    }
+                } else if(lavmodel@parameterization == "theta") {
+                    # did the user specify theta values? 
+                    user.delta.idx <- which(lavpartable$op == "~*~" &
+                            lavpartable$lhs == lavpartable$rhs &
+                            lavpartable$lhs %in% unlist(lavpta$vnames$ov.ord) &
+                            lavpartable$user == 1L)
+                    if(length(user.delta.idx)) {
+                        warning("lavaan WARNING: ",
+              "scaling (~*~) values for categorical variables are ignored",
+              "\n\t\t  if parameterization = \"theta\"!")
+                    }
+                }
+            }
         }
 
     } # slotModel
@@ -584,7 +774,16 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     } else {
         # prepare cache -- stuff needed for estimation, but also post-estimation
         lavcache <- vector("list", length=lavdata@ngroups)
-        if(lavoptions$estimator == "PML") {
+
+        # ov.types? (for PML check)
+        ov.types <- lavdata@ov$type
+        if(lavmodel@conditional.x && lavmodel@nexo > 0L) {
+            # remove ov.x
+            ov.x.idx <- unlist(lavpta$vidx$ov.x)   
+            ov.types <- ov.types[-ov.x.idx]
+        } 
+
+        if(lavoptions$estimator == "PML" && all(ov.types == "ordered")) {
             TH <- computeTH(lavmodel)
             BI <- lav_tables_pairwise_freq_cell(lavdata)
 
@@ -640,8 +839,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                     uniweights.casewise <- rowSums( is.na( lavdata@X[[g]] ) )
                     lavcache[[g]]$uniweights.casewise <- uniweights.casewise
 
-                    #weights per response category per variable in the same 
-                    # order as unifreq; i.e. w_ia, i=1,...,p, (p variables), 
+                    #weights per response category per variable in the same
+                    # order as unifreq; i.e. w_ia, i=1,...,p, (p variables),
                     # a=1,...,Ci, (Ci response categories for variable i),
                     # a running faster than i
                     tmp.uniweights <- apply(lavdata@X[[g]], 2,
@@ -659,36 +858,36 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 # doubly.robust only
                 if (lavoptions$missing == "doubly.robust") {
 
-                    # add the provided by the user probabilities 
+                    # add the provided by the user probabilities
                     # pairwiseProbGivObs and univariateProbGivObs in Cache
-                    lavcache[[g]]$pairwiseProbGivObs <- 
+                    lavcache[[g]]$pairwiseProbGivObs <-
                         lavoptions$control$pairwiseProbGivObs[[g]]
-                    lavcache[[g]]$univariateProbGivObs <- 
+                    lavcache[[g]]$univariateProbGivObs <-
                         lavoptions$control$univariateProbGivObs[[g]]
-                    # compute different indices vectors that will help to do 
+                    # compute different indices vectors that will help to do
                     # calculations
                     ind.vec <- as.data.frame(LONG[1:5] )
-                    ind.vec <- 
+                    ind.vec <-
                         ind.vec[ ((ind.vec$index.thres.var1.of.pair!=0) &
                                   (ind.vec$index.thres.var2.of.pair!=0)) , ]
                     idx.cat.y1 <- ind.vec$index.thres.var1.of.pair
                     idx.cat.y2 <- ind.vec$index.thres.var2.of.pair
                     idx.pairs  <- ind.vec$index.pairs.extended
                     lavcache[[g]]$idx.pairs <- idx.pairs
-                 
+
                     idx.cat.y1.split <- split(idx.cat.y1, idx.pairs)
                     idx.cat.y2.split <- split(idx.cat.y2, idx.pairs)
                     lavcache[[g]]$idx.cat.y1.split <- idx.cat.y1.split
                     lavcache[[g]]$idx.cat.y2.split <- idx.cat.y2.split
-                 
-                    # generate the variables, categories indices vector which 
-                    # keep track to which variables and categories the 
+
+                    # generate the variables, categories indices vector which
+                    # keep track to which variables and categories the
                     # elements of vector probY1Gy2 refer to
                     nlev <- lavdata@ov$nlev
                     nvar <- length(nlev)
 
                     idx.var.matrix <- matrix(1:nvar, nrow=nvar, ncol=nvar)
-                    idx.diag <- diag( matrix(1:(nvar*nvar), nrow=nvar, 
+                    idx.diag <- diag( matrix(1:(nvar*nvar), nrow=nvar,
                                              ncol=nvar) )
                     idx.Y1Gy2.matrix <- rbind(t(idx.var.matrix)[-idx.diag],
                                                 idx.var.matrix [-idx.diag])
@@ -711,10 +910,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                     lavcache[[g]]$idx.Gy2     <- idx.Gy2
                     lavcache[[g]]$idx.cat.Y1  <- idx.cat.Y1
                     lavcache[[g]]$idx.cat.Gy2 <- idx.cat.Gy2
-                 
-                    # the vector below keeps track of the variable each column 
+
+                    # the vector below keeps track of the variable each column
                     # of the matrix univariateProbGivObs refers to
-                    lavcache[[g]]$id.uniPrGivObs <- 
+                    lavcache[[g]]$id.uniPrGivObs <-
                         sort( c( unique(lavmodel@th.idx[[g]]) ,
                                         lavmodel@th.idx[[g]] ) )
                 } # doubly.robust
@@ -723,7 +922,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
             } # g
         }
-        # copy response patterns to cache -- FIXME!! (data not included 
+        # copy response patterns to cache -- FIXME!! (data not included
         # in Model only functions)
         if(lavdata@data.type == "full" && !is.null(lavdata@Rp[[1L]])) {
             for(g in 1:lavdata@ngroups) {
@@ -738,7 +937,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             # count only the ones with non-normal indicators
             #nfac <- lavpta$nfac.nonnormal[[g]]
             nfac <- lavpta$nfac[[g]]
-            lavcache[[g]]$GH <- 
+            lavcache[[g]]$GH <-
                 lav_integration_gauss_hermite(n = lavoptions$integration.ngh,
                                               dnorm = TRUE,
                                               mean = 0, sd = 1,
@@ -747,6 +946,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         }
     }
 
+    timing$cache <- (proc.time()[3] - start.time)
+    start.time <- proc.time()[3]
 
 
 
@@ -759,20 +960,35 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     #### 10. est + lavoptim ####
     ############################
     x <- NULL
-    if(lavoptions$do.fit && lavoptions$estimator != "none" && 
+    if(lavoptions$do.fit && lavoptions$estimator != "none" &&
        lavmodel@nx.free > 0L) {
 
-        x <- lav_model_estimate(lavmodel        = lavmodel,
-                                lavsamplestats  = lavsamplestats,
-                                lavdata         = lavdata,
-                                lavoptions      = lavoptions,
-                                lavcache        = lavcache)
+        if(lavoptions$optim.method == "em") {
+            # multilevel only for now
+            stopifnot(lavdata@nlevels > 1L)
+            x <- lav_mvnorm_cluster_em_h0(lavsamplestats = lavsamplestats,
+                               lavdata        = lavdata,
+                               lavimplied     = NULL,
+                               lavpartable    = lavpartable,
+                               lavmodel       = lavmodel,
+                               lavoptions     = lavoptions, 
+                               verbose        = lavoptions$verbose,
+                               fx.tol         = lavoptions$em.fx.tol,
+                               dx.tol         = lavoptions$em.dx.tol,
+                               max.iter       = lavoptions$em.iter.max)
+        } else {
+            x <- lav_model_estimate(lavmodel        = lavmodel,
+                                    lavsamplestats  = lavsamplestats,
+                                    lavdata         = lavdata,
+                                    lavoptions      = lavoptions,
+                                    lavcache        = lavcache)
+        }
         lavmodel <- lav_model_set_parameters(lavmodel, x = x)
         # store parameters in @ParTable$est
         lavpartable$est <- lav_model_get_parameters(lavmodel = lavmodel,
                                                     type = "user", extra = TRUE)
 
-        if(!is.null(attr(x, "con.jac"))) 
+        if(!is.null(attr(x, "con.jac")))
             lavmodel@con.jac <- attr(x, "con.jac")
         if(!is.null(attr(x, "con.lambda")))
             lavmodel@con.lambda <- attr(x, "con.lambda")
@@ -817,21 +1033,37 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     }
     lavoptim$control        <- attr(x, "control")
 
-
-
-
-
-
-
-
-
-    ########################
-    #### 11. lavimplied ####
-    ########################
-    lavimplied <- lav_model_implied(lavmodel)
-
-    timing$Estimate <- (proc.time()[3] - start.time)
+    timing$optim <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
+
+
+
+
+
+
+
+
+    ####################################
+    #### 11. lavimplied + lavloglik ####
+    ####################################
+    lavimplied <- list()
+    if(lavoptions$implied) {
+         lavimplied <- lav_model_implied(lavmodel)
+    } 
+        
+    lavloglik <- list()
+    if(lavoptions$loglik) {
+         lavloglik <- lav_model_loglik(lavdata        = lavdata,
+                                       lavsamplestats = lavsamplestats,
+                                       lavimplied     = lavimplied,
+                                       lavmodel       = lavmodel,
+                                       lavoptions     = lavoptions)
+    }
+
+    timing$implied <- (proc.time()[3] - start.time)
+    start.time <- proc.time()[3]
+
+    
 
 
 
@@ -846,7 +1078,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     #### 12. lavvcov + lavboot ####
     ###############################
     VCOV <- NULL
-    if(lavoptions$se != "none" && lavoptions$se != "external" && 
+    if(lavoptions$se != "none" && lavoptions$se != "external" &&
        lavmodel@nx.free > 0L && attr(x, "converged")) {
         if(lavoptions$verbose) {
             cat("Computing VCOV for se =", lavoptions$se, "...")
@@ -857,7 +1089,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                lavdata         = lavdata,
                                lavpartable     = lavpartable,
                                lavcache        = lavcache,
-                               lavimplied      = lavimplied)
+                               lavimplied      = lavimplied,
+                               lavh1           = lavh1)
         if(lavoptions$verbose) {
             cat(" done.\n")
         }
@@ -868,7 +1101,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         lavboot <- list()
         lavboot$coef <- attr(VCOV, "BOOT.COEF")
     } else {
-        lavboot <- list()  
+        lavboot <- list()
     }
 
     # store VCOV in vcov
@@ -881,20 +1114,20 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
     # store se in partable
     if(lavoptions$se != "external") {
-        lavpartable$se <- lav_model_vcov_se(lavmodel = lavmodel, 
+        lavpartable$se <- lav_model_vcov_se(lavmodel = lavmodel,
                                             lavpartable = lavpartable,
-                                            VCOV = VCOV, 
+                                            VCOV = VCOV,
                                             BOOT = lavboot$coef)
     } else {
         if(is.null(lavpartable$se)) {
-            lavpartable$se <- lav_model_vcov_se(lavmodel = lavmodel, 
+            lavpartable$se <- lav_model_vcov_se(lavmodel = lavmodel,
                                                 lavpartable = lavpartable,
                                                 VCOV = NULL, BOOT = NULL)
             warning("lavaan WARNING: se = \"external\" but parameter table does not contain a `se' column")
         }
     }
 
-    timing$VCOV <- (proc.time()[3] - start.time)
+    timing$vcov <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
 
@@ -916,24 +1149,27 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         TEST <- lav_model_test(lavmodel            = lavmodel,
                                lavpartable         = lavpartable,
                                lavsamplestats      = lavsamplestats,
+                               lavimplied          = lavimplied,
+                               lavh1               = lavh1,
                                lavoptions          = lavoptions,
                                x                   = x,
                                VCOV                = VCOV,
                                lavdata             = lavdata,
-                               lavcache            = lavcache)
+                               lavcache            = lavcache,
+                               lavloglik           = lavloglik)
         if(lavoptions$verbose) {
             cat(" done.\n")
         }
     } else {
-        TEST <- list(list(test="none", stat=NA, 
-                     stat.group=rep(NA, lavdata@ngroups), df=NA, 
+        TEST <- list(list(test="none", stat=NA,
+                     stat.group=rep(NA, lavdata@ngroups), df=NA,
                      refdistr="unknown", pvalue=NA))
     }
 
     # store test in lavtest
     lavtest <- TEST
 
-    timing$TEST <- (proc.time()[3] - start.time)
+    timing$test <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
 
@@ -948,9 +1184,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     ####################
     #### 14. lavfit ####
     ####################
-    lavfit <- lav_model_fit(lavpartable = lavpartable, 
+    lavfit <- lav_model_fit(lavpartable = lavpartable,
                             lavmodel    = lavmodel,
-                            x           = x, 
+                            x           = x,
                             VCOV        = VCOV,
                             TEST        = TEST)
     timing$total <- (proc.time()[3] - start.time0)
@@ -958,15 +1194,20 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
 
 
+    ######################
+    #### 15. baseline ####
+    ######################
+    lavbaseline <- list()
+    if(is.logical(lavoptions$baseline) && lavoptions$baseline) {
 
-
-
+    }
 
 
     ####################
-    #### 15. lavaan ####
+    #### 16. lavaan ####
     ####################
     lavaan <- new("lavaan",
+                  version      = as.character(packageVersion("lavaan")),
                   call         = mc,                  # match.call
                   timing       = timing,              # list
                   Options      = lavoptions,          # list
@@ -980,8 +1221,11 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                   boot         = lavboot,             # list
                   optim        = lavoptim,            # list
                   implied      = lavimplied,          # list
+                  loglik       = lavloglik,           # list
                   vcov         = lavvcov,             # list
                   test         = lavtest,             # list
+                  h1           = lavh1,               # list
+                  baseline     = list(),              # list
                   external     = list()               # empty list
                  )
 
@@ -991,6 +1235,37 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if("post" %in% lavoptions$check && lavTech(lavaan, "converged")) {
         lavInspect(lavaan, "post.check")
     }
+
+    ########################
+    #### post: baseline ####
+    ########################
+    #lavbaseline <- list()
+    #if(is.logical(lavoptions$baseline) && lavoptions$baseline) {
+    #    fit.indep <- try(lav_object_independence(lavaan), silent = TRUE)
+    #    X2.null <- df.null <- as.numeric(NA)
+    #    X2.null.scaled <- df.null.scaled <- as.numeric(NA)
+    #    if(inherits(fit.indep, "try-error")) {
+    #        warning("lavaan WARNING: estimation of the baseline model failed.")
+    #    } else {
+    #        X2.null <- fit.indep@test[[1]]$stat
+    #        df.null <- fit.indep@test[[1]]$df
+    #        if(length(fit.indep@test) > 1L) {
+    #            X2.null.scaled <- fit.indep@test[[2]]$stat
+    #            df.null.scaled <- fit.indep@test[[2]]$df
+    #        }
+    #    }
+    #
+    #    # store in list
+    #    lavbaseline <- list(X2.null = X2.null,
+    #                        df.null = df.null,
+    #                        X2.null.scaled = X2.null.scaled,
+    #                        df.null.scaled = df.null.scaled)
+    #
+    #    # add to lavaan object
+    #    lavaan@baseline <- lavbaseline
+    #}
+
+
 
     lavaan
 }
@@ -1005,6 +1280,9 @@ cfa <- sem <- function(# user-specified model: can be syntax, parameter Table
 
                        # variable information
                        ordered            = NULL,
+
+                       # sampling weights
+                       sampling.weights   = NULL,
 
                        # summary data
                        sample.cov         = NULL,
@@ -1066,6 +1344,9 @@ growth <- function(# user-specified model: can be syntax, parameter Table
 
                    # variable information
                    ordered            = NULL,
+
+                   # sampling weights
+                   sampling.weights   = NULL,
 
                    # summary data
                    sample.cov         = NULL,

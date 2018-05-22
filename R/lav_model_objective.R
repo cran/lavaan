@@ -38,7 +38,8 @@ lav_model_objective <- function(lavmodel       = NULL,
             Mu.hat <- computeMuHat(lavmodel = lavmodel, GLIST = GLIST)
         }
         if(debug) print(WLS.est)
-    } else if(estimator %in% c("ML", "PML", "FML", "REML")) {
+    } else if(estimator %in% c("ML", "PML", "FML", "REML") && 
+              lavdata@nlevels == 1L) {
         # compute moments for all groups
         #if(conditional.x) {
         #    Sigma.hat <- computeSigmaHatJoint(lavmodel = lavmodel,
@@ -62,26 +63,23 @@ lav_model_objective <- function(lavmodel       = NULL,
         }
         if(debug) print(Sigma.hat)
 
-        if(meanstructure && !categorical) {
+        if(meanstructure) {
             #if(conditional.x) {
             #    Mu.hat <- computeMuHatJoint(lavmodel = lavmodel, GLIST = GLIST,
             #                           lavsamplestats = lavsamplestats)
             #} else {
                 Mu.hat <- computeMuHat(lavmodel = lavmodel, GLIST = GLIST)
             #}
-        } else if(categorical) {
+        }
+
+        if(categorical) {
             TH <- computeTH(lavmodel = lavmodel, GLIST = GLIST)
         }
+
         if(conditional.x) {
             PI <- computePI(lavmodel = lavmodel, GLIST = GLIST)
         }
-        if(estimator == "PML") {
-            if(lavmodel@nexo > 0L) {
-                PI <- computePI(lavmodel = lavmodel)
-            } else {
-                PI <- vector("list", length = lavsamplestats@ngroups)
-            }
-        }
+
         if(group.w.free) {
             GW <- computeGW(lavmodel = lavmodel, GLIST = GLIST)
         }
@@ -99,13 +97,20 @@ lav_model_objective <- function(lavmodel       = NULL,
 
         # incomplete data and fiml?
         if(lavsamplestats@missing.flag && estimator != "Bayes") {
-            if(estimator == "ML") {
+            if(estimator == "ML" && lavdata@nlevels == 1L) {
                 # FIML
                 if(!attr(Sigma.hat[[g]], "po")) return(Inf)
                 group.fx <- estimator.FIML(Sigma.hat=Sigma.hat[[g]],
                                            Mu.hat=Mu.hat[[g]],
                                            Yp=lavsamplestats@missing[[g]],
                                            h1=lavsamplestats@missing.h1[[g]]$h1,                                           N=lavsamplestats@nobs[[g]])
+            } else if(estimator == "ML" && lavdata@nlevels > 1L) {
+                #group.fx <- estimator.2L(lavmodel       = lavmodel,
+                #                         GLIST          = GLIST,
+                #                         lavdata        = lavdata,
+                #                         lavsamplestats = lavsamplestats,
+                #                         group          = g)
+                group.fx <- 0
             } else {
                 stop("this estimator: `", estimator, 
                      "' can not be used with incomplete data and the missing=\"ml\" option")
@@ -114,7 +119,11 @@ lav_model_objective <- function(lavmodel       = NULL,
         # complete data
             # ML and friends
             if(lavdata@nlevels > 1L) {
-                group.fx <- 0
+                group.fx <- estimator.2L(lavmodel       = lavmodel,
+                                         GLIST          = GLIST,
+                                         Lp             = lavdata@Lp[[g]],
+                                         lavsamplestats = lavsamplestats,
+                                         group          = g)
             } else if(conditional.x) {
                 group.fx <- estimator.ML_res(
                     Sigma.hat        = Sigma.hat[[g]],
@@ -153,6 +162,7 @@ lav_model_objective <- function(lavmodel       = NULL,
                 #             slopestructure = conditional.x)
                 WLS.V <- lav_mvnorm_information_expected(
                              Sigma = Sigma.hat[[g]],
+                             x.idx = lavsamplestats@x.idx[[g]],
                              meanstructure = lavmodel@meanstructure)
                 # DEBUG!!!!
                 #WLS.V <- 2*WLS.V
@@ -172,15 +182,37 @@ lav_model_objective <- function(lavmodel       = NULL,
 
         } else if(estimator == "PML") {
             # Pairwise maximum likelihood
-            group.fx <- estimator.PML(Sigma.hat = Sigma.hat[[g]],
-                                      TH        = TH[[g]],
-                                      PI        = PI[[g]],
-                                      th.idx    = th.idx[[g]],
-                                      num.idx   = num.idx[[g]],
-                                      X         = lavdata@X[[g]],
-                                      eXo       = lavdata@eXo[[g]],
-                                      lavcache  = lavcache[[g]],
-                                      missing   = lavdata@missing)
+            if(lavdata@nlevels  > 1L) {
+                #group.fx <- estimator.PML.2L(lavmodel       = lavmodel,
+                #                             GLIST          = GLIST,
+                #                             Lp             = lavdata@Lp[[g]],
+                #                             lavsamplestats = lavsamplestats,
+                #                             group          = g)   
+                group.fx <- 0 # for now
+                attr(group.fx, "logl") <- 0
+            } else if(conditional.x) {
+                group.fx <- estimator.PML(Sigma.hat = Sigma.hat[[g]],
+                                          Mu.hat    = Mu.hat[[g]],
+                                          TH        = TH[[g]],
+                                          PI        = PI[[g]],
+                                          th.idx    = th.idx[[g]],
+                                          num.idx   = num.idx[[g]],
+                                          X         = lavdata@X[[g]],
+                                          eXo       = lavdata@eXo[[g]],
+                                          lavcache  = lavcache[[g]],
+                                          missing   = lavdata@missing)
+            } else {
+                group.fx <- estimator.PML(Sigma.hat = Sigma.hat[[g]],
+                                          Mu.hat    = Mu.hat[[g]],
+                                          TH        = TH[[g]],
+                                          PI        = NULL,
+                                          th.idx    = th.idx[[g]],
+                                          num.idx   = num.idx[[g]],
+                                          X         = lavdata@X[[g]],
+                                          eXo       = NULL,
+                                          lavcache  = lavcache[[g]],
+                                          missing   = lavdata@missing)
+            }
             logl.group[g] <- attr(group.fx, "logl")
         } else if(estimator == "FML") { 
             # Full maximum likelihood (underlying multivariate normal)

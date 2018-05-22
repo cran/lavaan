@@ -37,12 +37,13 @@ lavTestScore <- function(object, add = NULL, release = NULL,
     if(!is.null(add) && nchar(add) > 0L) {
         # check release argument
         if(!is.null(release)) {
-            stop("lavaan ERROR: `add' and `release' arguments can be used together.")
+            stop("lavaan ERROR: `add' and `release' arguments cannot be used together.")
         }
 
         # extend model with extra set of parameters
         FIT <- lav_object_extended(object, add = add)
-        score <- lavTech(FIT, "gradient")
+        
+        score <- lavTech(FIT, "gradient.logl")
         information <- lavTech(FIT, "information.expected")
 
         npar <- object@Model@nx.free
@@ -82,9 +83,10 @@ lavTestScore <- function(object, add = NULL, release = NULL,
             stop("lavaan ERROR: no equality constraints found in model.")
         }
 
-        score <- lavTech(object, "gradient")
+        score <- lavTech(object, "gradient.logl")
         information <- lavTech(object, "information.expected")
-        J.inv <- MASS::ginv(information)
+        J.inv <- MASS::ginv(information) #FIXME: move into if(is.null(release))? 
+        #                 else written over with Z1.plus if(is.numeric(release))
         #R <- object@Model@con.jac[,]
 
         if(is.null(release)) {
@@ -118,9 +120,19 @@ lavTestScore <- function(object, add = NULL, release = NULL,
         class(Table) <- c("lavaan.data.frame", "data.frame")
     }
 
-    N <- nobs(object)
-    if(lavoptions$mimic == "EQS") {
-        N <- N - 1
+    if(object@Data@nlevels == 1L) {
+        N <- object@SampleStats@ntotal
+        if(lavoptions$mimic == "EQS") {
+            N <- N - 1
+        }
+    } else {
+        # total number of clusters (over groups)   
+        N <- 0
+        for(g in 1:object@SampleStats@ngroups) {
+            N <- N + object@Data@Lp[[g]]$nclusters[[2]]
+        }
+        #score <- score * (2 * object@SampleStats@ntotal) / N
+        score <- score / 2 # -2 * LRT
     }
     
     if(lavoptions$se == "standard") {
@@ -217,8 +229,14 @@ lavTestScore <- function(object, add = NULL, release = NULL,
         EPC.all <- -1 * as.numeric(score %*%  Z1.plus1)
 
         # create epc table for the 'free' parameters
-        LIST <- parTable(object)
-        LIST <- LIST[,c("lhs","op","rhs","group","free","label","plabel")]
+        if (!is.null(add) && nchar(add) > 0L) {
+          LIST <- parTable(FIT)[,c("lhs","op","rhs","group",
+                                   "user","free","label","plabel")]
+        } else {
+          ## release mode
+          LIST <- parTable(object)[,c("lhs","op","rhs","group",
+                                      "user","free","label","plabel")]
+        }
         if(lav_partable_ngroups(LIST) == 1L) {
             LIST$group <- NULL
         }
@@ -227,10 +245,13 @@ lavTestScore <- function(object, add = NULL, release = NULL,
             LIST <- LIST[-nonpar.idx,]
         }
 
-        LIST$est[ LIST$free > 0 ] <- coef(object)
+        LIST$est[ LIST$free > 0 & LIST$user != 10 ] <- lav_object_inspect_coef(object, type = "free")
+        LIST$est[ LIST$user == 10L ] <- 0
         LIST$epc <- rep(as.numeric(NA), length(LIST$lhs))
         LIST$epc[ LIST$free > 0 ] <- EPC.all
         LIST$epv <- LIST$est + LIST$epc
+        LIST$free[ LIST$user == 10L ] <- 0
+        LIST$user <- NULL
 
         attr(LIST, "header") <- "expected parameter changes (epc) and expected parameter values (epv):"
 

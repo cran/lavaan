@@ -98,50 +98,59 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     ASECTIONS <- c("Defined Parameters", 
                    "Constraints")
 
-    cat("\nParameter Estimates:\n\n")
+    # header?
+    header <- attr(x, "header")
 
-    # info about standard errors (if we have x$se only)
-    # 1. information
-    # 2. se
-    # 3. bootstrap requested/successful draws
-    if(!is.null(x$se)) { 
-        # 1.
-        t0.txt <- sprintf("  %-40s", "Information")
-        tmp.txt <- attr(x, "information")
-        t1.txt <- sprintf("  %10s", paste(toupper(substring(tmp.txt,1,1)),
-                         substring(tmp.txt,2), sep=""))
-        cat(t0.txt, t1.txt, "\n", sep="")
+    if(header) {
+        cat("\nParameter Estimates:\n\n")
 
-        # 2.
-        t0.txt <- sprintf("  %-31s", "Standard Errors")
-        tmp.txt <- attr(x, "se")
-        t1.txt <- sprintf("  %19s", paste(toupper(substring(tmp.txt,1,1)),
-                                          substring(tmp.txt,2), sep=""))
-        cat(t0.txt, t1.txt, "\n", sep="")
-    
-        # 3.
-        if(attr(x, "se") == "bootstrap" && !is.null(attr(x, "bootstrap"))) {
-            t0.txt <- sprintf("  %-40s", "Number of requested bootstrap draws")
-            t1.txt <- sprintf("  %10i", attr(x, "bootstrap"))
-            cat(t0.txt, t1.txt, "\n", sep="")
-            t0.txt <- sprintf("  %-40s", "Number of successful bootstrap draws")
-            t1.txt <- sprintf("  %10i", attr(x, "bootstrap.successful"))
-            cat(t0.txt, t1.txt, "\n", sep="")
-        }
-
-        # 4.
-        if(attr(x, "missing") %in% c("two.stage", "robust.two.stage")) {
-            t0.txt <- sprintf("  %-35s", "Information saturated (h1) model")
-            tmp.txt <- attr(x, "h1.information")
+        # info about standard errors (if we have x$se only)
+        # 1. information
+        # 2. se
+        # 3. bootstrap requested/successful draws
+        if(!is.null(x$se)) { 
+            # 1.
+            t0.txt <- sprintf("  %-35s", "Information")
+            tmp.txt <- attr(x, "information")
             t1.txt <- sprintf("  %15s", paste(toupper(substring(tmp.txt,1,1)),
-                                          substring(tmp.txt,2), sep=""))
+                             substring(tmp.txt,2), sep=""))
             cat(t0.txt, t1.txt, "\n", sep="")
+
+            # 2.
+            if(attr(x, "information") %in% c("expected", "first.order") ||
+               attr(x, "observed.information") == "h1") { 
+                t0.txt <- sprintf("  %-35s", "Information saturated (h1) model")
+                tmp.txt <- attr(x, "h1.information")
+                t1.txt <- sprintf("  %15s", 
+                                  paste(toupper(substring(tmp.txt,1,1)),
+                                          substring(tmp.txt,2), sep=""))
+                cat(t0.txt, t1.txt, "\n", sep="")
+            }
             if(attr(x, "information") == "observed") {
                 t0.txt <- sprintf("  %-35s", "Observed information based on")
                 tmp.txt <- attr(x, "observed.information")
                 t1.txt <- sprintf("  %15s", 
                                   paste(toupper(substring(tmp.txt,1,1)),
                                   substring(tmp.txt,2), sep=""))
+                cat(t0.txt, t1.txt, "\n", sep="")
+            }
+
+            # 3.
+            t0.txt <- sprintf("  %-31s", "Standard Errors")
+            tmp.txt <- attr(x, "se")
+            t1.txt <- sprintf("  %19s", paste(toupper(substring(tmp.txt,1,1)),
+                                              substring(tmp.txt,2), sep=""))
+            cat(t0.txt, t1.txt, "\n", sep="")
+    
+            # 4.
+            if(attr(x, "se") == "bootstrap" && !is.null(attr(x, "bootstrap"))) {
+                t0.txt <- 
+                    sprintf("  %-40s", "Number of requested bootstrap draws")
+                t1.txt <- sprintf("  %10i", attr(x, "bootstrap"))
+                cat(t0.txt, t1.txt, "\n", sep="")
+                t0.txt <- 
+                    sprintf("  %-40s", "Number of successful bootstrap draws")
+                t1.txt <- sprintf("  %10i", attr(x, "bootstrap.successful"))
                 cat(t0.txt, t1.txt, "\n", sep="")
             }
         }
@@ -184,7 +193,10 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     y$block <- y$level <- NULL
 
     # if standardized, remove std.nox column (space reasons only)
-    y$std.nox <- NULL
+    # unless, std.all is already removed
+    if(!is.null(y$std.all)) {
+        y$std.nox <- NULL
+    }
 
     # convert to character matrix
     m <- as.matrix(format.data.frame(y, na.encode = FALSE, 
@@ -204,6 +216,13 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
             if(!is.null(x$pvalue)) {
                 m[se.idx, "pvalue"] <- ""
             }
+            ## for lavaan.mi-class objects (semTools)
+            if(!is.null(x$t)) {
+                m[se.idx, "t"] <- ""
+            }
+            if(!is.null(x$df)) {
+                m[se.idx, "df"] <- ""
+            }
         }
 
         # handle se == NA
@@ -215,6 +234,13 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
             if(!is.null(x$pvalue)) {
                 m[se.idx, "pvalue"] <- ""
             }
+            ## for lavaan.mi-class objects (semTools)
+            if(!is.null(x$t)) {
+                m[se.idx, "t"] <- ""
+            }
+            if(!is.null(x$df)) {
+                m[se.idx, "df"] <- ""
+            }
         }
     }
 
@@ -223,12 +249,16 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
         se.idx <- which(x$se == 0)
         if(length(se.idx) > 0L) {
             m[se.idx, "fmi"] <- ""
+            ## for lavaan.mi-class objects (semTools)
+            if (!is.null(x$riv)) m[se.idx, "riv"] <- ""
         }
 
         not.idx <- which(x$op %in% c(":=", "<", ">", "=="))
         if(length(not.idx) > 0L) {
             if(!is.null(x$fmi)) {
                 m[not.idx, "fmi"] <- ""
+                ## for lavaan.mi-class objects (semTools)
+                if (!is.null(x$riv)) m[not.idx, "riv"] <- ""
             }
         }
     }
@@ -271,7 +301,13 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     colnames(m)[ colnames(m) == "std.nox"] <- "Std.nox"
     colnames(m)[ colnames(m) == "prior"  ] <- "Prior"
     colnames(m)[ colnames(m) == "fmi"    ] <- "FMI"
- 
+    ## for lavaan.mi-class objects (semTools)
+    if ("t" %in% colnames(m)) {
+      colnames(m)[ colnames(m) == "t"      ] <- "t-value"
+      colnames(m)[ colnames(m) == "P(>|z|)"] <- "P(>|t|)"
+      colnames(m)[ colnames(m) == "riv"    ] <- "RIV"
+    }
+    
     # format column names
     colnames(m) <- sprintf(char.format, colnames(m))
 
@@ -301,13 +337,6 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     # group-specific sections
     for(g in 1:ngroups) {
 
-        # block number
-        b <- b + 1L
-
-        # ov/lv names
-        ov.names <- lavNames(x, "ov", block = b)
-        lv.names <- lavNames(x, "lv", block = b)
-
         # group header
         if(ngroups > 1L) {
             group.label <- attr(x, "group.label")
@@ -316,6 +345,13 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
         }
 
         for(l in 1:nlevels) {
+
+            # block number
+            b <- b + 1L
+
+            # ov/lv names
+            ov.names <- lavNames(x, "ov", block = b)
+            lv.names <- lavNames(x, "lv", block = b)
    
             # level header
             if(nlevels > 1L) {
@@ -463,11 +499,11 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                     #cat("\n")
                     print(M, quote = FALSE)
                 }
-            }
+            } # GSECTIONS
     
-        } # groups
+        } # levels
 
-    } # levels    
+    } # groups
 
     # asections
     for(s in ASECTIONS) {
@@ -581,10 +617,10 @@ summary.lavaan.fsr <- function(object, ...) {
         nd <- 3L
     }    
 
-    print.lavaan.fsr(x = object, nd = nd)
+    print.lavaan.fsr(x = object, nd = nd, mm = TRUE, struc = TRUE)
 }
 
-print.lavaan.fsr <- function(x, ..., nd = 3L) {
+print.lavaan.fsr <- function(x, ..., nd = 3L, mm = FALSE, struc = FALSE) {
 
     y <- unclass(x)
     
@@ -594,8 +630,45 @@ print.lavaan.fsr <- function(x, ..., nd = 3L) {
         cat("\n")
     }
 
+    if(mm && !is.null(y$MM.FIT)) {
+        cat("\n")
+        nblocks <- length(y$MM.FIT)
+        for(b in seq_len(nblocks)) {
+            cat("Measurement block for latent variable(s):",
+                paste(lavNames(y$MM.FIT[[b]], "lv")), "\n")
+ 
+            # fit measures?
+            b.options <- lavInspect(y$MM.FIT[[b]], "options")
+            if(b.options$test != "none") {
+                cat("\n")
+                print(fitMeasures(y$MM.FIT[[b]], c("chisq", "df", "pvalue", "cfi", "rmsea", "srmr")))
+            }
+
+            # parameter estimates
+            PE <- parameterEstimates(y$MM.FIT[[b]], add.attributes = TRUE,
+                                     ci = FALSE)
+            print.lavaan.parameterEstimates(PE, ..., nd = nd)
+            cat("\n")
+        }
+    }
+
     # print PE
-    print.lavaan.parameterEstimates(y$PE, ..., nd = nd) 
+    if(struc) {
+        cat("Structural Part\n")
+        cat("\n")
+        #print.lavaan.parameterEstimates(y$PE, ..., nd = nd) 
+
+        short.summary(y$STRUC.FIT)
+        FIT <- fitMeasures(y$STRUC.FIT, fit.measures="default")
+        if(FIT["df"] > 0) {
+            print.fit.measures( FIT )
+        }
+    }
+    PE <- parameterEstimates(y$STRUC.FIT, ci = FALSE, 
+                             remove.eq = FALSE, remove.system.eq = TRUE,
+                             remove.ineq = FALSE, remove.def = FALSE,
+                             add.attributes = TRUE)
+    print.lavaan.parameterEstimates(PE, ..., nd = nd)
 
     invisible(y)
 }

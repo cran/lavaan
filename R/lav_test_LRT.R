@@ -10,7 +10,8 @@
 #     method = "Satorra.Bentler.2010"
 #     method = "mean.var.adjusted.PLRT"
 
-lavTestLRT <- function(object, ..., method = "default", A.method = "exact",
+lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
+                       scaled.shifted = TRUE,
                        H1 = TRUE, type = "Chisq", model.names = NULL) {
 
     if(object@optim$npar > 0L && !object@optim$converged)
@@ -170,7 +171,8 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "exact",
             } else {
                 method <- "satorra.2000"
             }
-        } else if(method == "meanvaradjustedplrt") {
+        } else if(method == "meanvaradjustedplrt" ||
+                  method == "mean.var.adjusted.PLRT") {
             method <- "mean.var.adjusted.PLRT"
             stopifnot(estimator == "PML")
         } else if(method == "satorra2000") {
@@ -212,6 +214,7 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "exact",
                 out <- lav_test_diff_Satorra2000(mods[[m]], mods[[m+1]],
                                                  H1 = TRUE,
                                                  Satterthwaite = Satterthwaite,
+                                                 scaled.shifted = scaled.shifted,
                                                  A.method = A.method)
                 STAT.delta[m+1] <- out$T.delta
                   Df.delta[m+1] <- out$df.delta
@@ -254,7 +257,24 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "exact",
                           check.names = FALSE)
     }
 
+    # catch Df.delta == 0 cases (reported by Florian Zsok in Zurich)
+    # but only if there are no inequality constraints! (0.6-1)
+    idx <- which(val[,"Df diff"] == 0)
+    if(length(idx) > 0L) {
+        # remove models with inequality constraints
+        ineq.idx <- which(sapply(lapply(mods, function(x) slot(slot(x, "Model"), "x.cin.idx")), length) > 0L)
+        rm.idx <- which(idx %in% ineq.idx)
+        if(length(rm.idx) > 0L) {
+            idx <- idx[-rm.idx]
+        }
+    }
+    if(length(idx) > 0L) {
+        val[idx, "Pr(>Chisq)"] <- as.numeric(NA)
+        warning("lavaan WARNING: some models have the same degrees of freedom")
+    }
+
     if(type == "chisq") {
+
         if(scaled) {
             attr(val, "heading") <- 
                 paste("Scaled Chi Square Difference Test (method = \"",
