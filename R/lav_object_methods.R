@@ -6,6 +6,8 @@ short.summary <- function(object) {
     # print header
     lav_object_print_header(object)
 
+    # print optim info
+    lav_object_print_optim(object)
 
     # print lavdata
     lav_data_print_short(object@Data)
@@ -203,7 +205,7 @@ function(object, header       = TRUE,
                  std.nox      = FALSE,
                  modindices   = FALSE,
                  nd = 3L) {
- 
+
     # this is to avoid partial matching of 'std' with std.nox
     standardized <- std || standardized
 
@@ -249,7 +251,7 @@ function(object, header       = TRUE,
 
 setMethod("coef", "lavaan",
 function(object, type="free", labels=TRUE) {
-    lav_object_inspect_coef(object = object, type = type, 
+    lav_object_inspect_coef(object = object, type = type,
                             add.labels = labels, add.class = TRUE)
 })
 
@@ -296,13 +298,13 @@ standardizedSolution <- standardizedsolution <- function(object,
 
     # add std and std.all columns
     if(type == "std.lv") {
-        LIST$est.std     <- standardize.est.lv(object, est = est, GLIST = GLIST,
+        LIST$est.std     <- lav_standardize_lv(object, est = est, GLIST = GLIST,
                                                partable = partable, cov.std = cov.std)
     } else if(type == "std.all") {
-        LIST$est.std <- standardize.est.all(object, est = est, GLIST = GLIST,
+        LIST$est.std <- lav_standardize_all(object, est = est, GLIST = GLIST,
                                             partable = partable, cov.std = cov.std)
     } else if(type == "std.nox") {
-        LIST$est.std <- standardize.est.all.nox(object, est = est, GLIST = GLIST,
+        LIST$est.std <- lav_standardize_all_nox(object, est = est, GLIST = GLIST,
                                                 partable = partable, cov.std = cov.std)
     }
 
@@ -352,12 +354,12 @@ standardizedSolution <- standardizedsolution <- function(object,
     if(se && object@Options$se != "none" && ci) {
         # next three lines based on confint.lm
         a <- (1 - level)/2; a <- c(a, 1 - a)
-        if(object@Options$se != "bootstrap") {
-            fac <- qnorm(a)
+        fac <- qnorm(a)
+        #if(object@Options$se != "bootstrap") {
             ci <- LIST$est + LIST$se %o% fac
-        } else {
-            ci <- rep(as.numeric(NA), length(LIST$est)) + LIST$se %o% fac
-        }
+        #} else {
+        #    ci <- rep(as.numeric(NA), length(LIST$est)) + LIST$se %o% fac
+        #}
 
         LIST$ci.lower <- ci[,1]; LIST$ci.upper <- ci[,2]
     }
@@ -501,13 +503,26 @@ parameterEstimates <- parameterestimates <- function(object,
     # add se, zstat, pvalue
     if(se && object@Options$se != "none") {
         LIST$se <- lav_object_inspect_se(object)
-        # handle tiny SEs 
+        # handle tiny SEs
         LIST$se <- ifelse(LIST$se < sqrt(.Machine$double.eps), 0, LIST$se)
         tmp.se <- ifelse(LIST$se < sqrt(.Machine$double.eps), NA, LIST$se)
         if(zstat) {
             LIST$z <- LIST$est / tmp.se
             if(pvalue) {
                 LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
+                # remove p-value if bounds have been used
+                if(!is.null(PARTABLE$lower)) {
+                   b.idx <- which(PARTABLE$lower > -Inf)
+                   if(length(b.idx) > 0L) {
+                       LIST$pvalue[b.idx] <- as.numeric(NA)
+                   }
+                }
+                if(!is.null(PARTABLE$upper)) {
+                   b.idx <- which(PARTABLE$upper < Inf)
+                   if(length(b.idx) > 0L) {
+                       LIST$pvalue[b.idx] <- as.numeric(NA)
+                   }
+                }
             }
         }
     }
@@ -659,10 +674,10 @@ parameterEstimates <- parameterestimates <- function(object,
 
     # standardized estimates?
     if(standardized) {
-        LIST$std.lv  <- standardize.est.lv(object, cov.std = cov.std)
-        LIST$std.all <- standardize.est.all(object, est.std=LIST$est.std,
+        LIST$std.lv  <- lav_standardize_lv(object, cov.std = cov.std)
+        LIST$std.all <- lav_standardize_all(object, est.std=LIST$est.std,
                                             cov.std = cov.std)
-        LIST$std.nox <- standardize.est.all.nox(object, est.std=LIST$est.std,
+        LIST$std.nox <- lav_standardize_all_nox(object, est.std=LIST$est.std,
                                                 cov.std = cov.std)
     }
 
@@ -886,7 +901,7 @@ function(object, ...) {
     if(object@optim$npar > 0L && !object@optim$converged) {
         warning("lavaan WARNING: model did not converge")
     }
-   
+
     # new in 0.6-1: we use the @loglik slot (instead of fitMeasures)
     if(.hasSlot(object, "loglik")) {
         LOGL <- object@loglik
@@ -938,7 +953,7 @@ function(object, model, add, ..., evaluate = TRUE) {
       call$model$se <- NULL
     }
     if (!is.null(call$slotParTable) && is.list(call$model)) call$slotParTable <- call$model
-    
+
     if (length(extras) > 0) {
       ## check for call$slotOptions conflicts
       if (!is.null(call$slotOptions)) {
@@ -955,10 +970,10 @@ function(object, model, add, ..., evaluate = TRUE) {
             call <- as.call(call)
         }
     }
-    
+
     if (missing(add) && !evaluate) return(call)
     ## for any of the other 3 scenarios, we need the updated fit
-    
+
     ## Check if "add" and "model" are both strings; combine them
     if (missing(add)) {
       ADD.already.in.parTable <- TRUE # because nothing to add
@@ -970,7 +985,7 @@ function(object, model, add, ..., evaluate = TRUE) {
     }
     newfit <- eval(call, parent.frame())
     if (ADD.already.in.parTable && evaluate) return(newfit)
-    
+
     ## only remaining situations: "add" exists, but either "add" or "model"
     ## is a parameter table, so update the parameter table in the call
     if (!(mode(add) %in% c("list","character"))) {
@@ -985,7 +1000,7 @@ function(object, model, add, ..., evaluate = TRUE) {
     PT$est <- NULL
     PT$se <- NULL
     call$model <- PT
-    
+
     if (evaluate) {
         eval(call, parent.frame())
     }

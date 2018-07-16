@@ -134,8 +134,6 @@ lav_model_h1_information_expected <- function(lavobject      = NULL,
                 # mvnorm
                 # FIXME: allow for meanstructure = FALSE
                 # FIXME: allow for conditional.x = TRUE
-                # FIXME: allow for wt
-                # FIXME: allow for x.idx?
                 if(lavmodel@meanstructure && structured) {
                     MEAN <- lavimplied$mean[[g]]
                 } else {
@@ -143,22 +141,25 @@ lav_model_h1_information_expected <- function(lavobject      = NULL,
                 }
 
                 if(structured) {
-                    A1[[g]] <- 
+                    A1[[g]] <-
                       lav_mvnorm_missing_information_expected(
                           Y = lavdata@X[[g]],
                           Mp = lavdata@Mp[[g]],
                           wt = WT,
                           Mu = MEAN,
                           # meanstructure = lavmodel@meanstructure,
-                          Sigma = lavimplied$cov[[g]])
+                          Sigma = lavimplied$cov[[g]],
+                          x.idx = lavsamplestats@x.idx[[g]])
                 } else {
                     A1[[g]] <-
                       lav_mvnorm_missing_information_expected(
                           Y = lavdata@X[[g]],
                           Mp = lavdata@Mp[[g]],
+                          wt = WT,
                           Mu = MEAN,
                           # meanstructure = lavmodel@meanstructure,
-                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma,
+                          x.idx = lavsamplestats@x.idx[[g]])
                 }
             } else {
                 if(lavmodel@conditional.x) {
@@ -301,7 +302,7 @@ lav_model_h1_information_observed <- function(lavobject      = NULL,
     } else {
         structured <- TRUE
     }
- 
+
     # 1. WLS.V (=A1) for GLS/WLS
     if(lavmodel@estimator == "GLS"  || lavmodel@estimator == "WLS") {
         A1 <- lavsamplestats@WLS.V
@@ -316,7 +317,7 @@ lav_model_h1_information_observed <- function(lavobject      = NULL,
     # 3a. ML single level
     else if(lavmodel@estimator == "ML" && lavdata@nlevels == 1L) {
         A1 <- vector("list", length=lavsamplestats@ngroups)
-  
+
         # structured? compute model-implied statistics
         if(structured && length(lavimplied) == 0L) {
             lavimplied <- lav_model_implied(lavmodel)
@@ -328,8 +329,6 @@ lav_model_h1_information_observed <- function(lavobject      = NULL,
                 # mvnorm
                 # FIXME: allow for meanstructure = FALSE
                 # FIXME: allow for conditional.x = TRUE
-                # FIXME: allow for wt
-                # FIXME: allow for x.idx?
                 if(lavmodel@meanstructure && structured) {
                     MEAN <- lavimplied$mean[[g]]
                 } else {
@@ -337,21 +336,23 @@ lav_model_h1_information_observed <- function(lavobject      = NULL,
                 }
 
                 if(structured) {
-                    A1[[g]] <- 
+                    A1[[g]] <-
                       lav_mvnorm_missing_information_observed_samplestats(
                           Yp = lavsamplestats@missing[[g]],
-                          #wt = WT, ?
+                          # wt not needed
                           Mu = MEAN,
                           # meanstructure = lavmodel@meanstructure,
-                          Sigma = lavimplied$cov[[g]])
+                          Sigma = lavimplied$cov[[g]],
+                          x.idx = lavsamplestats@x.idx[[g]])
                 } else {
                     A1[[g]] <-
                       lav_mvnorm_missing_information_observed_samplestats(
                           Yp = lavsamplestats@missing[[g]],
-                          #wt = WT, ?
+                          # wt not needed
                           Mu = MEAN,
                           # meanstructure = lavmodel@meanstructure,
-                          Sigma = lavsamplestats@missing.h1[[g]]$sigma)
+                          Sigma = lavsamplestats@missing.h1[[g]]$sigma,
+                          x.idx = lavsamplestats@x.idx[[g]])
                 }
             } else {
                 if(lavmodel@conditional.x) {
@@ -500,12 +501,37 @@ lav_model_h1_information_firstorder <- function(lavobject      = NULL,
         stop("lavaan ERROR: information = \"first.order\" not available for estimator ", sQuote(estimator))
     }
 
+    # structured?
     if(!is.null(lavoptions) &&
        !is.null(lavoptions$h1.information) &&
        lavoptions$h1.information == "unstructured") {
         structured <- FALSE
     } else {
         structured <- TRUE
+    }
+
+    # clustered?
+    if(!is.null(lavoptions) &&
+       !is.null(lavoptions$clustered) &&
+       lavoptions$clustered) {
+        clustered <- TRUE
+        if(is.null(lavdata@Lp[[1]])) {
+            stop("lavaan ERROR: lavdata@Lp is empty, while clustered = TRUE")
+        }
+        if(estimator == "PML") {
+            stop("lavaan ERROR: clustered information is not (yet) available when estimator = \"PML\"")
+        }
+        #if(lavsamplestats@missing.flag) {
+        #    stop("lavaan ERROR: clustered information is not (yet) available when missing = \"ML\"")
+        #}
+        if(lavmodel@conditional.x) {
+            stop("lavaan ERROR: clustered information is not (yet) available when conditional.x = TRUE")
+        }
+        #if(!structured) {
+        #    stop("lavaan ERROR: clustered information is not (yet) available when h1.information = \"unstructured\"")
+        #}
+    } else {
+        clustered <- FALSE
     }
 
     # structured? compute model-implied statistics
@@ -582,24 +608,31 @@ lav_model_h1_information_firstorder <- function(lavobject      = NULL,
                            divide.by.two = TRUE)
 
         } else if(estimator == "ML" && lavdata@nlevels == 1L) {
+
+            if(length(lavdata@cluster) > 0L) {
+                cluster.idx <- lavdata@Lp[[g]]$cluster.idx[[2]]
+            } else {
+                cluster.idx <- NULL
+            }
+
             if(lavsamplestats@missing.flag) {
                 # mvnorm
                 # FIXME: allow for meanstructure = FALSE
                 # FIXME: allow for conditional.x = TRUE
-                # FIXME: allow for wt
-                # FIXME: allow for x.idx?
                 if(lavmodel@meanstructure && structured) {
                     MEAN <- lavimplied$mean[[g]]
                 } else {
                     MEAN <- lavsamplestats@missing.h1[[g]]$mu
                 }
- 
+
                 B1[[g]] <- lav_mvnorm_missing_information_firstorder(
-                               Y = lavdata@X[[g]],
+                              Y = lavdata@X[[g]],
                               Mp = lavdata@Mp[[g]], wt = WT,
+                              cluster.idx = cluster.idx,
                               Mu = MEAN,
                               # meanstructure = lavmodel@meanstructure,
-                              Sigma = implied$cov[[g]])
+                              Sigma = implied$cov[[g]],
+                              x.idx = lavsamplestats@x.idx[[g]])
 
             } else {
                 if(lavmodel@conditional.x) {
@@ -639,6 +672,7 @@ lav_model_h1_information_firstorder <- function(lavobject      = NULL,
                                   Y = lavdata@X[[g]],
                                   Mu = MEAN, Sigma = lavimplied$cov[[g]],
                                   wt = WT,
+                                  cluster.idx = cluster.idx,
                                   x.idx = lavsamplestats@x.idx[[g]],
                                   meanstructure = lavmodel@meanstructure)
                     } else {
@@ -647,6 +681,7 @@ lav_model_h1_information_firstorder <- function(lavobject      = NULL,
                                   sample.cov.inv = lavsamplestats@icov[[g]],
                                   Gamma = lavsamplestats@NACOV[[g]],
                                   wt = WT,
+                                  cluster.idx = cluster.idx, # only if wt
                                   x.idx = lavsamplestats@x.idx[[g]],
                                   meanstructure = lavmodel@meanstructure)
                     }

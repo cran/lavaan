@@ -1,5 +1,5 @@
 # YR 21 March 2015
-# new approach to compute 'Gamma': the asymptotic variance matrix of 
+# new approach to compute 'Gamma': the asymptotic variance matrix of
 #                                  sqrt{N} times the
 #                                  observed sample statistics (means + varcov)
 #
@@ -16,7 +16,7 @@ lavGamma <- function(object, group = NULL, missing = "listwise",
                      ov.names.x = NULL, fixed.x = FALSE, conditional.x = FALSE,
                      meanstructure = FALSE, slopestructure = FALSE,
                      Mplus.WLS = FALSE, add.labels) {
-    
+
     if(inherits(object, "lavaan")) {
         lavdata <- object@Data
         if(missing(missing)) {
@@ -38,7 +38,7 @@ lavGamma <- function(object, group = NULL, missing = "listwise",
         }
         lavdata <- lavData(data = object, group = group,
                            ov.names = NAMES, ordered = NULL,
-                           ov.names.x = ov.names.x, 
+                           ov.names.x = ov.names.x,
                            lavoptions = list(warn = FALSE,
                                              missing = missing))
     } else {
@@ -62,7 +62,7 @@ lavGamma <- function(object, group = NULL, missing = "listwise",
                                                 meanstructure  = meanstructure,
                                                 slopestructure = slopestructure,
                                                 Mplus.WLS      = Mplus.WLS))
-  
+
     OUT
 }
 
@@ -75,7 +75,7 @@ lavGamma <- function(object, group = NULL, missing = "listwise",
 
 # NORMAL-THEORY
 lav_samplestats_Gamma_NT <- function(Y              = NULL, # should include
-                                                            # eXo if 
+                                                            # eXo if
                                                             #conditional.x=TRUE
                                      wt             = NULL,
                                      COV            = NULL, # joint!
@@ -95,7 +95,7 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL, # should include
 
     if(is.null(COV)) {
         stopifnot(!is.null(Y))
-    
+
         # coerce to matrix
         Y <- unname(as.matrix(Y)); N <- nrow(Y)
         if(is.null(wt)) {
@@ -138,7 +138,7 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL, # should include
         } else {
             # handle fixed.x = TRUE
 
-            # cov(Y|X) = A - B C^{-1} B' 
+            # cov(Y|X) = A - B C^{-1} B'
             # where A = cov(Y), B = cov(Y,X), C = cov(X)
             A <- S[-x.idx, -x.idx, drop=FALSE]
             B <- S[-x.idx,  x.idx, drop=FALSE]
@@ -162,7 +162,7 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL, # should include
         }
 
     } else {
-        # conditional.x 
+        # conditional.x
 
         # 4 possibilities:
         # - no meanstructure, no slopes
@@ -203,7 +203,7 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL, # should include
 
         Gamma <- lav_matrix_bdiag(A11, Gamma)
     }
-   
+
     Gamma
 }
 
@@ -216,16 +216,18 @@ lav_samplestats_Gamma_NT <- function(Y              = NULL, # should include
 #
 #  - new in 0.6-1: if Mu/Sigma is provided, compute 'model-based' Gamma
 #                  (only if conditional.x = FALSE, for now)
+#  - new in 0.6-2: if cluster.idx is not NULL, correct for clustering
 
 # ADF THEORY
 lav_samplestats_Gamma <- function(Y,
                                   Mu                 = NULL,
                                   Sigma              = NULL,
                                   x.idx              = integer(0L),
+                                  cluster.idx        = NULL,
                                   fixed.x            = FALSE,
                                   conditional.x      = FALSE,
                                   meanstructure      = FALSE,
-                                  slopestructure     = FALSE, 
+                                  slopestructure     = FALSE,
                                   gamma.n.minus.one  = FALSE,
                                   Mplus.WLS          = FALSE,
                                   add.attributes     = FALSE) {
@@ -274,10 +276,10 @@ lav_samplestats_Gamma <- function(Y,
         idx1 <- lav_matrix_vech_col_idx(p)
         idx2 <- lav_matrix_vech_row_idx(p)
         if(meanstructure) {
-            Z <- cbind(Y, Yc[,idx1, drop = FALSE] * 
+            Z <- cbind(Y, Yc[,idx1, drop = FALSE] *
                           Yc[,idx2, drop = FALSE] )
         } else {
-            Z <- ( Yc[,idx1, drop = FALSE] * 
+            Z <- ( Yc[,idx1, drop = FALSE] *
                    Yc[,idx2, drop = FALSE] )
         }
 
@@ -291,6 +293,11 @@ lav_samplestats_Gamma <- function(Y,
             Zc <- t( t(Z) - sigma )
         } else {
             Zc <- t( t(Z) - colMeans(Z) )
+        }
+
+        # clustered?
+        if(length(cluster.idx) > 0L) {
+            Zc <- rowsum(Zc, cluster.idx)
         }
 
         if(anyNA(Zc)) {
@@ -322,9 +329,9 @@ lav_samplestats_Gamma <- function(Y,
             YHAT <- cbind(yhat, Y[,x.idx])
             YHATc <- t( t(YHAT) - YHAT.bar )
             if(meanstructure) {
-                Z <- ( cbind(Y, Yc[,idx1, drop = FALSE] * 
+                Z <- ( cbind(Y, Yc[,idx1, drop = FALSE] *
                                 Yc[,idx2, drop = FALSE] ) -
-                       cbind(YHAT, YHATc[,idx1, drop = FALSE] * 
+                       cbind(YHAT, YHATc[,idx1, drop = FALSE] *
                                    YHATc[,idx2, drop = FALSE]) )
                 sigma1 <- c(Mu, lav_matrix_vech(Sigma))
                 sigma2 <- c(YHAT.bar, lav_matrix_vech(YHAT.cov))
@@ -347,17 +354,22 @@ lav_samplestats_Gamma <- function(Y,
             idx1 <- lav_matrix_vech_col_idx(p)
             idx2 <- lav_matrix_vech_row_idx(p)
             if(meanstructure) {
-                Z <- ( cbind(Y, Yc[,idx1, drop = FALSE] * 
-                                Yc[,idx2, drop = FALSE]) - 
-                       cbind(YHAT, YHATc[,idx1, drop = FALSE] * 
+                Z <- ( cbind(Y, Yc[,idx1, drop = FALSE] *
+                                Yc[,idx2, drop = FALSE]) -
+                       cbind(YHAT, YHATc[,idx1, drop = FALSE] *
                                    YHATc[,idx2, drop = FALSE]) )
             } else {
-                Z <- ( Yc[,idx1, drop = FALSE] * 
+                Z <- ( Yc[,idx1, drop = FALSE] *
                        Yc[,idx2, drop = FALSE] -
-                       YHATc[,idx1, drop = FALSE] * 
+                       YHATc[,idx1, drop = FALSE] *
                        YHATc[,idx2, drop = FALSE] )
             }
             Zc <- t( t(Z) - colMeans(Z) )
+        }
+
+        # clustered?
+        if(length(cluster.idx) > 0L) {
+            Zc <- rowsum(Zc, cluster.idx)
         }
 
         if(anyNA(Zc)) {
@@ -368,7 +380,7 @@ lav_samplestats_Gamma <- function(Y,
 
 
     } else {
-        # conditional.x 
+        # conditional.x
 
         # 4 possibilities:
         # - no meanstructure, no slopes
@@ -399,13 +411,13 @@ lav_samplestats_Gamma <- function(Y,
                 Res.idx <- rep(seq_len(ncY), each  = ncX)
                 Z <- cbind( Xi[, Xi.idx, drop = FALSE] *
                            RES[,Res.idx, drop = FALSE],
-                           RES[,   idx1, drop = FALSE] * 
+                           RES[,   idx1, drop = FALSE] *
                            RES[,   idx2, drop = FALSE] )
             } else {
                 Xi.idx <- rep(1L, each = ncY)
                 Z <- cbind( Xi[, Xi.idx ,drop = FALSE] *
                            RES,
-                           RES[,   idx1, drop = FALSE] * 
+                           RES[,   idx1, drop = FALSE] *
                            RES[,   idx2, drop = FALSE] )
             }
         } else {
@@ -417,7 +429,7 @@ lav_samplestats_Gamma <- function(Y,
                 Res.idx <- rep(seq_len(ncY), each = (ncX - 1L))
                 Z <- cbind( Xi[, Xi.idx, drop = FALSE] *
                            RES[,Res.idx, drop = FALSE],
-                           RES[,   idx1, drop = FALSE] * 
+                           RES[,   idx1, drop = FALSE] *
                            RES[,   idx2, drop = FALSE] )
             } else {
                 Z <- RES[,idx1, drop = FALSE] * RES[,idx2, drop = FALSE]
@@ -430,13 +442,18 @@ lav_samplestats_Gamma <- function(Y,
             Zc <- t( t(Z) - colMeans(Z) )
         }
 
+        # clustered?
+        if(length(cluster.idx) > 0L) {
+            Zc <- rowsum(Zc, cluster.idx)
+        }
+
         if(anyNA(Zc)) {
             Gamma <- lav_matrix_crossprod(Zc) / N
         } else {
             Gamma <- base::crossprod(Zc) / N
         }
     }
-   
+
 
     # only to mimic Mplus when estimator = "WLS"
     if(Mplus.WLS && !fixed.x && !conditional.x) {
@@ -459,6 +476,12 @@ lav_samplestats_Gamma <- function(Y,
             Gamma[seq_len(p),-seq_len(p)] <- Gamma[seq_len(p),-seq_len(p)] * N1
             Gamma[-seq_len(p),seq_len(p)] <- Gamma[-seq_len(p),seq_len(p)] * N1
         }
+    }
+
+    # clustered?
+    if(length(cluster.idx) > 0L) {
+        nC <- nrow(Zc)
+        Gamma <- Gamma * nC / (nC - 1)
     }
 
     Gamma
