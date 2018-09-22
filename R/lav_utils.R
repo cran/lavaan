@@ -9,6 +9,7 @@ lav_utils_logsumexp <- function(x) {
     a + log(sum(exp(x - a)))
 }
 
+
 # invert positive definite symmetric matrix (eg cov matrix)
 # using choleski decomposition
 # return log determinant as an attribute

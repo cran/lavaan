@@ -22,6 +22,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                    # summary data
                    sample.cov         = NULL,
                    sample.mean        = NULL,
+                   sample.th          = NULL,
                    sample.nobs        = NULL,
 
                    # multiple groups?
@@ -185,8 +186,27 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             ov.names.x[[g]] <- unique(unlist(lav_partable_vnames(tmp.lav,
                                 type = "ov.x", group = tmp.group.values[g])))
         }
+    } else if(!is.null(FLAT$group)) {
+        # user-provided full partable with group column!
+        ngroups <- lav_partable_ngroups(FLAT)
+        if(ngroups > 1L) {
+            group.values <- lav_partable_group_values(FLAT)
+            ov.names <- ov.names.y <- ov.names.x <- vector("list",
+                                                       length = ngroups)
+            for(g in seq_len(ngroups)) {
+                ov.names[[g]]   <- lav_partable_vnames(FLAT, type = "ov",
+                                                       group = group.values[g])
+                ov.names.y[[g]] <- lav_partable_vnames(FLAT, type = "ov.y",
+                                                       group = group.values[g])
+                ov.names.x[[g]] <- lav_partable_vnames(FLAT, type = "ov.x",
+                                                       group = group.values[g])
+            }
+        } else {
+            ov.names   <- lav_partable_vnames(FLAT, type = "ov")
+            ov.names.y <- lav_partable_vnames(FLAT, type = "ov.nox")
+            ov.names.x <- lav_partable_vnames(FLAT, type = "ov.x")
+        }
     } else {
-        # no blocks: same set of variables per group/block
         ov.names   <- lav_partable_vnames(FLAT, type = "ov")
         ov.names.y <- lav_partable_vnames(FLAT, type = "ov.nox")
         ov.names.x <- lav_partable_vnames(FLAT, type = "ov.x")
@@ -303,16 +323,12 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         # modifyList
         opt <- modifyList(opt, dotdotdot)
 
-        # no data?
-        if(is.null(data) && is.null(sample.cov)) {
-            opt$fixed.x <- FALSE
-            opt$conditional.x <- FALSE
-        }
-
         # categorical mode?
         if(any(FLAT$op == "|")) {
             opt$categorical <- TRUE
         } else if(!is.null(data) && length(ordered) > 0L) {
+            opt$categorical <- TRUE
+        } else if(!is.null(sample.th)) {
             opt$categorical <- TRUE
         } else if(is.data.frame(data) &&
             lav_dataframe_check_ordered(frame = data, ov.names = ov.names.y)) {
@@ -396,19 +412,19 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if(!is.null(slotData)) {
         lavdata <- slotData
     } else {
-        if(lavoptions$conditional.x) {
-            ov.names <- ov.names.y
-        }
+        # FIXME: ov.names should always contain both y and x!
+        OV.NAMES <- if(lavoptions$conditional.x) { ov.names.y } else {ov.names}
         lavdata <- lavData(data             = data,
                            group            = group,
                            cluster          = cluster,
-                           ov.names         = ov.names,
+                           ov.names         = OV.NAMES,
                            ov.names.x       = ov.names.x,
                            ov.names.l       = ov.names.l,
                            ordered          = ordered,
                            sampling.weights = sampling.weights,
                            sample.cov       = sample.cov,
                            sample.mean      = sample.mean,
+                           sample.th        = sample.th,
                            sample.nobs      = sample.nobs,
                            lavoptions       = lavoptions)
     }
@@ -586,11 +602,12 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         lavsamplestats <- lav_samplestats_from_moments(
                            sample.cov    = sample.cov,
                            sample.mean   = sample.mean,
+                           sample.th     = sample.th,
                            sample.nobs   = sample.nobs,
-                           ov.names      = lavpta$vnames$ov,
+                           ov.names      = ov.names,
+                           ov.names.x    = ov.names.x,
                            estimator     = lavoptions$estimator,
                            mimic         = lavoptions$mimic,
-                           meanstructure = lavoptions$meanstructure,
                            group.w.free  = lavoptions$group.w.free,
                            WLS.V         = WLS.V,
                            NACOV         = NACOV,
@@ -779,7 +796,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
         # ov.types? (for PML check)
         ov.types <- lavdata@ov$type
-        if(lavmodel@conditional.x && lavmodel@nexo > 0L) {
+        if(lavmodel@conditional.x && sum(lavmodel@nexo) > 0L) {
             # remove ov.x
             ov.x.idx <- unlist(lavpta$vidx$ov.x)
             ov.types <- ov.types[-ov.x.idx]
@@ -1248,9 +1265,20 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if(is.character(constraints) && nchar(constraints) > 0L) {
         hasExplicitConstraints <- TRUE
     }
-    if(!is.null(lavoptions$check.gradient) &&
-       lavoptions$check.gradient && lavTech(lavaan, "converged") &&
-       !hasExplicitConstraints) {
+    hasNonLinearEqConstraints <- FALSE
+    if(length(lavmodel@ceq.nonlinear.idx) > 0L) {
+        hasNonLinearEqConstraints <- TRUE
+    }
+    hasIneqConstraints <- FALSE
+    if(length(lavmodel@cin.linear.idx) > 0L ||
+       length(lavmodel@cin.nonlinear.idx) > 0L) {
+        hasIneqConstraints <- TRUE
+    }
+    if(!is.null(lavoptions$check.gradient) && lavoptions$check.gradient &&
+       lavTech(lavaan, "converged") &&
+       !hasExplicitConstraints      &&
+       !hasNonLinearEqConstraints   &&
+       !hasIneqConstraints) {
         grad <- lavInspect(lavaan, "optim.gradient")
         large.idx <- which(abs(grad) > 0.001)  # better 0.0001?
         if(length(large.idx) > 0L) {
@@ -1312,6 +1340,7 @@ cfa <- sem <- function(# user-specified model: can be syntax, parameter Table
                        # summary data
                        sample.cov         = NULL,
                        sample.mean        = NULL,
+                       sample.th          = NULL,
                        sample.nobs        = NULL,
 
                        # multiple groups?
@@ -1376,6 +1405,7 @@ growth <- function(# user-specified model: can be syntax, parameter Table
                    # summary data
                    sample.cov         = NULL,
                    sample.mean        = NULL,
+                   sample.th          = NULL,
                    sample.nobs        = NULL,
 
                    # multiple groups?

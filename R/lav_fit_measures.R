@@ -1,11 +1,15 @@
+# TDJ: add "..." to make the method generic, so lavaan.mi can add arguments to
+#      pass to lavTestLRT() and lavTestLRT.mi() about how to pool chi-squared.
+#      NOT sure this is necessary for the lavaan-method, perhaps only the
+#      generic needs "..."?
 setMethod("fitMeasures", signature(object = "lavaan"),
-function(object, fit.measures = "all", baseline.model = NULL) {
+function(object, fit.measures = "all", baseline.model = NULL, ...) {
     lav_fit_measures(object = object, fit.measures = fit.measures,
                      baseline.model = baseline.model)
 })
 
 setMethod("fitmeasures", signature(object = "lavaan"),
-function(object, fit.measures = "all", baseline.model = NULL) {
+function(object, fit.measures = "all", baseline.model = NULL, ...) {
     lav_fit_measures(object = object, fit.measures = fit.measures,
                      baseline.model = baseline.model)
 })
@@ -159,7 +163,7 @@ lav_fit_measures <- function(object, fit.measures="all",
         fit.srmr2 <- c("rmr", "rmr_nomean",
                        "srmr", # per default equal to srmr_bentler_nomean
                        "srmr_bentler", "srmr_bentler_nomean",
-                       "srmr_bollen", "srmr_bollen_nomean",
+                       "crmr", "crmr_nomean",
                        "srmr_mplus", "srmr_mplus_nomean")
     } else {
         if(object@Data@nlevels > 1L) {
@@ -170,7 +174,7 @@ lav_fit_measures <- function(object, fit.measures="all",
             fit.srmr2 <- c("rmr", "rmr_nomean",
                            "srmr", # the default
                            "srmr_bentler", "srmr_bentler_nomean",
-                           "srmr_bollen", "srmr_bollen_nomean",
+                           "crmr", "crmr_nomean",
                            "srmr_mplus", "srmr_mplus_nomean")
         }
     }
@@ -353,7 +357,8 @@ lav_fit_measures <- function(object, fit.measures="all",
             if("cfi" %in% fit.measures) {
                 t1 <- max( c(X2 - df, 0) )
                 t2 <- max( c(X2 - df, X2.null - df.null, 0) )
-                if(t1 == 0 && t2 == 0) {
+                if(isTRUE(all.equal(t1,0)) && 
+                   isTRUE(all.equal(t2,0))) {
                     indices["cfi"] <- 1
                 } else {
                     indices["cfi"] <- 1 - t1/t2
@@ -365,7 +370,8 @@ lav_fit_measures <- function(object, fit.measures="all",
                              X2.null.scaled - df.null.scaled, 0) )
                 if(is.na(t1) || is.na(t2)) {
                     indices["cfi.scaled"] <- NA
-                } else if(t1 == 0 && t2 == 0) {
+                } else if(isTRUE(all.equal(t1,0)) && 
+                          isTRUE(all.equal(t2,0))) {
                     indices["cfi.scaled"] <- 1
                 } else {
                     indices["cfi.scaled"] <- 1 - t1/t2
@@ -392,7 +398,8 @@ lav_fit_measures <- function(object, fit.measures="all",
                     t2 <- max( c(X2 - (ch*df), X2.null - (cb*df.null), 0) )
                     if(is.na(t1) || is.na(t2)) {
                         indices["cfi.robust"] <- NA
-                    } else if(t1 == 0 && t2 == 0) {
+                    } else if(isTRUE(all.equal(t1,0)) && 
+                              isTRUE(all.equal(t2,0))) {
                         indices["cfi.robust"] <- 1
                     } else {
                         indices["cfi.robust"] <- 1 - t1/t2
@@ -407,7 +414,7 @@ lav_fit_measures <- function(object, fit.measures="all",
             if("rni" %in% fit.measures) {
                 t1 <- X2 - df
                 t2 <- X2.null - df.null
-                if(t2 == 0) {
+                if(isTRUE(all.equal(t2,0))) {
                     RNI <- NA
                 } else {
                     RNI <- 1 - t1/t2
@@ -419,7 +426,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 t2 <- X2.null.scaled - df.null.scaled
                 if(is.na(t1) || is.na(t2)) {
                     RNI <- NA
-                } else if(t2 == 0) {
+                } else if(isTRUE(all.equal(t2,0))) {
                     RNI <- NA
                 } else {
                     RNI <- 1 - t1/t2
@@ -446,7 +453,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                     t2 <- X2.null - cb*df.null
                     if(is.na(t1) || is.na(t2)) {
                         RNI <- NA
-                    } else if(t2 == 0) {
+                    } else if(isTRUE(all.equal(t2,0))) {
                         RNI <- NA
                     } else {
                         RNI <- 1 - t1/t2
@@ -481,7 +488,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 #   therefore, t1 can go negative, and TLI can be > 1
                 t1 <- (X2 - df)*df.null
                 t2 <- (X2.null - df.null)*df
-                if(df > 0 && t2 != 0) {
+                if(df > 0 && abs(t2) > 0) {
                     indices["tli"] <- indices["nnfi"] <- 1 - t1/t2
                 } else {
                     indices["tli"] <- indices["nnfi"] <- 1
@@ -495,7 +502,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 t2 <- (X2.null.scaled - df.null.scaled)*df.scaled
                 if(is.na(t1) || is.na(t2)) {
                     indices["tli.scaled"] <- indices["nnfi.scaled"] <- NA
-                } else if(df > 0 && t2 != 0) {
+                } else if(df > 0 && abs(t2) > 0) {
                     indices["tli.scaled"] <- indices["nnfi.scaled"] <- 1 - t1/t2
                 } else {
                     indices["tli.scaled"] <- indices["nnfi.scaled"] <- 1
@@ -523,7 +530,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                     t2 <- (X2.null - cb*df.null)*df
                     if(is.na(t1) || is.na(t2)) {
                         indices["tli.robust"] <- indices["nnfi.robust"] <- NA
-                    } else if(df > 0 && t2 != 0) {
+                    } else if(df > 0 && abs(t2) > 0) {
                         indices["tli.robust"] <- indices["nnfi.robust"] <- 1 - t1/t2
                     } else {
                         indices["tli.robust"] <- indices["nnfi.robust"] <- 1
@@ -573,7 +580,7 @@ lav_fit_measures <- function(object, fit.measures="all",
 
             # NFI - normed fit index (Bentler & Bonett, 1980)
             if("nfi" %in% fit.measures) {
-                if(df > df.null) {
+                if(df > df.null || isTRUE(all.equal(X2.null,0))) {
                     NFI <- as.numeric(NA)
                 } else if(df > 0) {
                     t1 <- X2.null - X2
@@ -585,7 +592,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 indices["nfi"] <- NFI
             }
             if("nfi.scaled" %in% fit.measures) {
-                if(df > df.null) {
+                if(df > df.null || isTRUE(all.equal(X2.null.scaled,0))) {
                     NFI <- as.numeric(NA)
                 } else {
                     t1 <- X2.null.scaled - X2.scaled
@@ -597,7 +604,7 @@ lav_fit_measures <- function(object, fit.measures="all",
 
             # PNFI - Parsimony normed fit index (James, Mulaik & Brett, 1982)
             if("pnfi" %in% fit.measures) {
-                if(df.null > 0) {
+                if(df.null > 0 && X2.null > 0) {
                     t1 <- X2.null - X2
                     t2 <- X2.null
                     PNFI <- (df/df.null) * t1/t2
@@ -607,7 +614,7 @@ lav_fit_measures <- function(object, fit.measures="all",
                 indices["pnfi"] <- PNFI
             }
             if("pnfi.scaled" %in% fit.measures) {
-                if(df.null > 0) {
+                if(df.null > 0 && X2.null.scaled > 0) {
                     t1 <- X2.null.scaled - X2.scaled
                     t2 <- X2.null.scaled
                     PNFI <- (df/df.null) * t1/t2
@@ -623,6 +630,8 @@ lav_fit_measures <- function(object, fit.measures="all",
                 t2 <- X2.null - df
                 if(t2 < 0) {
                     IFI <- 1
+                } else if(isTRUE(all.equal(t2,0))) {
+                    IFI <- as.numeric(NA)
                 } else {
                     IFI <- t1/t2
                 }
@@ -630,11 +639,13 @@ lav_fit_measures <- function(object, fit.measures="all",
             }
             if("ifi.scaled" %in% fit.measures) {
                 t1 <- X2.null.scaled - X2.scaled
-                t2 <- X2.null.scaled
+                t2 <- X2.null.scaled - df.scaled
                 if(is.na(t2)) {
                     IFI <- NA
                 } else if(t2 < 0) {
                     IFI <- 1
+                } else if(isTRUE(all.equal(t2,0))) {
+                    IFI <- as.numeric(NA)
                 } else {
                     IFI <- t1/t2
                 }
@@ -763,13 +774,15 @@ lav_fit_measures <- function(object, fit.measures="all",
             }
 
             #  multiple group correction
-            if(object@Options$mimic %in% c("Mplus", "lavaan")) {
+            #  note: recent builds of EQS also use this 'correction'
+            #        perhaps we should have an option to obtain the 'old' one
+            #if(object@Options$mimic %in% c("Mplus", "lavaan")) {
                 RMSEA <- RMSEA * sqrt(G)
                 if(scaled) {
                     RMSEA.scaled <- RMSEA.scaled * sqrt(G)
                     RMSEA.robust <- RMSEA.robust * sqrt(G)
                 }
-            }
+            #}
 
         } else {
             RMSEA <- RMSEA.scaled <- RMSEA.robust <- 0
@@ -798,13 +811,13 @@ lav_fit_measures <- function(object, fit.measures="all",
             lambda.l <- try(uniroot(f=lower.lambda, lower=0, upper=X2)$root,
                             silent=TRUE)
             if(inherits(lambda.l, "try-error")) { lambda.l <- NA }
-            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+            #if(object@Options$mimic %in% c("lavaan", "Mplus")) {
                 GG <- 0
                 indices["rmsea.ci.lower"] <-
                     sqrt( lambda.l/((N-GG)*df) ) * sqrt(G)
-            } else {
-                indices["rmsea.ci.lower"] <- sqrt( lambda.l/(N*df) )
-            }
+            #} else {
+            #    indices["rmsea.ci.lower"] <- sqrt( lambda.l/(N*df) )
+            #}
         }
     }
 
@@ -831,13 +844,13 @@ lav_fit_measures <- function(object, fit.measures="all",
             lambda.l <- try(uniroot(f=lower.lambda, lower=0, upper=XX2)$root,
                             silent=TRUE)
             if(inherits(lambda.l, "try-error")) { lambda.l <- NA }
-            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+            #if(object@Options$mimic %in% c("lavaan", "Mplus")) {
                 indices["rmsea.ci.lower.scaled"] <-
                         sqrt( lambda.l/(N*df2) ) * sqrt(G)
-            } else {
-                # no multiple group correction
-                indices["rmsea.ci.lower.scaled"] <- sqrt( lambda.l/(N*df2) )
-            }
+            #} else {
+            #    # no multiple group correction
+            #    indices["rmsea.ci.lower.scaled"] <- sqrt( lambda.l/(N*df2) )
+            #}
 
             if(TEST[[2]]$test %in% c("satorra.bentler", "yuan.bentler.mplus",
                                      "yuan.bentler")) {
@@ -850,14 +863,14 @@ lav_fit_measures <- function(object, fit.measures="all",
                 lambda.l <- try(uniroot(f=lower.lambda, lower=0, upper=XX2)$root,
                                 silent=TRUE)
                 if(inherits(lambda.l, "try-error")) { lambda.l <- NA }
-                if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+                #if(object@Options$mimic %in% c("lavaan", "Mplus")) {
                     indices["rmsea.ci.lower.robust"] <-
                             sqrt( (c.hat*lambda.l)/(N*df2) ) * sqrt(G)
-                } else {
-                    # no multiple group correction
-                    indices["rmsea.ci.lower.robust"] <-
-                        sqrt( (c.hat*lambda.l)/(N*df2) )
-                }
+                #} else {
+                #    # no multiple group correction
+                #    indices["rmsea.ci.lower.robust"] <-
+                #        sqrt( (c.hat*lambda.l)/(N*df2) )
+                #}
             } else {
                 indices["rmsea.ci.lower.robust"] <- NA
             }
@@ -876,13 +889,13 @@ lav_fit_measures <- function(object, fit.measures="all",
             lambda.u <- try(uniroot(f=upper.lambda, lower=0,upper=N.RMSEA)$root,
                             silent=TRUE)
             if(inherits(lambda.u, "try-error")) { lambda.u <- NA }
-            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+            #if(object@Options$mimic %in% c("lavaan", "Mplus")) {
                 GG <- 0
                 indices["rmsea.ci.upper"] <-
                     sqrt( lambda.u/((N-GG)*df) ) * sqrt(G)
-            } else {
-                indices["rmsea.ci.upper"] <- sqrt( lambda.u/(N*df) )
-            }
+            #} else {
+            #    indices["rmsea.ci.upper"] <- sqrt( lambda.u/(N*df) )
+            #}
         }
     }
 
@@ -910,14 +923,14 @@ lav_fit_measures <- function(object, fit.measures="all",
             lambda.u <- try(uniroot(f=upper.lambda, lower=0,upper=N.RMSEA)$root,
                             silent=TRUE)
             if(inherits(lambda.u, "try-error")) { lambda.u <- NA }
-            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+            #if(object@Options$mimic %in% c("lavaan", "Mplus")) {
                 indices["rmsea.ci.upper.scaled"] <-
                     sqrt( lambda.u/(N*df2) ) * sqrt(G)
-            } else {
-                # no multiple group correction
-                indices["rmsea.ci.upper.scaled"] <-
-                    sqrt( lambda.u/(N*df2) )
-            }
+            #} else {
+            #    # no multiple group correction
+            #    indices["rmsea.ci.upper.scaled"] <-
+            #        sqrt( lambda.u/(N*df2) )
+            #}
 
             if(TEST[[2]]$test %in% c("satorra.bentler", "yuan.bentler.mplus",
                                      "yuan.bentler")) {
@@ -930,14 +943,14 @@ lav_fit_measures <- function(object, fit.measures="all",
                 lambda.u <- try(uniroot(f=upper.lambda, lower=0,upper=N.RMSEA)$root,
                                 silent=TRUE)
                 if(inherits(lambda.u, "try-error")) { lambda.u <- NA }
-                if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+             #   if(object@Options$mimic %in% c("lavaan", "Mplus")) {
                     indices["rmsea.ci.upper.robust"] <-
                         sqrt( (c.hat*lambda.u)/(N*df2) ) * sqrt(G)
-                } else {
-                    # no multiple group correction
-                    indices["rmsea.ci.upper.robust"] <-
-                        sqrt( (c.hat*lambda.u)/(N*df2) )
-                }
+             #   } else {
+             #       # no multiple group correction
+             #       indices["rmsea.ci.upper.robust"] <-
+             #           sqrt( (c.hat*lambda.u)/(N*df2) )
+             #   }
             } else {
                 indices["rmsea.ci.upper.robust"] <- NA
             }
@@ -948,14 +961,14 @@ lav_fit_measures <- function(object, fit.measures="all",
         if(is.na(X2) || is.na(df)) {
             indices["rmsea.pvalue"] <- as.numeric(NA)
         } else if(df > 0) {
-            if(object@Options$mimic %in% c("lavaan","Mplus")) {
+            #if(object@Options$mimic %in% c("lavaan","Mplus")) {
                 ncp <- N*df*0.05^2/G
                 indices["rmsea.pvalue"] <-
                     1 - pchisq(X2, df=df, ncp=ncp)
-            } else {
-                indices["rmsea.pvalue"] <-
-                    1 - pchisq(X2, df=df, ncp=(N*df*0.05^2))
-            }
+            #} else {
+            #    indices["rmsea.pvalue"] <-
+            #        1 - pchisq(X2, df=df, ncp=(N*df*0.05^2))
+            #}
         } else {
             indices["rmsea.pvalue"] <- NA # used to be 1 in < 0.5-21
         }
@@ -975,14 +988,14 @@ lav_fit_measures <- function(object, fit.measures="all",
             indices["rmsea.pvalue.robust"] <- as.numeric(NA)
         } else if(df > 0) {
             # scaled
-            if(object@Options$mimic %in% c("lavaan", "Mplus")) {
+            #if(object@Options$mimic %in% c("lavaan", "Mplus")) {
                 ncp <- N*df2*0.05^2/G
                 indices["rmsea.pvalue.scaled"] <-
                     1 - pchisq(XX2, df=df2, ncp=ncp)
-            } else {
-                indices["rmsea.pvalue.scaled"] <-
-                    1 - pchisq(XX2, df=df2, ncp=(N*df2*0.05^2))
-            }
+            #} else {
+            #    indices["rmsea.pvalue.scaled"] <-
+            #        1 - pchisq(XX2, df=df2, ncp=(N*df2*0.05^2))
+            #}
 
             if(TEST[[2]]$test %in% c("satorra.bentler", "yuan.bentler.mplus",
                                      "yuan.bentler")) {
@@ -1016,8 +1029,8 @@ lav_fit_measures <- function(object, fit.measures="all",
         rmr_nomean.group <- numeric(G)
         srmr_bentler.group <- numeric(G)
         srmr_bentler_nomean.group <- numeric(G)
-        srmr_bollen.group <- numeric(G)
-        srmr_bollen_nomean.group <- numeric(G)
+        crmr.group <- numeric(G)
+        crmr_nomean.group <- numeric(G)
         srmr_mplus.group <- numeric(G)
         srmr_mplus_nomean.group <- numeric(G)
 
@@ -1072,9 +1085,9 @@ lav_fit_measures <- function(object, fit.measures="all",
                            sum(R.mean^2))/ e )
                 rmr.group[g] <- sqrt( (sum(RR[lower.tri(RR, diag=TRUE)]^2) +
                                        sum(RR.mean^2))/ e )
-                srmr_bollen.group[g] <-
+                crmr.group[g] <-
                     sqrt( (sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2)  +
-                           sum(R.cor.mean^2)) / e )
+                           sum(R.cor.mean^2)) / (e - nvar) )
                 # see http://www.statmodel.com/download/SRMR.pdf
                 srmr_mplus.group[g] <-
                     sqrt( (sum(R.cor[lower.tri(R.cor, diag=FALSE)]^2)  +
@@ -1086,8 +1099,12 @@ lav_fit_measures <- function(object, fit.measures="all",
                     sqrt(  sum( R[lower.tri( R, diag=TRUE)]^2) / e )
                 rmr_nomean.group[g] <-
                     sqrt(  sum(RR[lower.tri(RR, diag=TRUE)]^2) / e )
-                srmr_bollen_nomean.group[g] <-
-                    sqrt(  sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2) / e )
+                if((e - nvar) > 0) {
+                    crmr_nomean.group[g] <-
+                    sqrt(  sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2) / (e - nvar) )
+                } else {
+                    crmr_nomean.group[g] <- as.numeric(NA)
+                }
                 srmr_mplus_nomean.group[g] <-
                     sqrt( (sum(R.cor[lower.tri(R.cor, diag=FALSE)]^2)  +
                            sum(((diag(S) - diag(Sigma.hat))/diag(S))^2)) / e )
@@ -1097,8 +1114,8 @@ lav_fit_measures <- function(object, fit.measures="all",
                     sqrt( sum(R[lower.tri(R, diag=TRUE)]^2) / e )
                 rmr_nomean.group[g] <- rmr.group[g] <-
                     sqrt( sum(RR[lower.tri(RR, diag=TRUE)]^2) / e )
-                srmr_bollen_nomean.group[g] <- srmr_bollen.group[g] <-
-                    sqrt(  sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2) / e )
+                crmr_nomean.group[g] <- crmr.group[g] <-
+                    sqrt(  sum(R.cor[lower.tri(R.cor, diag=TRUE)]^2) / (e - nvar) )
                 srmr_mplus_nomean.group[g] <- srmr_mplus.group[g] <-
                     sqrt( (sum(R.cor[lower.tri(R.cor, diag=FALSE)]^2)  +
                            sum(((diag(S) - diag(Sigma.hat))/diag(S))^2)) / e )
@@ -1109,8 +1126,8 @@ lav_fit_measures <- function(object, fit.measures="all",
             ## FIXME: get the scaling right
             SRMR_BENTLER <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bentler.group) / object@SampleStats@ntotal )
             SRMR_BENTLER_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bentler_nomean.group) / object@SampleStats@ntotal )
-            SRMR_BOLLEN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bollen.group) / object@SampleStats@ntotal )
-            SRMR_BOLLEN_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_bollen_nomean.group) / object@SampleStats@ntotal )
+            CRMR <- as.numeric( (unlist(object@SampleStats@nobs) %*% crmr.group) / object@SampleStats@ntotal )
+            CRMR_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% crmr_nomean.group) / object@SampleStats@ntotal )
             SRMR_MPLUS <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_mplus.group) / object@SampleStats@ntotal )
             SRMR_MPLUS_NOMEAN <- as.numeric( (unlist(object@SampleStats@nobs) %*% srmr_mplus_nomean.group) / object@SampleStats@ntotal )
             RMR <- as.numeric( (unlist(object@SampleStats@nobs) %*% rmr.group) / object@SampleStats@ntotal )
@@ -1118,8 +1135,8 @@ lav_fit_measures <- function(object, fit.measures="all",
         } else {
             SRMR_BENTLER <- srmr_bentler.group[1]
             SRMR_BENTLER_NOMEAN <- srmr_bentler_nomean.group[1]
-            SRMR_BOLLEN <- srmr_bollen.group[1]
-            SRMR_BOLLEN_NOMEAN <- srmr_bollen_nomean.group[1]
+            CRMR <- crmr.group[1]
+            CRMR_NOMEAN <- crmr_nomean.group[1]
             SRMR_MPLUS <- srmr_mplus.group[1]
             SRMR_MPLUS_NOMEAN <- srmr_mplus_nomean.group[1]
             RMR <- rmr.group[1]
@@ -1146,15 +1163,15 @@ lav_fit_measures <- function(object, fit.measures="all",
         # the others
         indices["srmr_bentler"]        <- SRMR_BENTLER
         indices["srmr_bentler_nomean"] <- SRMR_BENTLER_NOMEAN
-        indices["srmr_bollen"]         <- SRMR_BOLLEN
-        indices["srmr_bollen_nomean"]  <- SRMR_BOLLEN_NOMEAN
+        indices["crmr"]                <- CRMR
+        indices["crmr_nomean"]         <- CRMR_NOMEAN
         indices["srmr_mplus"]          <- SRMR_MPLUS
         indices["srmr_mplus_nomean"]   <- SRMR_MPLUS_NOMEAN
-        if(categorical) {
+        #if(categorical) {
             indices["rmr"]             <- RMR
-        } else {
-            indices["rmr"]             <- RMR_NOMEAN
-        }
+        #} else {
+        #    indices["rmr"]             <- RMR_NOMEAN
+        #}
         indices["rmr_nomean"]          <- RMR_NOMEAN
     }
 

@@ -162,12 +162,12 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
             op.idx <- regexpr(op, x)
         }
         lhs <- substr(x, 1L, op.idx-1L)
-        # fix for 'NA' names in lhs; not likely to happen to ov.names
-        # since 'NA' is not a valid name for list elements/data.frame columns
-        if(lhs == "NA") lhs <- "NA."
+
+        # right-hand side string
         rhs <- substr(x, op.idx+attr(op.idx, "match.length"), nchar(x))
 
-        # check if first character is '+'; if so, remove silently
+        # check if first character of rhs is '+'; if so, remove silently
+        # (for those who copied multiline R input from a website/pdf)
         if(substr(rhs, 1, 1) == "+") {
             rhs <- substr(rhs, 2, nchar(rhs))
         }
@@ -204,7 +204,26 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
         }
 
         # 3. parse left hand
-        #    lhs modifiers will be ignored for now
+
+        # new in 0.6-3
+        # first check if all lhs names are valid (in R); see ?make.names
+        # and ?reserved
+        # for example, 'NA' is a reserved keyword, and should not be used
+        # this usually only happens for latent variable names
+        #
+        # check should not come earlier, as we do not need it for :,==,<,>,:=
+        LHS <- strsplit(lhs, split = "+", fixed = TRUE)[[1]]
+        # remove modifiers
+        LHS <- gsub("^\\S*\\*", "", LHS)
+        if( !all(make.names(LHS) == LHS) ) {
+            stop("lavaan ERROR: left hand side (lhs) of this formula:\n    ",
+                 lhs, " ", op, " ", rhs,
+                 "\n    contains a reserved word (in R): ",
+                 dQuote(LHS[!make.names(LHS) == LHS]),
+                 "\n    see ?reserved for a list of reserved words in R",
+                 "\n    please use a variable name that is not a reserved word in R")
+        }
+
         lhs.formula <- as.formula(paste("~",lhs))
         out <- lav_syntax_parse_rhs(rhs=lhs.formula[[2L]])
         lhs.names <- names(out)
@@ -234,7 +253,8 @@ lavParseModelString <- function(model.syntax = '', as.data.frame. = FALSE,
                     if(op == "~") {
                         rhs.name <- ""
                     } else {
-                        stop("lavaan ERROR: right-hand side of formula contains an intercept, but operator is \"", op, "\" in: ", x)
+                        # either number (1), or reserved name?
+                        stop("lavaan ERROR: right-hand side of formula contains an invalid variable name:\n    ", x)
                     }
                 } else if(names(out)[j] == "..zero.." && op == "~") {
                     rhs.name <- ""
@@ -432,32 +452,62 @@ lav_syntax_parse_rhs <- function(rhs, op="") {
             names(out)[1L] <- NAME
             break
         } else if(rhs[[1L]] == "+") { # not last one!
-            i.var <- all.vars(rhs[[3L]], unique=FALSE)
-            n.var <- length(i.var)
 
-            # catch interaction term
-            rhs3.names <- all.names(rhs[[3L]])
-            if(length(i.var) > 1L && ":" %in% rhs3.names) {
-               colon.idx <- which(rhs3.names == ":")
-               i.var <- i.var[seq_len(n.var - 1L)]
-               n.var <- n.var - 1L
-               i.var[n.var] <- paste(rhs3.names[colon.idx + 1L], ":",
-                                     rhs3.names[colon.idx + 2L], sep = "")
-            }
+            # three possibilities:
+            # 1. length(rhs[[3]] == 3), and rhs[[3L]][[1]] == "*" -> modifier
+            # 2. length(rhs[[3]] == 3), and rhs[[3L]][[1]] == ":" -> interaction
+            # 3. length(rhs[[3]] == 1) -> single element
 
             out <- c(vector("list", 1L), out)
-            if(length(i.var) > 0L) {
-                names(out)[1L] <- i.var[n.var]
-            } else {
-                names(out)[1L] <- "intercept"
+
+            # modifier or not?
+            if(length(rhs[[3L]]) == 3L && rhs[[3L]][[1]] == "*") {
+                # modifier!!
+                NAME <- all.vars(rhs[[3L]][[3]])
+
+                if(length(NAME) > 0L) { # not an intercept
+                    # catch interaction term
+                    rhs3.names <- all.names(rhs[[3L]][[3]])
+                    if(rhs3.names[1L] == ":") {
+                        NAME <- paste(NAME[1L], ":", NAME[2L], sep = "")
+                    }
+                    names(out)[1L] <- NAME
+                } else { # intercept
+                    names(out)[1L] <- "intercept"
+                }
+                i.var <- all.vars(rhs[[3]][[2L]], unique = FALSE)
+                if(length(i.var) > 0L) {
+                    # modifier are unquoted labels
+                    out[[1L]]$label <- i.var
+                } else {
+                    # modifer is something else
+                    out[[1L]] <- lav_syntax_get_modifier(rhs[[3]][[2L]])
+                }
+
+            # interaction term?
+            } else if(length(rhs[[3L]]) == 3L && rhs[[3L]][[1]] == ":") {
+                # interaction term, without modifier
+                NAME <- all.vars(rhs[[3L]])
+                NAME <- paste(NAME[1L], ":", NAME[2L], sep = "")
+                names(out)[1L] <- NAME
+
+            } else { # no modifier!!
+                NAME <- all.vars(rhs[[3]])
+                if(length(NAME) > 0L) {
+                    names(out)[1L] <- NAME
+                } else { # intercept or zero?
+                    if(as.character(rhs[[3]]) == "1") {
+                        names(out)[1L] <- "intercept"
+                    } else if(as.character(rhs[[3]]) == "0") {
+                        names(out)[1L] <- "..zero.."
+                        out[[1L]]$fixed <- 0
+                    } else {
+                        names(out)[1L] <- "..constant.."
+                        out[[1L]]$fixed <- 0
+                    }
+                }
             }
-            if(n.var > 1L) {
-                # modifier are unquoted labels
-                out[[1L]]$label <- i.var[-n.var]
-            } else if(length(rhs[[3L]]) == 3L && rhs3.names[1L] == "*") {
-                # modifiers!!
-                out[[1L]] <- lav_syntax_get_modifier(rhs[[3L]][[2L]])
-            }
+
 
             # next element
             rhs <- rhs[[2L]]

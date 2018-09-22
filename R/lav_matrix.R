@@ -1039,8 +1039,19 @@ lav_matrix_orthogonal_complement2 <- function(A,
 
 # inverse of a non-singular (not necessarily positive-definite) symmetric matrix
 # FIXME: error handling?
-lav_matrix_symmetric_inverse <- function(S, logdet = FALSE,
-                                         Sinv.method = "eigen") {
+lav_matrix_symmetric_inverse <- function(S, logdet   = FALSE,
+                                         Sinv.method = "eigen",
+                                         zero.warn   = FALSE) {
+
+    # catch zero cols/rows
+    zero.idx <- which(colSums(S) == 0 & diag(S) == 0 & rowSums(S) == 0)
+    S.orig <- S
+    if(length(zero.idx) > 0L) {
+        if(zero.warn) {
+            warning("lavaan WARNING: matrix to be inverted contains zero cols/rows")
+        }
+        S <- S[-zero.idx, -zero.idx]
+    }
 
     P <- NCOL(S)
 
@@ -1072,6 +1083,11 @@ lav_matrix_symmetric_inverse <- function(S, logdet = FALSE,
         S.inv <-
             tcrossprod(EV$vector / rep(EV$values, each = length(EV$values)),
                        EV$vector)
+
+        # 0.5 version
+        #S.inv <- tcrossprod(sweep(EV$vector, 2L,
+        #                          STATS = (1/EV$values), FUN="*"), EV$vector)
+
         if(logdet) {
             if(all(EV$values >= 0)) {
                 attr(S.inv, "logdet") <- sum(log(EV$values))
@@ -1099,6 +1115,15 @@ lav_matrix_symmetric_inverse <- function(S, logdet = FALSE,
         }
     } else {
         stop("method must be either `eigen', `solve' or `chol'")
+    }
+
+    if(length(zero.idx) > 0L) {
+        logdet <- attr(S.inv, "logdet")
+        tmp <- S.orig
+        tmp[-zero.idx, -zero.idx] <- S.inv
+        S.inv <- tmp
+        attr(S.inv, "logdet") <- logdet
+        attr(S.inv, "zero.idx") <- zero.idx
     }
 
     S.inv

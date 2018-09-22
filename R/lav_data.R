@@ -25,6 +25,7 @@ lavData <- function(data              = NULL,          # data.frame
                     sampling.weights  = NULL,          # sampling weights
                     sample.cov        = NULL,          # sample covariance(s)
                     sample.mean       = NULL,          # sample mean vector(s)
+                    sample.th         = NULL,          # sample thresholds
                     sample.nobs       = NULL,          # sample nobs
 
                     lavoptions        = lavOptions(),  # lavoptions
@@ -99,6 +100,21 @@ lavData <- function(data              = NULL,          # data.frame
             }
         }
 
+        # no ov.names?
+        if(is.null(ov.names)) {
+            ov.names <- names(data)
+            # remove group variable, if provided
+            if(length(group) > 0L) {
+                group.idx <- which(ov.names == group)
+                ov.names <- ov.names[-group.idx]
+            }
+            # remove cluster variable, if provided
+            if(length(cluster) > 0L) {
+                cluster.idx <- which(ov.names == cluster)
+                ov.names <- ov.names[-cluster.idx]
+            }
+        }
+
         lavData <- lav_data_full(data              = data,
                                  group             = group,
                                  cluster           = cluster,
@@ -124,14 +140,18 @@ lavData <- function(data              = NULL,          # data.frame
         nlevels <- 1L
 
         # we also need the number of observations (per group)
-        if(is.null(sample.nobs))
+        if(is.null(sample.nobs)) {
             stop("lavaan ERROR: please specify number of observations")
+        }
 
         # list?
         if(is.list(sample.cov)) {
             # multiple groups, multiple cov matrices
             if(!is.null(sample.mean)) {
                 stopifnot(length(sample.mean) == length(sample.cov))
+            }
+            if(!is.null(sample.th)) {
+                stopifnot(length(sample.th) == length(sample.cov))
             }
             # multiple groups, multiple cov matrices
             ngroups     <- length(sample.cov)
@@ -184,8 +204,23 @@ lavData <- function(data              = NULL,          # data.frame
         ov$name <- unique( unlist(c(ov.names, ov.names.x)) )
         nvar    <- length(ov$name)
         ov$idx  <- rep(NA, nvar)
-        ov$nobs <- rep(sample.nobs, nvar)
+        ov$nobs <- rep(sum(unlist(sample.nobs)), nvar)
         ov$type <- rep("numeric", nvar)
+        ov$nlev <- rep(0, nvar)
+        # check for categorical
+        if(!is.null(sample.th)) {
+            th.idx <- attr(sample.th, "th.idx")
+            if(is.list(th.idx)) {
+                th.idx <- th.idx[[1]] ## FIRST group only (assuming same ths!)
+            }
+            if(any(th.idx > 0)) {
+                TAB <- table(th.idx[th.idx > 0])
+                ord.idx <- as.numeric(names(TAB))
+                nlev <- as.integer(unname(TAB) + 1)
+                ov$type[ord.idx ] <- "ordered"
+                ov$nlev[ord.idx ] <- nlev
+            }
+        }
 
         # if std.ov = TRUE, give a warning (suggested by Peter Westfall)
         if(std.ov && warn) {
@@ -676,7 +711,7 @@ lav_data_full <- function(data          = NULL,          # data.frame
             #                           complete.cases(data[exo.idx]))
             #    nobs[[g]] <- length(case.idx[[g]])
             #    norig[[g]] <- length(which(data[[group]] == group.label[g]))
-            } else if(length(exo.idx) > 0L) {
+            } else if(length(exo.idx) > 0L && missing != "ml.x") {
                 case.idx[[g]] <- which(data[[group]] == group.label[g] &
                                        complete.cases(data[exo.idx]))
                 nobs[[g]] <- length(case.idx[[g]])
@@ -700,7 +735,7 @@ lav_data_full <- function(data          = NULL,          # data.frame
             #    case.idx[[g]] <- which(complete.cases(data[exo.idx]))
             #    nobs[[g]] <- length(case.idx[[g]])
             #    norig[[g]] <- nrow(data)
-            } else if(length(exo.idx) > 0L) {
+            } else if(length(exo.idx) > 0L && missing != "ml.x") {
                 case.idx[[g]] <- which(complete.cases(data[exo.idx]))
                 nobs[[g]] <- length(case.idx[[g]])
                 norig[[g]] <- nrow(data)
@@ -760,7 +795,8 @@ lav_data_full <- function(data          = NULL,          # data.frame
 
         # standardize observed variables? numeric only!
         if(std.ov) {
-            num.idx <- which(ov.names[[g]] %in% ov$name & ov$type == "numeric")
+            num.idx <- which(ov$name %in% ov.names[[g]] &
+                             ov$type == "numeric" & ov$exo == 0L)
             if(length(num.idx) > 0L) {
                 X[[g]][,num.idx] <-
                    scale(X[[g]][,num.idx,drop = FALSE])[,,drop = FALSE]
@@ -790,10 +826,10 @@ lav_data_full <- function(data          = NULL,          # data.frame
             nobs[[g]] <- NROW(X[[g]]) - length(Mp[[g]]$empty.idx)
         }
 
-        # response patterns (categorical only, no exogenous variables)
-        all.ordered <- all(ov.names[[g]] %in% ov$name[ov$type == "ordered"])
-        if(length(exo.idx) == 0L && all.ordered) {
-            Rp[[g]] <- lav_data_resp_patterns(X[[g]])
+        # response patterns (ordered variables only)
+        ord.idx <- which(ov.names[[g]] %in% ov$name[ov$type == "ordered"])
+        if(length(ord.idx) > 0L) {
+            Rp[[g]] <- lav_data_resp_patterns(X[[g]][,ord.idx, drop = FALSE])
         }
 
         # warn if we have a small number of observations (but NO error!)

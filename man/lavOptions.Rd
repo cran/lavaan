@@ -85,14 +85,57 @@ Data options:
 \describe{
     \item{\code{std.ov}:}{If \code{TRUE}, all observed variables are 
       standardized before entering the analysis.}
-    \item{\code{missing}:}{If \code{"listwise"}, cases with missing values 
-      are removed listwise from the data frame before analysis. If 
-      \code{"direct"} or \code{"ml"} or \code{"fiml"} and the estimator is 
-      maximum likelihood, Full Information Maximum Likelihood (FIML) 
-      estimation is used using all available data in the data frame. This is 
-      only valid if the data are missing completely at random (MCAR) or 
-      missing at random (MAR). If \code{"default"}, the value is set depending 
-      on the estimator and the mimic option.}
+    \item{\code{missing}:}{The default setting is \code{"listwise"}: all
+         cases with missing values
+      are removed listwise from the data before the analysis starts. This is
+      only valid if the data are missing completely at random (MCAR).
+      Therefore, it may not be the optimal choice, but
+      it can be useful for a first run. If the estimator belongs to
+      the ML family, another option is \code{"ml"} (alias: \code{"fiml"}
+      or \code{"direct"}). This corresponds to the so-called full information
+      maximum likelihood approach (fiml), where we compute the likelihood
+      case by case, using all available data from that case. Note
+      that if the model contains exogenous observed covariates, and
+      \code{fixed.x = TRUE} (the default), all cases with any missing values
+      on these covariates will be deleted first. The option \code{"ml.x"}
+      (alias: \code{"fiml.x"} or \code{"direct.x"}) is similar to \code{"ml"},
+      but does not delete any cases with missing values for the exogenous
+      covariates, even if \code{fixed.x = TRUE}. (Note: all lavaan versions
+      < 0.6 used \code{"ml.x"} instead of \code{"ml"}).
+      If you wish to use multiple
+      imputation, you need to use an external package (eg. mice) to
+      generate imputed datasets, which can then be analyzed using
+      the \code{\link{semList}} function. The semTools package contains
+      several functions to do this automatically. Another option (with
+      continuous data) is to use \code{"two.stage"}
+      or \code{"robust.two.stage"}. In this approach, we first estimate
+      the sample statistics (mean vector, variance-covariance matrix) using
+      an EM algorithm. Then, we use these estimated sample statistics as
+      input for a regular analysis (as if the data were complete). The
+      standard errors and test statistics
+      are adjusted correctly to reflect the two-step procedure. The
+      \code{"robust.two.stage"} option produces standard errors and
+      a test statistic that are robust against non-normality.
+      If (part of) the data is categorical, and the estimator is
+      from the (W)LS family, the only option (besides listwise deletion)
+      is \code{"pairwise"}. In this three-step approach, missingness is
+      only an issue in the first two steps. In the first step, we compute
+      thresholds (for categorical variables) and means or intercepts
+      (for continuous variables) using univariate information only.
+      In this step, we simply ignore
+	  the missing values just like in mean(x, na.rm = TRUE). In the second
+      step, we compute polychoric/polyserial/pearson correlations using (only)
+      two variables at a time. Here we use pairwise deletion: we only keep
+      those observations for which both values are observed (not-missing).
+      And this may change from pair to pair.
+      By default, in the categorical case we use \code{conditional.x = TRUE}. 
+      Therefore, any cases
+      with missing values on the exogenous covariates will be deleted listwise
+      from the data first.
+      Finally, if the estimator is \code{"PML"}, the available options are
+      \code{"pairwise"}, \code{"available.cases"} and
+      \code{"doubly.robust"}. See the PML tutorial on the lavaan website for
+      more information about these approaches.}
 }
 
 Data summary options:
@@ -341,6 +384,15 @@ Miscellaneous:
     \item{\code{representation}:}{If \code{"LISREL"} the classical LISREL 
       matrix representation is used to represent the model (using the all-y 
       variant). No other options are available (for now).}
+    \item{\code{implied}:}{Logical. If \code{TRUE}, compute the model-implied
+      statistics, and store them in the implied slot.}
+    \item{\code{h1}:}{Logical. If \code{TRUE}, compute the unrestricted model
+      and store the unrestricted summary statistics (and perhaps a 
+      loglikelihood) in the h1 slot.}
+    \item{\code{baseline:}}{Not used yet.}
+    \item{\code{baseline.conditional.x.free.slopes}:}{Logical. If \code{TRUE},
+      and \code{conditional.x = TRUE}, the (default) baseline model will
+      allow the slopestructure to be unrestricted.}
 }
 
 }

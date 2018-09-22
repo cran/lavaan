@@ -4,6 +4,7 @@
 modindices <- function(object,
                        standardized = TRUE,
                        cov.std = TRUE,
+                       information = "expected",
 
                        # power statistics?
                        power = FALSE,
@@ -36,8 +37,8 @@ modindices <- function(object,
 
     # extended list (fixed-to-zero parameters)
     strict.exo <- FALSE
-    if(object@Model@fixed.x && object@Model@categorical) {
-        strict.exo <- TRUE ## truly conditional.x
+    if(object@Model@conditional.x) {
+        strict.exo <- TRUE
     }
     FULL <- lav_partable_full(partable = object@ParTable,
                               lavpta = object@pta,
@@ -51,7 +52,7 @@ modindices <- function(object,
 
     # compute information matrix 'extended model'
     # ALWAYS use *expected* information (for now)
-    information <- lavTech(FIT, "information.expected")
+    Information <- lavTech(FIT, paste("information", information, sep = "."))
 
     # compute gradient 'extended model'
     score <- lavTech(FIT, "gradient.logl")
@@ -79,13 +80,15 @@ modindices <- function(object,
     }
 
     # partition
-    I11 <- information[extra.idx, extra.idx, drop = FALSE]
-    I12 <- information[extra.idx, model.idx, drop = FALSE]
-    I21 <- information[model.idx, extra.idx, drop = FALSE]
-    I22 <- information[model.idx, model.idx, drop = FALSE]
+    I11 <- Information[extra.idx, extra.idx, drop = FALSE]
+    I12 <- Information[extra.idx, model.idx, drop = FALSE]
+    I21 <- Information[model.idx, extra.idx, drop = FALSE]
+    I22 <- Information[model.idx, model.idx, drop = FALSE]
 
     # ALWAYS use *expected* information (for now)
-    I22.inv <- try(lavTech(object, "inverted.information.expected"), silent = TRUE)
+    I22.inv <- try(lavTech(object, paste("inverted.information",
+                                         information, sep = ".")),
+                   silent = TRUE)
     # just in case...
     if(inherits(I22.inv, "try-error")) {
         stop("lavaan ERROR: could not compute modification indices; information matrix is singular")

@@ -1,6 +1,7 @@
 # lavaanList: fit the *same* model, on different datasets
 # YR - 29 Jun 2016
 # YR - 27 Jan 2017: change lavoptions; add dotdotdot to each call
+# TDJ - 23 Aug 2018: change wrappers to preserve arguments from match.call()
 
 lavaanList <- function(model         = NULL,             # model
                        dataList      = NULL,             # list of datasets
@@ -25,6 +26,7 @@ lavaanList <- function(model         = NULL,             # model
     store.slots <- tolower(store.slots)
     if(length(store.slots) == 1L && store.slots == "all") {
         store.slots <- c("timing", "partable", "data", "samplestats",
+                         "cache", "loglik", "h1", "baseline", "external",
                          "vcov", "test", "optim", "implied")
     }
 
@@ -112,6 +114,7 @@ lavaanList <- function(model         = NULL,             # model
     # empty slots
     timingList <- ParTableList <- DataList <- SampleStatsList <-
         CacheList <- vcovList <- testList <- optimList <-
+        h1List <- loglikList <-
         impliedList <- funList <- list()
 
     # prepare store.slotsd slots
@@ -142,6 +145,13 @@ lavaanList <- function(model         = NULL,             # model
     if("implied" %in% store.slots) {
         impliedList <- vector("list", length = ndat)
     }
+    if("loglik" %in% store.slots) {
+        loglikList <- vector("list", length = ndat)
+    }
+    if("h1" %in% store.slots) {
+        h1List <- vector("list", length = ndat)
+    }
+
     if(!is.null(FUN)) {
         funList <- vector("list", length = ndat)
     }
@@ -275,6 +285,12 @@ lavaanList <- function(model         = NULL,             # model
             if("implied" %in% store.slots) {
                 RES$implied <- lavobject@implied
             }
+            if("loglik" %in% store.slots) {
+                RES$loglik <- lavobject@loglik
+            }
+            if("h1" %in% store.slots) {
+                RES$h1 <- lavobject@h1
+            }
 
             # custom FUN
             if(!is.null(FUN)) {
@@ -371,6 +387,12 @@ lavaanList <- function(model         = NULL,             # model
     if("implied" %in% store.slots) {
         impliedList <- lapply(RES, "[[", "implied")
     }
+    if("h1" %in% store.slots) {
+        h1List <- lapply(RES, "[[", "h1")
+    }
+    if("loglik" %in% store.slots) {
+        loglikList <- lapply(RES, "[[", "loglik")
+    }
     if(!is.null(FUN)) {
         funList <- lapply(RES, "[[", "fun")
     }
@@ -397,6 +419,9 @@ lavaanList <- function(model         = NULL,             # model
                       testList        = testList,
                       optimList       = optimList,
                       impliedList     = impliedList,
+                      h1List          = h1List,
+                      loglikList      = loglikList,
+
                       funList         = funList,
 
                       external     = list()
@@ -420,14 +445,10 @@ semList <- function(model         = NULL,
                     cl            = NULL,
                     iseed         = NULL) {
 
-    lavaanList(model = model, dataList = dataList,
-               dataFunction = dataFunction,
-               dataFunction.args = dataFunction.args, ndat = ndat,
-               cmd = "sem",
-               ..., store.slots = store.slots,
-               FUN = FUN, show.progress = show.progress,
-               store.failed = store.failed,
-               parallel = parallel, ncpus = ncpus, cl = cl, iseed = iseed)
+  mc <- match.call(expand.dots = TRUE)
+  mc$cmd <- "sem"
+  mc[[1L]] <- quote(lavaan::lavaanList)
+  eval(mc, parent.frame())
 }
 
 cfaList <- function(model         = NULL,
@@ -445,14 +466,9 @@ cfaList <- function(model         = NULL,
                     cl            = NULL,
                     iseed         = NULL) {
 
-    lavaanList(model = model, dataList = dataList,
-               dataFunction = dataFunction,
-               dataFunction.args = dataFunction.args, ndat = ndat,
-               cmd = "cfa",
-               ..., store.slots = store.slots,
-               FUN = FUN, show.progress = show.progress,
-               store.failed = store.failed,
-               parallel = parallel, ncpus = ncpus, cl = cl,
-               iseed = iseed)
+  mc <- match.call(expand.dots = TRUE)
+  mc$cmd <- "cfa"
+  mc[[1L]] <- quote(lavaan::lavaanList)
+  eval(mc, parent.frame())
 }
 

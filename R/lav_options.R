@@ -76,18 +76,13 @@ lav_options_default <- function(mimic = "lavaan") {
                 ridge.constant.x   = 1e-5,
 
                 # multiple groups
-                group              = NULL,
                 group.label        = NULL,
                 group.equal        = '',
                 group.partial      = '',
                 group.w.free       = FALSE,
 
                 # clusters
-                cluster            = NULL,
                 level.label        = NULL,
-
-                # sampling weights
-                sampling.weights   = NULL,
 
                 # estimation
                 estimator              = "default",
@@ -148,6 +143,7 @@ lav_options_default <- function(mimic = "lavaan") {
                 # more models/info
                 h1                     = TRUE,
                 baseline               = TRUE,
+                baseline.conditional.x.free.slopes = TRUE,
                 implied                = TRUE,
                 loglik                 = TRUE,
 
@@ -376,10 +372,28 @@ lav_options_set <- function(opt = NULL) {
             opt$missing <- "listwise"
         }
     } else if(opt$missing %in% c("ml", "direct", "fiml")) {
+        #if(opt$categorical && opt$estimator != "mml") {
+        if(opt$categorical) {
+            stop("lavaan ERROR: missing = ", dQuote(opt$missing),
+                 " not available in the categorical setting")
+        }
         opt$missing <- "ml"
         if(opt$estimator %in% c("mlm", "mlmv", "gls", "wls", "wlsm", "wlsmv",
                                 "uls", "ulsm", "ulsmv", "pml")) {
-            stop("lavaan ERROR: missing=\"ml\" is not allowed for estimator MLM, MLMV, GLS, ULS, ULSM, ULSMV, DWLS, WLS, WLSM, WLSMV, PML")
+            stop("lavaan ERROR: missing=\"ml\" is not allowed for estimator ",
+                 dQuote(opt$estimator))
+        }
+    } else if(opt$missing %in% c("ml.x", "direct.x", "fiml.x")) {
+        #if(opt$categorical && opt$estimator != "mml") {
+        if(opt$categorical) {
+            stop("lavaan ERROR: missing = ", dQuote(opt$missing),
+                 " not available in the categorical setting")
+        }
+        opt$missing <- "ml.x"
+        if(opt$estimator %in% c("mlm", "mlmv", "gls", "wls", "wlsm", "wlsmv",
+                                "uls", "ulsm", "ulsmv", "pml")) {
+            stop("lavaan ERROR: missing=\"ml\" is not allowed for estimator ",
+                 dQuote(opt$estimator))
         }
     } else if(opt$missing %in% c("two.stage", "twostage", "two-stage",
                                  "two.step",  "twostep",  "two-step")) {
@@ -480,13 +494,13 @@ lav_options_set <- function(opt = NULL) {
     }
 
     # check missing
-    if(opt$missing == "ml" && opt$se == "robust.sem") {
+    if(opt$missing %in% c("ml", "ml.x") && opt$se == "robust.sem") {
         warning("lavaan WARNING: missing will be set to ",
                     dQuote("listwise"), " for se = ",
                     dQuote(opt$se) )
         opt$missing <- "listwise"
     }
-    if(opt$missing == "ml" &&
+    if(opt$missing %in% c("ml", "ml.x") &&
        opt$test %in% c("satorra.bentler",
                        "mean.var.adjusted", "scaled.shifted")) {
         warning("lavaan WARNING: missing will be set to ",
@@ -552,7 +566,7 @@ lav_options_set <- function(opt = NULL) {
             #if(opt$estimator %in% c("mlm", "mlmv", "mlr", "mlf", "ulsm", "ulsmv", "wlsm", "wlsmv", "pml")) {
             #    warning("lavaan WARNING: estimator forces meanstructure = TRUE")
             #}
-            if(opt$missing %in% c("ml", "two.stage")) {
+            if(opt$missing %in% c("ml", "ml.x", "two.stage")) {
                 warning("lavaan WARNING: missing argument forces meanstructure = TRUE")
             }
         }
@@ -610,7 +624,7 @@ lav_options_set <- function(opt = NULL) {
             opt$se <- "standard"
             opt$information <- "expected"
         } else if(opt$se == "robust") {
-            if(opt$missing == "ml") {
+            if(opt$missing %in% c("ml", "ml.x")) {
                 opt$se <- "robust.huber.white"
             } else if(opt$missing == "two.stage") {
                 opt$se <- "robust.two.stage"
@@ -965,8 +979,8 @@ lav_options_set <- function(opt = NULL) {
 
     # information
     if(opt$information == "default") {
-        if(opt$missing == "ml"     ||
-           opt$se == "robust.huber.white"  ||
+        if(opt$missing %in% c("ml", "ml.x") ||
+           opt$se == "robust.huber.white"   ||
            opt$se == "first.order") {
            #nchar(opt$constraints) > 0L) {
             opt$information <- "observed"
@@ -1045,7 +1059,7 @@ lav_options_set <- function(opt = NULL) {
 
 
     # meanstructure again
-    if(opt$missing == "ml" || opt$model.type == "growth") {
+    if(opt$missing %in% c("ml", "ml.x") || opt$model.type == "growth") {
         opt$meanstructure <- TRUE
     }
     if("intercepts" %in% opt$group.equal ||
