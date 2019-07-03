@@ -10,8 +10,9 @@ function is NOT to predict future values of dependent variables as in the
 regression framework!}
 \usage{
 lavPredict(object, type = "lv", newdata = NULL, method = "EBM",
-           se = "none", label = TRUE, fsm = FALSE, level = 1L,
-           optim.method = "bfgs", ETA = NULL)
+           se = "none", acov = "none", label = TRUE, fsm = FALSE, 
+           append.data = FALSE, assemble = FALSE,
+           level = 1L, optim.method = "bfgs", ETA = NULL)
 }
 \arguments{
 \item{object}{An object of class \code{\linkS4class{lavaan}}.}
@@ -34,9 +35,17 @@ likelihood approach.}
 If \code{"standard"}, naive standard errors are computed (assuming the
 parameters of the measurement model are known). The standard errors are
 returned as an attribute.}
+\item{acov}{Similar to the \code{"se"} argument, but optionally returns the full
+sampling covariance matrix of factor scores as an attribute.}
 \item{label}{Logical. If TRUE, the columns are labeled.}
 \item{fsm}{Logical. If TRUE, return the factor score matrix as an attribute.
            Only for numeric data.}
+\item{append.data}{Logical. Only used when \code{type = "lv"}. If TRUE, 
+the original data (or the data provided
+in the newdata argument) is appended to the factor scores.}
+\item{assemble}{Logical. If TRUE, 
+the separate multiple groups as reassembled again to form a single data.frame
+with a group column, having the same dimensions are the original dataset.}
 \item{level}{Integer. Only used in a multilevel SEM.
 If \code{level = 1}, only factor scores for latent variable
 defined at the first (within) level are computed; if \code{level = 2},
@@ -75,7 +84,10 @@ head(lavPredict(fit))
 head(lavPredict(fit, type = "ov"))
 
 
+## ------------------------------------------
 ## merge factor scores to original data.frame
+## ------------------------------------------
+
 idx <- lavInspect(fit, "case.idx")
 fscores <- lavPredict(fit)
 ## loop over factors
@@ -99,4 +111,9 @@ for (g in seq_along(fscores)) {
 }
 head(HolzingerSwineford1939)
 
+## -------------------------------------
+## Use factor scores in susequent models
+## -------------------------------------
+
+## see Examples in semTools package: ?plausibleValues
 }

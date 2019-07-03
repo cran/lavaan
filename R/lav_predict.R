@@ -20,8 +20,9 @@ function(object, newdata = NULL) {
 
 # main function
 lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
-                       se = "none", label = TRUE, fsm = FALSE, level = 1L,
-                       optim.method = "bfgs", ETA = NULL) {
+                       se = "none", acov = "none", label = TRUE, fsm = FALSE,
+                       append.data = FALSE, assemble = FALSE, # or TRUE?
+                       level = 1L, optim.method = "bfgs", ETA = NULL) {
 
     stopifnot(inherits(object, "lavaan"))
     lavmodel       <- object@Model
@@ -38,9 +39,11 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
         type <- "yhat"
 
     # se?
+    if (acov != "none") se <- acov # ACOV implies SE
     if(se != "none") {
         if(is.logical(se) && se) {
             se <- "standard"
+            if (acov != "none") acov <- se # reverse-imply upstream
         }
         if(type != "lv") {
             stop("lavaan ERROR: standard errors only available if type = \"lv\"")
@@ -56,6 +59,7 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
             stop("lavaan ERROR: no local copy of data; FIXME!")
         } else {
             data.obs <- lavdata@X
+            ov.names <- lavdata@ov.names
         }
         eXo <- lavdata@eXo
     } else {
@@ -68,10 +72,11 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
                            lavoptions  = list(std.ov = lavdata@std.ov,
                                               group.label = lavdata@group.label,
                                               missing = lavdata@missing,
-                                              warn = FALSE),
+                                              warn = TRUE), # was FALSE before?
                            allow.single.case = TRUE)
         data.obs <- newData@X
         eXo <- newData@eXo
+        ov.names <- newData@ov.names
     }
 
     if(type == "lv") {
@@ -87,7 +92,7 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
 
         out <- lav_predict_eta(lavobject = NULL, lavmodel = lavmodel,
                    lavdata = lavdata, lavsamplestats = lavsamplestats,
-                   lavimplied = lavimplied, se = se, level = level,
+                   lavimplied = lavimplied, se = se, acov = acov, level = level,
                    data.obs = data.obs, eXo = eXo, method = method,
                    fsm = fsm, optim.method = optim.method)
 
@@ -99,6 +104,7 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
         # extract se here
         if(se != "none") {
             SE <- attr(out, "se")
+            if (acov != "none") ACOV <- attr(out, "acov")
         }
 
         # remove dummy lv? (removes attr!)
@@ -117,6 +123,15 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
                    }
                    ret
                })
+
+        # append original/new data? (also remove attr)
+        if(append.data) {
+            out <- lapply(seq_len(lavdata@ngroups), function(g) {
+                       ret <- cbind(out[[g]], data.obs[[g]])
+                       ret
+                   })
+        }
+
 
         if(fsm) {
             #FSM <- attr(out, "fsm")
@@ -155,6 +170,25 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
                        }
                        ret
                    })
+            if (acov != "none") {
+              ACOV <- lapply(seq_len(lavdata@ngroups), function(g) {
+                       # determine block
+                       if (lavdata@nlevels == 1L) {
+                           bb <- g
+                       } else {
+                           bb <- (g - 1)*lavdata@nlevels + level
+                       }
+                       lv.idx <- c(lavmodel@ov.y.dummy.lv.idx[[bb]],
+                                   lavmodel@ov.x.dummy.lv.idx[[bb]])
+                       ret <- ACOV[[g]]
+                       if (length(lv.idx) > 0L) {
+                           #FIXME: did I extrapolate this correctly?
+                           ret <- ACOV[[g]][-lv.idx, -lv.idx, drop=FALSE]
+                       }
+                       ret
+                   })
+
+            }
         }
 
         # label?
@@ -165,7 +199,12 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
                 } else {
                     gg <- g
                 }
-                colnames(out[[g]]) <- lavpta$vnames$lv[[gg]]
+                if(append.data) {
+                    colnames(out[[g]]) <- c(lavpta$vnames$lv[[gg]],
+                                            ov.names[[gg]])
+                } else {
+                    colnames(out[[g]]) <- lavpta$vnames$lv[[gg]]
+                }
             }
             if(se != "none") {
                 if(lavdata@nlevels > 1L && level == 2L) {
@@ -174,6 +213,11 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
                     gg <- g
                 }
                 colnames(SE[[g]]) <- lavpta$vnames$lv[[gg]]
+
+                if (acov != "none") {
+                  dimnames(ACOV[[g]]) <- list(lavpta$vnames$lv[[g]],
+                                              lavpta$vnames$lv[[g]])
+                }
             }
         }
 
@@ -216,20 +260,55 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
     out <- lapply(out, "class<-", c("lavaan.matrix", "matrix"))
 
     if(lavdata@ngroups == 1L) {
-        out <- out[[1L]]
+        res <- out[[1L]]
     } else {
-        out
+        res <- out
+    }
+
+    # assemble multiple groups into a single data.frame? (new in 0.6-4)
+    if(lavdata@ngroups > 1L && assemble) {
+        if(!is.null(newdata)) {
+            lavdata <- newData
+        }
+        DATA <- matrix(as.numeric(NA), nrow = sum(unlist(lavdata@norig)),
+                                       ncol = ncol(out[[1L]])) # assume == per g
+        colnames(DATA) <- colnames(out[[1L]])
+        for(g in seq_len(lavdata@ngroups)) {
+            DATA[ lavdata@case.idx[[g]], ] <- out[[g]]
+        }
+        DATA <- as.data.frame(DATA, stringsAsFactors = FALSE)
+
+        if(!is.null(newdata)) {
+            DATA[, lavdata@group] <- newdata[, lavdata@group ]
+        } else {
+            # add group
+            DATA[, lavdata@group ] <- rep(as.character(NA), nrow(DATA))
+            if(lavdata@missing == "listwise") {
+                # we will loose the group label of omitted variables!
+                DATA[unlist( lavdata@case.idx ), lavdata@group ] <-
+                    rep( lavdata@group.label, unlist( lavdata@nobs ) )
+            } else {
+                DATA[unlist( lavdata@case.idx ), lavdata@group ] <-
+                    rep( lavdata@group.label, unlist( lavdata@norig ) )
+            }
+        }
+
+        res <- DATA
     }
 
     if(fsm) {
-        attr(out, "fsm") <- FSM
+        attr(res, "fsm") <- FSM
     }
 
     if(se != "none") {
-        attr(out, "se") <- SE
+        attr(res, "se") <- SE
+        # return full sampling covariance matrix?
+        if (acov == "standard") {
+          attr(res, "acov") <- ACOV
+        }
     }
 
-    out
+    res
 }
 
 # internal function
@@ -243,7 +322,7 @@ lav_predict_eta <- function(lavobject = NULL,  # for convenience
                             # options
                             method = "EBM",
                             fsm = FALSE,
-                            se = "none",
+                            se = "none", acov = "none",
                             level = 1L,
                             optim.method = "bfgs") {
 
@@ -269,14 +348,14 @@ lav_predict_eta <- function(lavobject = NULL,  # for convenience
         if(method == "ebm") {
             out <- lav_predict_eta_normal(lavobject = lavobject,
                        lavmodel = lavmodel, lavdata = lavdata,
-                       lavimplied = lavimplied, se = se, level = level,
-                       lavsamplestats = lavsamplestats,
+                       lavimplied = lavimplied, se = se, acov = acov,
+                       level = level, lavsamplestats = lavsamplestats,
                        data.obs = data.obs, eXo = eXo, fsm = fsm)
         } else if(method == "ml") {
             out <- lav_predict_eta_bartlett(lavobject = lavobject,
                        lavmodel = lavmodel, lavdata = lavdata,
-                       lavimplied = lavimplied, se = se, level = level,
-                       lavsamplestats = lavsamplestats,
+                       lavimplied = lavimplied, se = se, acov = acov,
+                       level = level, lavsamplestats = lavsamplestats,
                        data.obs = data.obs, eXo = eXo, fsm = fsm)
         } else {
             stop("lavaan ERROR: unkown method: ", method)
@@ -285,13 +364,13 @@ lav_predict_eta <- function(lavobject = NULL,  # for convenience
         if(method == "ebm") {
             out <- lav_predict_eta_ebm_ml(lavobject = lavobject,
                        lavmodel = lavmodel, lavdata = lavdata,
-                       lavsamplestats = lavsamplestats, se = se,
+                       lavsamplestats = lavsamplestats, se = se, acov = acov,
                        level = level, data.obs = data.obs, eXo = eXo,
                        ML = FALSE, optim.method = optim.method)
         } else if(method == "ml") {
             out <- lav_predict_eta_ebm_ml(lavobject = lavobject,
                        lavmodel = lavmodel, lavdata = lavdata,
-                       lavsamplestats = lavsamplestats, se = se,
+                       lavsamplestats = lavsamplestats, se = se, acov = acov,
                        level = level, data.obs = data.obs, eXo = eXo,
                        ML = TRUE, optim.method = optim.method)
         } else {
@@ -313,7 +392,7 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
                                    lavimplied = NULL,
                                    # optional new data
                                    data.obs = NULL, eXo = NULL,
-                                   se = "none", level = 1L,
+                                   se = "none", acov = "none", level = 1L,
                                    fsm = FALSE) {
 
     # full object?
@@ -336,27 +415,20 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
     # eXo not needed
 
     # missings? and missing = "ml"?
-    # impute values under the normal
     if(lavdata@missing %in% c("ml", "ml.x")) {
-        for(g in seq_len(lavdata@ngroups)) {
-            if(newdata.flag) {
-                DATA <- data.obs[[g]]
-                MP   <- lav_data_missing_patterns(data.obs[[g]])
-            } else {
-                DATA <- lavdata@X[[g]]
-                MP   <- lavdata@Mp[[g]]
+        if(newdata.flag) {
+            MP <- vector("list", lavdata@ngroups)
+            for(g in seq_len(lavdata@ngroups)) {
+                MP[[g]] <- lav_data_missing_patterns(data.obs[[g]])
             }
-            data.obs[[g]] <-
-                lav_mvnorm_missing_impute_pattern(Y = DATA,
-                                                  Mp = MP,
-                                                  Mu = lavimplied$mean[[g]],
-                                                  Sigma = lavimplied$cov[[g]])
+        } else {
+            MP   <- lavdata@Mp
         }
     }
 
     LAMBDA <- computeLAMBDA(lavmodel = lavmodel, remove.dummy.lv = FALSE)
     Sigma.hat <- lavimplied$cov
-    Sigma.hat.inv <- lapply(Sigma.hat, MASS::ginv)
+    Sigma.inv <- lapply(Sigma.hat, MASS::ginv)
     VETA   <- computeVETA(lavmodel = lavmodel)
     EETA   <- computeEETA(lavmodel = lavmodel, lavsamplestats = lavsamplestats)
     EY     <- computeEY(  lavmodel = lavmodel, lavsamplestats = lavsamplestats)
@@ -365,8 +437,14 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
     if(fsm) {
         FSM <- vector("list", length = lavdata@ngroups)
     }
+
+    if (acov != "none") se <- acov # ACOV implies SE
     if(se != "none") {
         SE <- vector("list", length = lavdata@ngroups)
+        # return full sampling covariance matrix?
+        if (acov != "none") {
+          ACOV <- vector("list", length = lavdata@ngroups)
+        }
     }
 
     for(g in 1:lavdata@ngroups) {
@@ -410,7 +488,7 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
             EETA.g     <- EETA[[gg]]
             LAMBDA.g   <- LAMBDA[[gg]]
             EY.g       <- EY[[gg]]
-            Sigma.hat.inv.g <- Sigma.hat.inv[[gg]]
+            Sigma.inv.g <- Sigma.inv[[gg]]
 
         } else {
             data.obs.g <- data.obs[[g]]
@@ -418,9 +496,8 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
             EETA.g     <- EETA[[g]]
             LAMBDA.g   <- LAMBDA[[g]]
             EY.g       <- EY[[g]]
-            Sigma.hat.inv.g <- Sigma.hat.inv[[g]]
+            Sigma.inv.g <- Sigma.inv[[g]]
         }
-
 
         nfac <- ncol(VETA[[g]])
         if(nfac == 0L) {
@@ -428,23 +505,57 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
             next
         }
 
-        # factor score coefficient matrix 'C'
-        FSC <- VETA.g %*% t(LAMBDA.g) %*% Sigma.hat.inv.g
-        if(fsm) {
-            FSM[[g]] <- FSC
-        }
+        # center data
+        Yc <- t( t(data.obs.g) - EY.g )
 
-        # standard error
-        if(se == "standard") {
-            tmp <- (VETA.g -
-             VETA.g %*% t(LAMBDA.g) %*% Sigma.hat.inv.g %*% LAMBDA.g %*% VETA.g)
-            tmp.d <- diag(tmp)
-            tmp.d[ tmp.d < 1e-05 ] <- as.numeric(NA)
-            SE[[g]] <- matrix(sqrt(tmp.d), nrow = 1L)
-        }
+        # compute factor scores
+        if(lavdata@missing %in% c("ml", "ml.x")) {
 
-        RES  <- sweep(data.obs.g,  MARGIN = 2L, STATS = EY.g,   FUN = "-")
-        FS.g <- sweep(RES %*% t(FSC), MARGIN = 2L, STATS = EETA.g, FUN = "+")
+            # missing patterns for this group
+            Mp <- MP[[g]]
+
+            # factor scores container
+            FS.g <- matrix(as.numeric(NA), nrow(Yc), ncol = length(EETA.g))
+
+            # compute FSC per pattern
+            for(p in seq_len(Mp$npatterns)) {
+                var.idx <- Mp$pat[p,]     # observed
+                na.idx <- which(!var.idx) # missing
+
+                # extract observed data for these (centered) cases
+                Oc <- Yc[Mp$case.idx[[p]], Mp$pat[p, ], drop = FALSE]
+
+                # invert Sigma (Sigma_22, observed part only) for this pattern
+                Sigma_22.inv <- try(lav_matrix_symmetric_inverse_update(S.inv =
+                                    Sigma.inv.g, rm.idx = na.idx,
+                                    logdet = FALSE), silent = TRUE)
+                if(inherits(Sigma_22.inv, "try-error")) {
+                    stop("lavaan ERROR: Sigma_22.inv cannot be inverted")
+                }
+
+                lambda <- LAMBDA.g[var.idx, , drop = FALSE]
+                FSC <- VETA.g %*% t(lambda) %*% Sigma_22.inv
+
+                FS.g[Mp$case.idx[[p]], ] <- t(FSC %*% t(Oc) + EETA.g)
+            }
+
+            # what about FSM? There is no single one, but as many as patterns
+            if(fsm) {
+                # use 'global' version (just like in complete case)
+                FSM[[g]] <- VETA.g %*% t(LAMBDA.g) %*% Sigma.inv.g
+            }
+        } else {
+            # factor score coefficient matrix 'C'
+            FSC <- VETA.g %*% t(LAMBDA.g) %*% Sigma.inv.g
+
+            # store fsm?
+            if(fsm) {
+                FSM[[g]] <- FSC
+            }
+
+            # compute factor scores
+            FS.g <- t(FSC %*% t(Yc) + EETA.g)
+        }
 
         # replace values in dummy lv's by their observed counterpart
         if(length(lavmodel@ov.y.dummy.lv.idx[[g]]) > 0L && level == 1L) {
@@ -457,6 +568,20 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
         }
 
         FS[[g]] <- FS.g
+
+        # standard error
+        if(se == "standard" && !(lavdata@missing %in% c("ml", "ml.x"))) {
+            tmp <- (VETA.g -
+             VETA.g %*% t(LAMBDA.g) %*% Sigma.inv.g %*% LAMBDA.g %*% VETA.g)
+            tmp.d <- diag(tmp)
+            tmp.d[ tmp.d < 1e-05 ] <- as.numeric(NA)
+            SE[[g]] <- matrix(sqrt(tmp.d), nrow = 1L)
+
+            # return full sampling covariance matrix?
+            if (acov == "standard") {
+              ACOV[[g]] <- tmp
+            }
+        }
     }
 
     if(fsm) {
@@ -464,6 +589,10 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
     }
     if(se != "none") {
         attr(FS, "se") <- SE
+        # return full sampling covariance matrix?
+        if (acov == "standard") {
+          attr(FS, "acov") <- ACOV
+        }
     }
 
     FS
@@ -474,8 +603,8 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
 #           case, this is equivalent to 'ML'
 #        2) the usual formula is:
 #               FSC = solve(lambda' theta.inv lambda) (lambda' theta.inv)
-#           BUT to deal with zero or negative variances, we use the
-#           'GLS' version instead:
+#           BUT to deal with singular THETA (with zeroes on the diagonal),
+#           we use the 'GLS' version instead:
 #               FSC = solve(lambda' sigma.inv lambda) (lambda' sigma.inv)
 #           Reference: Bentler & Yuan (1997) 'Optimal Conditionally Unbiased
 #                      Equivariant Factor Score Estimators'
@@ -483,6 +612,8 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
 #                      applications to causality' (Springer-Verlag)
 #        3) instead of solve(), we use MASS::ginv, for special settings where
 #           -by construction- (lambda' sigma.inv lambda) is singular
+#           note: this will destroy the conditionally unbiased property
+#                 of Bartlett scores!!
 lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
                                      # sub objects
                                      lavmodel = NULL, lavdata = NULL,
@@ -490,7 +621,7 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
                                      lavimplied = NULL,
                                      # optional new data
                                      data.obs = NULL, eXo = NULL,
-                                     se = "none", level = 1L,
+                                     se = "none", acov = "none", level = 1L,
                                      fsm = FALSE) {
 
     # full object?
@@ -513,30 +644,20 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
     # eXo not needed
 
     # missings? and missing = "ml"?
-    # impute values under the normal
-    #
-    # FIXME: THIS IS NOT CORRECT; we should use FIML!!!
-    #
     if(lavdata@missing %in% c("ml", "ml.x")) {
-        for(g in seq_len(lavdata@ngroups)) {
-            if(newdata.flag) {
-                DATA <- data.obs[[g]]
-                MP   <- lav_data_missing_patterns(data.obs[[g]])
-            } else {
-                DATA <- lavdata@X[[g]]
-                MP   <- lavdata@Mp[[g]]
+        if(newdata.flag) {
+            MP <- vector("list", lavdata@ngroups)
+            for(g in seq_len(lavdata@ngroups)) {
+                MP[[g]] <- lav_data_missing_patterns(data.obs[[g]])
             }
-            data.obs[[g]] <-
-                lav_mvnorm_missing_impute_pattern(Y = DATA,
-                                                  Mp = MP,
-                                                  Mu = lavimplied$mean[[g]],
-                                                  Sigma = lavimplied$cov[[g]])
+        } else {
+            MP   <- lavdata@Mp
         }
     }
 
-
     LAMBDA <- computeLAMBDA(lavmodel = lavmodel, remove.dummy.lv = FALSE)
-    Sigma.hat.inv <- lapply(lavimplied$cov, MASS::ginv)
+    Sigma  <- lavimplied$cov
+    Sigma.inv <- lapply(lavimplied$cov, MASS::ginv)
     VETA   <- computeVETA(lavmodel = lavmodel) # for se only
     EETA   <- computeEETA(lavmodel = lavmodel, lavsamplestats = lavsamplestats)
     EY     <- computeEY(  lavmodel = lavmodel, lavsamplestats = lavsamplestats)
@@ -545,8 +666,14 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
     if(fsm) {
         FSM <- vector("list", length = lavdata@ngroups)
     }
+
+    if (acov != "none") se <- acov # ACOV implies SE
     if(se != "none") {
         SE <- vector("list", length = lavdata@ngroups)
+        # return full sampling covariance matrix?
+        if (acov != "none") {
+          ACOV <- vector("list", length = lavdata@ngroups)
+        }
     }
 
     for(g in 1:lavdata@ngroups) {
@@ -560,6 +687,8 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
             implied.group <- lapply(lavimplied, function(x) x[group.idx])
 
             # random effects (=random intercepts or cluster means)
+            # NOTE: is the 'ML' way not simply using the observed cluster
+            #       means?
             out <- lav_mvnorm_cluster_implied22l(Lp = Lp,
                                                  implied = implied.group)
             MB.j <- lav_mvnorm_cluster_em_estep_ranef(YLp = YLp, Lp = Lp,
@@ -590,7 +719,7 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
             EETA.g     <- EETA[[gg]]
             LAMBDA.g   <- LAMBDA[[gg]]
             EY.g       <- EY[[gg]]
-            Sigma.hat.inv.g <- Sigma.hat.inv[[gg]]
+            Sigma.inv.g <- Sigma.inv[[gg]]
 
         } else {
             data.obs.g <- data.obs[[g]]
@@ -598,7 +727,7 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
             EETA.g     <- EETA[[g]]
             LAMBDA.g   <- LAMBDA[[g]]
             EY.g       <- EY[[g]]
-            Sigma.hat.inv.g <- Sigma.hat.inv[[g]]
+            Sigma.inv.g <- Sigma.inv[[g]]
         }
 
         nfac <- length(EETA[[g]])
@@ -607,39 +736,59 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
             next
         }
 
-        # factor score coefficient matrix 'C'
-        FSC <- ( MASS::ginv(t(LAMBDA.g) %*% Sigma.hat.inv.g %*% LAMBDA.g)
-                %*% t(LAMBDA.g) %*% Sigma.hat.inv.g )
+        # center data
+        Yc <- t( t(data.obs.g) - EY.g )
 
-        if(fsm) {
-            FSM[[g]] <- FSC
+        # compute factor scores
+        if(lavdata@missing %in% c("ml", "ml.x")) {
+
+            # missing patterns for this group
+            Mp <- MP[[g]]
+
+            # factor scores container
+            FS.g <- matrix(as.numeric(NA), nrow(Yc), ncol = length(EETA.g))
+
+            # compute FSC per pattern
+            for(p in seq_len(Mp$npatterns)) {
+                var.idx <- Mp$pat[p,]     # observed
+                na.idx <- which(!var.idx) # missing
+
+                # extract observed data for these (centered) cases
+                Oc <- Yc[Mp$case.idx[[p]], Mp$pat[p, ], drop = FALSE]
+
+                # invert Sigma (Sigma_22, observed part only) for this pattern
+                Sigma_22.inv <- try(lav_matrix_symmetric_inverse_update(S.inv =
+                                    Sigma.inv.g, rm.idx = na.idx,
+                                    logdet = FALSE), silent = TRUE)
+                if(inherits(Sigma_22.inv, "try-error")) {
+                    stop("lavaan ERROR: Sigma_22.inv cannot be inverted")
+                }
+
+                lambda <- LAMBDA.g[var.idx, , drop = FALSE]
+                FSC <- ( MASS::ginv(t(lambda) %*% Sigma_22.inv %*% lambda)
+                           %*% t(lambda) %*% Sigma_22.inv )
+                FS.g[Mp$case.idx[[p]], ] <- t(FSC %*% t(Oc) + EETA.g)
+            }
+
+            # what about FSM? There is no single one, but as many as patterns
+            if(fsm) {
+                # use 'global' version (just like in complete case)
+                FSM[[g]] <- ( MASS::ginv(t(LAMBDA.g) %*% Sigma.inv.g %*%
+                                LAMBDA.g) %*% t(LAMBDA.g) %*% Sigma.inv.g )
+            }
+
+        } else {
+            # factor score coefficient matrix 'C'
+            FSC <- ( MASS::ginv(t(LAMBDA.g) %*% Sigma.inv.g %*% LAMBDA.g)
+                     %*% t(LAMBDA.g) %*% Sigma.inv.g )
+            # store fsm?
+            if(fsm) {
+                FSM[[g]] <- FSC
+            }
+
+            # compute factor scores
+            FS.g <- t(FSC %*% t(Yc) + EETA.g)
         }
-
-        # standard error
-        if(se == "standard") {
-            # the traditional formula is:
-            #     solve(t(lambda) %*% solve(theta) %*% lambda)
-            # but we replace it by
-            #     solve( t(lambda) %*% solve(sigma) %*% lambda ) - psi
-            # to handle negative variances
-            # in addition, we use ginv
-            tmp <- ( MASS::ginv(t(LAMBDA.g) %*%
-                                  Sigma.hat.inv.g %*% LAMBDA.g)
-                     - VETA.g )
-            tmp.d <- diag(tmp)
-            tmp.d[ tmp.d < 1e-05 ] <- as.numeric(NA)
-            SE[[g]] <- matrix(sqrt(tmp.d), nrow = 1L)
-        }
-
-        RES  <- sweep(data.obs.g,  MARGIN = 2L, STATS = EY.g,   FUN = "-")
-        FS.g <- sweep(RES %*% t(FSC), MARGIN = 2L, STATS = EETA.g, FUN = "+")
-
-        # remove dummy lv's
-        #lv.dummy.idx <- c(lavmodel@ov.y.dummy.lv.idx[[g]],
-        #                  lavmodel@ov.x.dummy.lv.idx[[g]])
-        #if(length(lv.dummy.idx) > 0L) {
-        #    FS.g <- FS.g[,-lv.dummy.idx,drop=FALSE]
-        #}
 
         # replace values in dummy lv's by their observed counterpart
         if(length(lavmodel@ov.y.dummy.lv.idx[[g]]) > 0L && level == 1L) {
@@ -652,6 +801,28 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
         }
 
         FS[[g]] <- FS.g
+
+        # standard error
+        if(se == "standard" && !(lavdata@missing %in% c("ml", "ml.x"))) {
+            # the traditional formula is:
+            #     solve(t(lambda) %*% solve(theta) %*% lambda)
+            # but we replace it by
+            #     solve( t(lambda) %*% solve(sigma) %*% lambda ) - psi
+            # to handle negative variances
+            # in addition, we use ginv
+            tmp <- ( MASS::ginv(t(LAMBDA.g) %*%
+                                  Sigma.inv.g %*% LAMBDA.g)
+                     - VETA.g )
+            tmp.d <- diag(tmp)
+            tmp.d[ tmp.d < 1e-05 ] <- as.numeric(NA)
+            SE[[g]] <- matrix(sqrt(tmp.d), nrow = 1L)
+
+            # return full sampling covariance matrix?
+            if (acov == "standard") {
+              ACOV[[g]] <- tmp
+            }
+        }
+
     }
 
     if(fsm) {
@@ -659,6 +830,10 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
     }
     if(se != "none") {
         attr(FS, "se") <- SE
+        # return full sampling covariance matrix?
+        if (acov == "standard") {
+          attr(FS, "acov") <- ACOV
+        }
     }
 
     FS
@@ -671,7 +846,7 @@ lav_predict_eta_ebm_ml <- function(lavobject = NULL,  # for convenience
                                    lavsamplestats = NULL,
                                    # optional new data
                                    data.obs = NULL, eXo = NULL,
-                                   se = "none", level = 1L,
+                                   se = "none", acov = "none", level = 1L,
                                    ML = FALSE,
                                    optim.method = "bfgs") {
 
@@ -702,6 +877,7 @@ lav_predict_eta_ebm_ml <- function(lavobject = NULL,  # for convenience
     }
 
     # se?
+    if (acov != "none") se <- acov # ACOV implies SE
     if(se != "none") {
         warning("lavaan WARNING: standard errors are not available (yet) for the non-normal case")
     }
@@ -718,6 +894,13 @@ lav_predict_eta_ebm_ml <- function(lavobject = NULL,  # for convenience
                           remove.dummy.lv = TRUE) ## FIXME?
     TH    <- computeTH(   lavmodel = lavmodel)
     THETA <- computeTHETA(lavmodel = lavmodel)
+
+    # check for zero entries in THETA (new in 0.6-4)
+    for(g in seq_len(lavdata@ngroups)) {
+        if(any(diag(THETA[[g]]) == 0)) {
+            stop("lavaan ERROR: (residual) variance matrix THETA contains zero elements on the diagonal.")
+        }
+    }
 
     # local objective function: x = lv values
     f.eta.i <- function(x, y.i, x.i, mu.i) {

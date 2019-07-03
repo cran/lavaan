@@ -20,6 +20,23 @@ lav_test_diff_Satorra2000 <- function(m1, m0, H1 = TRUE, A.method = "delta",
     # m = difference between the df's
     m <- r0 - r1
 
+    # check for identical df setting
+    if(m == 0L) {
+        return(list(T.delta = (T0 - T1), scaling.factor = as.numeric(NA),
+                    df.delta = m, a = as.numeric(NA), b = as.numeric(NA)))
+    }
+
+
+    # bail out here, if m == 0 (but we should catch this earlier)
+    #if(m < 1L) {
+    #    txt <- paste("Can not compute (scaled) difference test when ",
+    #                 "the degrees of freedom (df) are the same for both ",
+    #                 "models:\n",
+    #                 "Df model 1 = ", r1, ", and Df model 2 = ", r0, "\n",
+    #                 sep = "")
+    #            stop(lav_txt2message(txt, header = "lavaan ERROR:"))
+    #}
+
     Gamma <- lavTech(m1, "Gamma") # the same for m1 and m0
     # check for NULL
     if(is.null(Gamma)) {
@@ -148,6 +165,12 @@ lav_test_diff_SatorraBentler2001 <- function(m1, m0) {
     # m = difference between the df's
     m = r0 - r1
 
+    # check for identical df setting
+    if(m == 0L) {
+        return(list(T.delta = (T0 - T1), scaling.factor = as.numeric(NA),
+                    df.delta = m))
+    }
+
     # compute c_d
     cd <- (r0 * c0 - r1 * c1) / m
 
@@ -185,6 +208,12 @@ lav_test_diff_SatorraBentler2010 <- function(m1, m0, H1 = FALSE) {
     # m = difference between the df's
     m = r0 - r1
 
+    # check for identical df setting
+    if(m == 0L) {
+        return(list(T.delta = (T0 - T1), scaling.factor = as.numeric(NA),
+                    df.delta = m))
+    }
+
     # generate `M10' model
     if(H1) {
         # M0 with M1 parameters
@@ -193,11 +222,11 @@ lav_test_diff_SatorraBentler2010 <- function(m1, m0, H1 = FALSE) {
 
         # check if vcov is positive definite (new in 0.6)
         # if not, we may get negative values
-        eigvals <- eigen(lavTech(M10, "information"),
+        eigvals <- eigen(lavTech(M01, "information"),
                          symmetric=TRUE, only.values=TRUE)$values
         if(any(eigvals < -1 * .Machine$double.eps^(3/4))) {
             warning(
-  "lavaan WARNING: information matrix of the M10 model is not positive definite.\n",
+  "lavaan WARNING: information matrix of the M01 model is not positive definite.\n",
 "                  As a result, the scale-factor can not be computed.")
             cd <- as.numeric(NA)
         } else {
@@ -240,6 +269,8 @@ lav_test_diff_m10 <- function(m1, m0, test = FALSE) {
     # switch of verbose/se/test
     Options <- m1@Options
     Options$verbose <- FALSE
+    # switch of optim.gradient check
+    Options$check.gradient <- FALSE
 
     # should we compute se/test statistics?
     if(!test) {
@@ -255,27 +286,33 @@ lav_test_diff_m10 <- function(m1, m0, test = FALSE) {
     PT.M1.extended <- lav_partable_merge(PT.M1, PT.M1.FULL,
                                          remove.duplicated = TRUE, warn = FALSE)
 
+    # remove most columns
+    PT.M1.extended$start  <- NULL # new in 0.6-4! (otherwise, they are used)
+    PT.M1.extended$est    <- NULL
+    PT.M1.extended$se     <- NULL
+
+    # in addition, use 'NA' for free parameters in ustart column
+    free.par.idx <- which(PT.M1.extended$free > 0L)
+    PT.M1.extended$ustart[ free.par.idx ] <- as.numeric(NA)
+
     # `extend' PT.M0 partable to include all `fixed-to-zero parameters'
     PT.M0.FULL <- lav_partable_full(partable = PT.M0, lavpta = m0@pta,
                                     free = TRUE, start = TRUE)
     PT.M0.extended <- lav_partable_merge(PT.M0, PT.M0.FULL,
                                          remove.duplicated = TRUE, warn = FALSE)
+    # remove most columns, but not 'est'
+    PT.M0.extended$ustart <- NULL
+    PT.M0.extended$start  <- NULL
+    PT.M0.extended$se     <- NULL
 
-    # `extend' PE of M0 to include all `fixed-to-zero parameters'
-    PE.M0 <- parameterEstimates(m0, remove.eq = FALSE, remove.ineq = FALSE,
-                                remove.system.eq =  FALSE, remove.def = FALSE)
-    PE.M0.FULL <- lav_partable_full(PE.M0)
-    PE.M0.extended <- lav_partable_merge(PE.M0, PE.M0.FULL,
-                                         remove.duplicated = TRUE, warn = FALSE)
 
     # FIXME:
     # - check if H0 does not contain additional parameters...
 
     Options$optim.method          = "none"
     Options$optim.force.converged = TRUE
-    Options$start                 = PE.M0.extended # new in 0.6!
+    Options$start                 = PT.M0.extended # new in 0.6!
     m10 <- lavaan(model = PT.M1.extended,
-                  #start = PE.M0.extended,
                   slotOptions     = Options,
                   slotSampleStats = m1@SampleStats,
                   slotData        = m1@Data,

@@ -97,7 +97,7 @@ Model matrices:
         set to unity; hence no-x.)}
 }
 
-Information about the data (including missing patterns):
+Information about the data:
 
 \describe{
     \item{\code{"data"}:}{A matrix containing the observed variables
@@ -105,13 +105,6 @@ Information about the data (including missing patterns):
         Column names correspond to the output of \code{lavNames(object)},
         while the rows correspond to the output of
         \code{lavInspect(object, "case.idx"}.}
-    \item{\code{"group"}:}{A character string. The group variable in
-        the data.frame (if any).}
-    \item{\code{"ngroups"}:}{Integer. The number of groups.}
-    \item{\code{"group.label"}:}{A character vector. The group labels.}
-    \item{\code{"cluster"}:}{A character vector. The cluster variable(s)
-       in the data.frame (if any).}
-    \item{\code{"nlevels"}:}{Integer. The number of levels.}
     \item{\code{"ordered"}:}{A character vector. The ordered variables.}
     \item{\code{"nobs"}:}{Integer vector. The number of observations
         in each group that were used in the analysis.}
@@ -121,8 +114,8 @@ Information about the data (including missing patterns):
         were used in the analysis. If there is just a single group, this
         is the same as the \code{"nobs"} option; if there are multiple groups,
         this is the sum of the \code{"nobs"} numbers for each group.}
-    \item{\code{"case.idx"}:}{The case/observation numbers that were used
-        in the analysis.
+    \item{\code{"case.idx"}:}{Integer vector. The case/observation numbers 
+        that were used in the analysis.
         In the case of multiple groups: a list of numbers.}
     \item{\code{"empty.idx"}:}{The case/observation numbers of those
         cases/observations that contained missing values only
@@ -140,6 +133,40 @@ Information about the data (including missing patterns):
         the proportion of observed datapoints for the corresponding
         pair of observed variables.
         In the case of multiple groups: a list of coverage matrices.}
+    \item{\code{"group"}:}{A character string. The group variable in
+        the data.frame (if any).}
+    \item{\code{"ngroups"}:}{Integer. The number of groups.}
+    \item{\code{"group.label"}:}{A character vector. The group labels.}
+    \item{\code{"cluster"}:}{A character vector. The cluster variable(s)
+        in the data.frame (if any).}
+    \item{\code{"nlevels"}:}{Integer. The number of levels.}
+    \item{\code{"nclusters"}:}{Integer. The number of clusters
+        that were used in the analysis.}
+    \item{\code{"ncluster.size"}:}{Integer. The number of different cluster
+        sizes.}
+    \item{\code{"cluster.size"}:}{Integer vector. The number of observations
+        within each cluster. For multigroup multilevel models, a list of
+        integer vectors, indicating cluster sizes within each group.}
+    \item{\code{"cluster.id"}:}{Integer vector. The cluster IDs identifying
+        the clusters. For multigroup multilevel models, a list of
+        integer vectors, indicating cluster IDs within each group.}
+    \item{\code{"cluster.idx"}:}{Integer vector. The cluster index for
+        each observation. The cluster index ranges from 1 to the
+        number of clusters. For multigroup multilevel models, a list of
+        integer vectors, indicating cluster indices within each group.}
+    \item{\code{"cluster.label"}:}{Integer vector. The cluster ID for
+        each observation. For multigroup multilevel models, a list of
+        integer vectors, indicating the cluster ID for each observation 
+        within each group.}
+    \item{\code{"cluster.sizes"}:}{Integer vector. The different cluster
+        sizes that were used in the analysis. For multigroup multilevel 
+        models, a list of integer vectors, indicating the different cluster 
+        sizes within each group.}
+    \item{\code{"average.cluster.size"}:}{Integer. The average cluster
+        size (using the formula 
+        \code{s = (N^2 - sum(cluster.size^2)) / (N*(nclusters - 1L))}). 
+        For multigroup multilevel
+        models, a list containing the average cluster size per group.}
 }
 
 Observed sample statistics:
@@ -188,7 +215,7 @@ Model-implied sample statistics:
 \describe{
     \item{\code{"implied"}:}{The model-implied summary statistics.
         Alias: \code{"fitted"}, \code{"expected"}, \code{"exp"}.}
-    \item{\code{"resid"}:}{The difference between observed and model-implied 
+    \item{\code{"resid"}:}{The difference between observed and model-implied
         summary statistics.
         Alias: \code{"residuals"}, \code{"residual"}, \code{"res"}.}
     \item{\code{"cov.lv"}:}{The model-implied variance-covariance matrix
@@ -274,6 +301,17 @@ Gradient, Hessian, observed, expected and first.order information matrices:
         inverted observed information matrix for the free model parameters.}
     \item{\code{"inverted.information.first.order"}:}{Matrix containing the
         inverted first.order information matrix for the free model parameters.}
+   \item{\code{"h1.information"}:}{Matrix containing either the observed,
+        expected or first.order information matrix (depending on the 
+        information option of the fitted model) of the unrestricted h1
+        model. This is unit-information, not total-information.}
+    \item{\code{"h1.information.expected"}:}{Matrix containing the expected
+        information matrix for the unrestricted h1 model.}
+    \item{\code{"h1.information.observed"}:}{Matrix containing the observed
+        information matrix for the unrestricted h1 model.}
+    \item{\code{"h1.information.first.order"}:}{Matrix containing the 
+        first.order information matrix for the the unrestricted h1 model.
+        Alias: \code{"h1.first.order"}.}
 }
 
 Variance covariance matrix of the model parameters:
@@ -289,6 +327,34 @@ Variance covariance matrix of the model parameters:
         is done with respect to the latent variables only.}
     \item{\code{"vcov.std.nox"}:}{Matrix containing the variance covariance
         matrix of the standardized estimated model parameters. Standardization
+        is done with respect to both observed and latent variables, but
+        ignoring any exogenous observed covariates.}
+    \item{\code{"vcov.def"}:}{Matrix containing the variance covariance matrix
+        of the user-defined (using the := operator) parameters.}
+    \item{\code{"vcov.def.std.all"}:}{Matrix containing the variance covariance
+        matrix of the standardized user-defined parameters. Standardization
+        is done with respect to both observed and latent variables.}
+    \item{\code{"vcov.def.std.lv"}:}{Matrix containing the variance covariance
+        matrix of the standardized user-defined parameters. Standardization
+        is done with respect to the latent variables only.}
+    \item{\code{"vcov.def.std.nox"}:}{Matrix containing the variance covariance
+        matrix of the standardized user-defined parameters. Standardization
+        is done with respect to both observed and latent variables, but
+        ignoring any exogenous observed covariates.}
+    \item{\code{"vcov.def.joint"}:}{Matrix containing the joint variance
+        covariance matrix of both the estimated model parameters and
+        the defined (using the := operator) parameters.}
+    \item{\code{"vcov.def.joint.std.all"}:}{Matrix containing the joint
+        variance covariance matrix of both the standardized model parameters
+        and the user-defined parameters. Standardization
+        is done with respect to both observed and latent variables.}
+    \item{\code{"vcov.def.joint.std.lv"}:}{Matrix containing the joint
+        variance covariance matrix of both the standardized model parameters
+        and the user-defined parameters. Standardization
+        is done with respect to the latent variables only.}
+    \item{\code{"vcov.def.joint.std.nox"}:}{Matrix containing the joint
+        variance covariance matrix of both the standardized model parameters
+        and the user-defined parameters. Standardization
         is done with respect to both observed and latent variables, but
         ignoring any exogenous observed covariates.}
 }
@@ -310,6 +376,8 @@ Miscellaneous:
     \item{\code{"mi"}:}{The modification indices. Alias: \code{"modindices"},
         \code{"modification.indices"}. The same output as given
         by \code{modindices()}.}
+    \item{\code{"loglik.casewise"}:}{Vector containing the casewise 
+        loglikelihood contributions. Only available if estimator = \code{"ML"}.}
     \item{\code{"options"}:}{List. The option list.}
     \item{\code{"call"}:}{List. The call as returned by match.call, coerced to
         a list.}
@@ -323,7 +391,7 @@ Miscellaneous:
         \code{lavInspect(fit, "theta")} return a non-positive definite matrix.}
     \item{\code{"zero.cell.tables"}:}{List. List of bivariate frequency tables
         where at least one cell is empty.}
-    \item{\code{"version"}:}{The lavaan version number that was used to 
+    \item{\code{"version"}:}{The lavaan version number that was used to
         construct the fitted lavaan object.}
 }
 
@@ -337,7 +405,7 @@ HS.model <- ' visual  =~ x1 + x2 + x3
               textual =~ x4 + x5 + x6
               speed   =~ x7 + x8 + x9 '
 
-     
+
 fit <- cfa(HS.model, data = HolzingerSwineford1939, group = "school")
 
 # extract information

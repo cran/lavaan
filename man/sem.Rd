@@ -73,7 +73,7 @@ in a multiple group analysis.}
     \code{int.ov.free = TRUE}, \code{int.lv.free = FALSE},
     \code{auto.fix.first = TRUE} (unless \code{std.lv = TRUE}),
     \code{auto.fix.single = TRUE}, \code{auto.var = TRUE},
-    \code{auto.cov.lv.x = TRUE}, 
+    \code{auto.cov.lv.x = TRUE}, \code{auto.efa = TRUE},
     \code{auto.th = TRUE}, \code{auto.delta = TRUE},
     and \code{auto.cov.y = TRUE}.
 }
@@ -109,6 +109,6 @@ model <- '
     y6 ~~ y8
 '
 
-fit <- sem(model, data=PoliticalDemocracy)
-summary(fit, fit.measures=TRUE)
+fit <- sem(model, data = PoliticalDemocracy)
+summary(fit, fit.measures = TRUE)
 }

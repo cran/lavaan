@@ -5,6 +5,11 @@ lav_partable_merge <- function(pt1 = NULL, pt2 = NULL,
                                fromLast=FALSE,
                                warn = TRUE) {
 
+    # check for empty pt2
+    if(is.null(pt2) || length(pt2) == 0L) {
+        return(pt1)
+    }
+
     pt1 <- as.data.frame(pt1, stringsAsFactors = FALSE)
     pt2 <- as.data.frame(pt2, stringsAsFactors = FALSE)
 
@@ -33,16 +38,16 @@ lav_partable_merge <- function(pt1 = NULL, pt2 = NULL,
 
     # group
     if(is.null(pt1$group) && !is.null(pt2$group)) {
-        pt1$group <- rep(0L, length(pt1$lhs))
+        pt1$group <- rep(1L, length(pt1$lhs))
     } else if(is.null(pt2$group) && !is.null(pt1$group)) {
-        pt2$group <- rep(0L, length(pt2$lhs))
+        pt2$group <- rep(1L, length(pt2$lhs))
     }
 
     # level
     if(is.null(pt1$level) && !is.null(pt2$level)) {
-        pt1$level <- rep(0L, length(pt1$lhs))
+        pt1$level <- rep(1L, length(pt1$lhs))
     } else if(is.null(pt2$level) && !is.null(pt1$level)) {
-        pt2$level <- rep(0L, length(pt2$lhs))
+        pt2$level <- rep(1L, length(pt2$lhs))
     }
 
     # user
@@ -85,6 +90,13 @@ lav_partable_merge <- function(pt1 = NULL, pt2 = NULL,
         pt1$plabel <- rep("", length(pt1$lhs))
     } else if(is.null(pt2$plabel) && !is.null(pt1$plabel)) {
         pt2$plabel <- rep("", length(pt2$lhs))
+    }
+
+    # efa
+    if(is.null(pt1$efa) && !is.null(pt2$efa)) {
+        pt1$efa <- rep("", length(pt1$lhs))
+    } else if(is.null(pt2$efa) && !is.null(pt1$efa)) {
+        pt2$efa <- rep("", length(pt2$lhs))
     }
 
     # start
@@ -143,6 +155,20 @@ lav_partable_merge <- function(pt1 = NULL, pt2 = NULL,
     }
 
     NEW <- base::merge(pt1, pt2, all = TRUE, sort = FALSE)
+
+    # make sure group/block/level are zero if op %in% c("==", "<", ">", ":=")
+    op.idx <- which(NEW$op %in% c("==", "<", ">", ":="))
+    if(length(op.idx) > 0L) {
+        if(!is.null(NEW$block)) {
+            NEW$block[op.idx] <- 0L
+        }
+        if(!is.null(NEW$group)) {
+            NEW$group[op.idx] <- 0L
+        }
+        if(!is.null(NEW$level)) {
+            NEW$level[op.idx] <- 0L
+        }
+    }
 
     NEW
 }

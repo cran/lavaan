@@ -47,12 +47,33 @@ Model features (always available):
       are considered random, and the means, variances and covariances are free 
       parameters. If \code{"default"}, the value is set depending on the mimic 
       option.}
-    \item{\code{orthogonal}:}{If \code{TRUE}, the exogenous latent variables
-      are assumed to be uncorrelated.}
+    \item{\code{orthogonal}:}{If \code{TRUE}, all covariances among
+      latent variables are set to zero.}
+    \item{\code{orthogonal.y}:}{If \code{TRUE}, all covariances among
+      endogenous latent variables only are set to zero.}
+    \item{\code{orthogonal.x}:}{If \code{TRUE}, all covariances among
+      exogenous latent variables only are set to zero.}
     \item{\code{std.lv}:}{If \code{TRUE}, the metric of each latent variable 
       is determined by fixing their (residual) variances to 1.0. If 
       \code{FALSE}, the metric of each latent variable is determined by fixing 
-      the factor loading of the first indicator to 1.0.}
+      the factor loading of the first indicator to 1.0. If there are multiple
+      groups, \code{std.lv = TRUE} and \code{"loadings"} is included in 
+      the \code{group.label} argument, then only the latent variances i
+      of the first group will be fixed to 1.0, while the latent
+      variances of other groups are set free.}
+    \item{\code{effect.coding}:}{Can be logical or character string. If
+     logical and \code{TRUE}, this implies 
+     \code{effect.coding = c("loadings", "intercepts")}. If logical and 
+     \code{FALSE}, it is set equal to the empty string. 
+     If \code{"loadings"} is included, equality
+     constraints are used so that the average of the factor loadings (per
+     latent variable) equals 1. Note that this should not be used 
+     together with \code{std.lv = TRUE}. If \code{"intercepts"} is
+     included, equality constraints are used so that the sum of the
+     intercepts (belonging to the indicators of a single latent variable) 
+     equals zero.
+     As a result, the latent mean will be freely estimated and usually 
+     equal the average of the means of the involved indicators.}
     \item{\code{parameterization}:}{Currently only used if data is 
       categorical. If \code{"delta"}, the delta parameterization is used. 
       If \code{"theta"}, the theta parameterization is used.}
@@ -78,6 +99,11 @@ Model features (only available for the \code{lavaan()} function):
       variables are included in the model and set free.}
     \item{\code{auto.delta}:}{If \code{TRUE}, response scaling parameters 
       for limited dependent variables are included in the model and set free.}
+    \item{\code{auto.efa}:}{If \code{TRUE}, the necessary constraints are
+      imposed to make the (unrotated) exploratory factor analysis blocks
+      identifiable: for each block, factor variances are set to 1, factor
+      covariances are constrained to be zero, and factor loadings are
+      constrained to follow an echelon pattern.}
 }
 
 Data options:
@@ -136,6 +162,13 @@ Data options:
       \code{"pairwise"}, \code{"available.cases"} and
       \code{"doubly.robust"}. See the PML tutorial on the lavaan website for
       more information about these approaches.}
+    \item{\code{sampling.weights.normalization}:}{If \code{"none"}, the
+      sampling weights (if provided) will not be transformed. If \code{"total"},
+      the sampling weights are normalized by dividing by the total sum of
+      the weights, and multiplying again by the total sample size. 
+      If \code{"group"}, the sampling weights are normalized per group:
+      by dividing by the sum of the weights (in each group), and multiplying
+      again by the group size. The default is \code{"total"}.}
 }
 
 Data summary options:
@@ -160,7 +193,8 @@ Multiple group options:
       selected, in the order as they appear in the data.}
     \item{\code{group.equal}:}{A vector of character strings. Only used in
       a multiple group analysis. Can be one or more of the following:
-      \code{"loadings"}, \code{"intercepts"}, \code{"means"},
+      \code{"loadings"}, \code{"composite.loadings"}, 
+      \code{"intercepts"}, \code{"means"},
       \code{"thresholds"}, \code{"regressions"}, \code{"residuals"},
       \code{"residual.covariances"}, \code{"lv.variances"} or
       \code{"lv.covariances"}, specifying the pattern of equality

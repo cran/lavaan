@@ -197,6 +197,7 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     # always remove /block/level/group/op/rhs/label/exo columns
     y$op <- y$group <- y$rhs <- y$label <- y$exo <- NULL
     y$block <- y$level <- NULL
+    y$efa <- NULL
 
     # if standardized, remove std.nox column (space reasons only)
     # unless, std.all is already removed
@@ -387,7 +388,8 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                     if(length(row.idx) == 0L) next
                     # make distinction between residual and plain
                     y.names <- unique( c(lavNames(x, "eqs.y"),
-                                         lavNames(x, "ov.ind")) )
+                                         lavNames(x, "ov.ind"),
+                                         lavNames(x, "lv.ind")) )
                     PREFIX <- rep("", length(row.idx))
                     PREFIX[ x$rhs[row.idx] %in% y.names ] <- "  ."
                     m[row.idx,1] <- .makeNames(x$rhs[row.idx], x$label[row.idx],
@@ -398,7 +400,8 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                     if(length(row.idx) == 0L) next
                     # make distinction between intercepts and means
                     y.names <- unique( c(lavNames(x, "eqs.y"),
-                                         lavNames(x, "ov.ind")) )
+                                         lavNames(x, "ov.ind"),
+                                         lavNames(x, "lv.ind")) )
                     PREFIX <- rep("", length(row.idx))
                     PREFIX[ x$lhs[row.idx] %in% y.names ] <- "  ."
                         m[row.idx,1] <- .makeNames(x$lhs[row.idx], x$label[row.idx],
@@ -415,7 +418,8 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                     if(length(row.idx) == 0L) next
                     # make distinction between residual and plain
                     y.names <- unique( c(lavNames(x, "eqs.y"),
-                                         lavNames(x, "ov.ind")) )
+                                         lavNames(x, "ov.ind"),
+                                         lavNames(x, "lv.ind")) )
                     PREFIX <- rep("", length(row.idx))
                     PREFIX[ x$rhs[row.idx] %in% y.names ] <- "  ."
                     m[row.idx,1] <- .makeNames(x$rhs[row.idx], x$label[row.idx],
@@ -451,13 +455,19 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
                     colnames(M) <- colnames(m)
                     rownames(M) <- rep("", NROW(M))
                     #colnames(M)[1] <- sprintf("%-17s", paste(s, ":", sep = ""))
-                    LHS <- paste(x$lhs[row.idx], x$op[row.idx])
+                    if(is.null(x$efa)) {
+                        LHS <- paste(x$lhs[row.idx], x$op[row.idx])
+                    } else {
+                        LHS <- paste(x$lhs[row.idx], x$op[row.idx],
+                                     x$efa[row.idx])
+                    }
                     lhs.idx <- seq(1, nel*2L, 2L)
                     rhs.idx <- seq(1, nel*2L, 2L) + 1L
                     if(s == "Covariances") {
                         # make distinction between residual and plain
                         y.names <- unique( c(lavNames(x, "eqs.y"),
-                                             lavNames(x, "ov.ind")) )
+                                             lavNames(x, "ov.ind"),
+                                             lavNames(x, "lv.ind")) )
                             PREFIX <- rep("", length(row.idx))
                         PREFIX[ x$lhs[row.idx] %in% y.names ] <- "."
                     } else {
@@ -673,6 +683,7 @@ print.lavaan.fsr <- function(x, ..., nd = 3L, mm = FALSE, struc = FALSE) {
     PE <- parameterEstimates(y$STRUC.FIT, ci = FALSE,
                              remove.eq = FALSE, remove.system.eq = TRUE,
                              remove.ineq = FALSE, remove.def = FALSE,
+                             remove.nonfree = FALSE,
                              add.attributes = TRUE)
     print.lavaan.parameterEstimates(PE, ..., nd = nd)
 

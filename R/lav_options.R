@@ -53,7 +53,11 @@ lav_options_default <- function(mimic = "lavaan") {
                 conditional.x      = "default", # or FALSE?
                 fixed.x            = "default", # or FALSE?
                 orthogonal         = FALSE,
+                orthogonal.x       = FALSE,
+                orthogonal.y       = FALSE,
                 std.lv             = FALSE,
+                effect.coding      = FALSE,     # TRUE implies
+                                                # c("loadings", "intercepts")
                 parameterization   = "default",
 
                 auto.fix.first     = FALSE,
@@ -63,10 +67,39 @@ lav_options_default <- function(mimic = "lavaan") {
                 auto.cov.y         = FALSE,
                 auto.th            = FALSE,
                 auto.delta         = FALSE,
+                auto.efa           = FALSE,
+
+                # seat belts
+                safe.ov.var.ub     = FALSE,
+                save.ov.var.lb     = FALSE,
+
+                # rotation
+                rotation           = "geomin",
+                rotation.se        = "delta", # "bordered" or "delta"
+                rotation.args      = list(orthogonal     = FALSE,
+                                          row.weights    = "none",
+                                          std.ov         = FALSE,
+                                          geomin.epsilon = 0.01,
+                                          orthomax.gamma = 1,
+                                          cf.gamma       = 0,
+                                          oblimin.gamma  = 0,
+                                          target         = matrix(0,0,0),
+                                          target.mask    = matrix(0,0,0),
+                                          rstarts        = 100L,
+                                          algorithm      = "gpa",
+                                          reflect        = TRUE,
+                                          order.lv.by    = "index",
+                                          gpa.tol        = 1e-05,
+                                          tol            = 1e-08,
+                                          warn           = FALSE,
+                                          verbose        = FALSE,
+                                          jac.init.rot   = TRUE,
+                                          max.iter       = 10000L),
 
                 # full data
                 std.ov             = FALSE,
                 missing            = "default",
+                sampling.weights.normalization = "total",
 
                 # summary data
                 sample.cov.rescale = "default",
@@ -112,6 +145,7 @@ lav_options_default <- function(mimic = "lavaan") {
                 optim.init_nelder_mead = FALSE,
                 optim.var.transform    = "none",
                 optim.parscale         = "none",
+                optim.dx.tol           = 1e-04,
                 em.iter.max            = 10000L,
                 em.fx.tol              = 1e-08,
                 em.dx.tol              = 1e-04,
@@ -174,10 +208,8 @@ lav_options_set <- function(opt = NULL) {
     opt.old <- opt
     opt <- lapply(opt, function(x) { if(is.character(x)) tolower(x) else x})
     # except group,group.partial, which may contain capital letters
-    opt$group <- opt.old$group
     opt$group.label <- opt.old$group.label
     opt$group.partial <- opt.old$group.partial
-    opt$cluster <- opt.old$cluster
 
 
     # do.fit implies se="none and test="none" (unless not default)
@@ -207,12 +239,16 @@ lav_options_set <- function(opt = NULL) {
     # group.equal and group.partial
     if(opt$group.equal[1] == "none") {
         opt$group.equal <- character(0)
-    } else if(is.null(opt$group.equal) || nchar(opt$group.equal) == 0L) {
-        if(opt$mimic == "Mplus" && !is.null(opt$group)) {
+    } else if(is.null(opt$group.equal) || all(nchar(opt$group.equal) == 0L)) {
+        if(opt$mimic == "Mplus") {
             if(opt$categorical) {
                 opt$group.equal <- c("loadings", "thresholds")
             } else {
-                opt$group.equal <- c("loadings", "intercepts")
+                if(is.logical(opt$meanstructure) && !opt$meanstructure) {
+                    opt$group.equal <- "loadings"
+                } else {
+                    opt$group.equal <- c("loadings", "intercepts")
+                }
             }
         } else {
             opt$group.equal <- character(0)
@@ -220,15 +256,21 @@ lav_options_set <- function(opt = NULL) {
     } else if(length(opt$group.equal) == 0) {
         # nothing to do
     } else if(all(opt$group.equal %in% c("loadings", "intercepts", "means",
+                                         "composite.loadings",
                                          "regressions", "residuals",
                                          "residual.covariances", "thresholds",
                                          "lv.variances", "lv.covariances"))) {
         # nothing to do
     } else {
+        wrong.idx <- which(!opt$group.equal %in%
+            c("loadings", "intercepts", "means",
+              "composite.loadings", "regressions", "residuals",
+              "residual.covariances", "thresholds",
+              "lv.variances", "lv.covariances"))
         stop("lavaan ERROR: unknown value for `group.equal' argument: ",
-             opt$group.equal, "\n")
+             sQuote(opt$group.equal[wrong.idx[1L]]), "\n")
     }
-    if(is.null(opt$group.partial) || nchar(opt$group.partial) == 0L) {
+    if(is.null(opt$group.partial) || all(nchar(opt$group.partial) == 0L)) {
         opt$group.partial <- character(0)
     } else if(length(opt$group.partial) == 0) {
         # nothing to do
@@ -574,11 +616,11 @@ lav_options_set <- function(opt = NULL) {
         # by default: no meanstructure!
         if(opt$estimator == "pml") {
             opt$meanstructure <- TRUE
+        } else if(opt$mimic == "Mplus") {
+            opt$meanstructure <- TRUE
         } else {
             opt$meanstructure <- FALSE
         }
-        # unless there is a group argument? (added since 0.4-10)
-        # if(!is.null(opt$group)) opt$meanstructure <- TRUE
     } else {
         stop("lavaan ERROR: meanstructure must be TRUE, FALSE or \"default\"\n")
     }
@@ -682,6 +724,8 @@ lav_options_set <- function(opt = NULL) {
         if(opt$test != "none" && opt$se != "external") {
             if(opt$mimic == "Mplus" || opt$test == "yuan.bentler.mplus") {
                 opt$test <- "yuan.bentler.mplus"
+            } else if(opt$mimic == "EQS") {
+                opt$test <- "yuan.bentler"
             } else {
                 opt$test <- "yuan.bentler.mplus" # for now
             }
@@ -1120,6 +1164,38 @@ lav_options_set <- function(opt = NULL) {
     } else {
         stop("lavaan ERROR: argument `parameterization' should be `delta' or `theta'")
     }
+
+
+    # std.lv vs effect.coding # new in 0.6-4
+    if(is.logical(opt$effect.coding)) {
+        if(opt$effect.coding) {
+            opt$effect.coding <- c("loadings", "intercepts")
+        } else {
+            opt$effect.coding <- ""
+        }
+    } else if(length(opt$effect.coding) == 0) {
+        # nothing to do
+    } else if(all(opt$effect.coding %in% c("loadings", "intercepts",
+                                           "mg.lv.variances",
+                                           "mg.lv.means",
+                                           "mg.lv.intercepts"))) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: unknown value for ", sQuote("effect.coding"),
+             " argument: ", opt$effect.coding, "\n")
+    }
+
+    # if we use effect coding for the factor loadings, we don't need/want
+    # std.lv = TRUE
+    if("loadings" %in% opt$effect.coding) {
+        if(opt$std.lv) {
+            stop("lavaan ERROR: std.lv is set to FALSE but effect.coding contains ", dQuote("loadings"))
+            opt$std.lv <- FALSE
+        }
+        # shut off auto.fix.first
+        opt$auto.fix.first <- FALSE
+    }
+
 
     if(opt$debug) { cat("lavaan DEBUG: lavaanOptions OUT\n"); str(opt) }
 

@@ -206,8 +206,7 @@ lav_model_estimate <- function(lavmodel       = NULL,
                                   lavsamplestats = lavsamplestats,
                                   lavdata        = lavdata,
                                   lavcache       = lavcache,
-                                  verbose        = verbose,
-                                  forcePD        = FALSE)
+                                  verbose        = verbose)
 
         # only for PML: divide by N (to speed up convergence)
         if(estimator == "PML") {
@@ -269,8 +268,7 @@ lav_model_estimate <- function(lavmodel       = NULL,
                                  lavcache       = lavcache,
                                  type           = "free",
                                  group.weight   = group.weight, ### check me!!
-                                 verbose        = verbose,
-                                 forcePD        = TRUE)
+                                 verbose        = verbose)
 
         if(debug) {
             cat("Gradient function (analytical) =\n"); print(dx); cat("\n")
@@ -480,7 +478,15 @@ lav_model_estimate <- function(lavmodel       = NULL,
         iterations <- optim.out$iterations
         x          <- optim.out$par
         if(optim.out$convergence == 0) {
-            converged <- TRUE
+            # optimizer is happy, but do we have a zero gradient
+            # check 'unscaled' gradient (for now)
+            grad <- gradient_function_numerical(x)
+            if( all(abs(grad) < lavoptions$optim.dx.tol) ) {
+                converged <- TRUE
+            } else {
+                # warning here?
+                converged <- FALSE
+            }
         } else {
             converged <- FALSE
         }
@@ -523,7 +529,19 @@ lav_model_estimate <- function(lavmodel       = NULL,
         iterations <- optim.out$iterations
         x          <- optim.out$par
         if(optim.out$convergence == 0) {
-            converged <- TRUE
+            # optimizer is happy, but do we have a zero gradient
+            # check 'unscaled' gradient (for now)
+
+            # should we treat bounds differently?
+
+
+            grad <- gradient_function(x)
+            if( all(abs(grad) < lavoptions$optim.dx.tol) ) {
+                converged <- TRUE
+            } else {
+                # warning here?
+                converged <- FALSE
+            }
         } else {
             converged <- FALSE
         }

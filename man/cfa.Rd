@@ -74,7 +74,7 @@ in a multiple group analysis.}
     \code{int.ov.free = TRUE}, \code{int.lv.free = FALSE}, 
     \code{auto.fix.first = TRUE} (unless \code{std.lv = TRUE}), 
     \code{auto.fix.single = TRUE}, \code{auto.var = TRUE}, 
-    \code{auto.cov.lv.x = TRUE}, 
+    \code{auto.cov.lv.x = TRUE}, \code{auto.efa = TRUE},
     \code{auto.th = TRUE}, \code{auto.delta = TRUE},
     and \code{auto.cov.y = TRUE}.
 }
@@ -95,6 +95,6 @@ HS.model <- ' visual  =~ x1 + x2 + x3
               textual =~ x4 + x5 + x6
               speed   =~ x7 + x8 + x9 '
 
-fit <- cfa(HS.model, data=HolzingerSwineford1939)
-summary(fit, fit.measures=TRUE)
+fit <- cfa(HS.model, data = HolzingerSwineford1939)
+summary(fit, fit.measures = TRUE)
 }

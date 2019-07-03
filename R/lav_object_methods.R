@@ -9,6 +9,11 @@ short.summary <- function(object) {
     # print optim info
     lav_object_print_optim(object)
 
+    # print rotation info
+    if(.hasSlot(object@Model, "nefa") && object@Model@nefa > 0L) {
+        lav_object_print_rotation(object)
+    }
+
     # print lavdata
     lav_data_print_short(object@Data)
 
@@ -206,6 +211,9 @@ function(object, header       = TRUE,
                  modindices   = FALSE,
                  nd = 3L) {
 
+    # return object
+    res <- list()
+
     # this is to avoid partial matching of 'std' with std.nox
     standardized <- std || standardized
 
@@ -223,7 +231,9 @@ function(object, header       = TRUE,
         } else if(object@optim$npar > 0L && !object@optim$converged) {
             warning("lavaan WARNING: fit measures not available if model did not converge\n\n")
         } else {
-            print.fit.measures( fitMeasures(object, fit.measures="default") )
+            FIT <- fitMeasures(object, fit.measures="default")
+            res$FIT = FIT
+            print.fit.measures( FIT )
         }
     }
 
@@ -233,19 +243,28 @@ function(object, header       = TRUE,
                                  cov.std = cov.std,
                                  remove.eq = FALSE, remove.system.eq = TRUE,
                                  remove.ineq = FALSE, remove.def = FALSE,
+                                 remove.nonfree = FALSE,
                                  add.attributes = TRUE)
         if(standardized && std.nox) {
             #PE$std.all <- PE$std.nox
             PE$std.all <- NULL
         }
         print(PE, nd = nd)
+        res$PE <- as.data.frame(PE)
     }
 
     # modification indices?
     if(modindices) {
         cat("Modification Indices:\n\n")
-        print( modificationIndices(object, standardized=TRUE, cov.std = cov.std) )
+        MI <- modificationIndices(object, standardized=TRUE, cov.std = cov.std)
+        print( MI )
+        res$MI <- MI
     }
+
+    # return something invisibly, just for those who want this...
+    # new in 0.6-4
+    invisible(res)
+
 })
 
 
@@ -255,20 +274,22 @@ function(object, type="free", labels=TRUE) {
                             add.labels = labels, add.class = TRUE)
 })
 
-standardizedSolution <- standardizedsolution <- function(object,
-                                                         type = "std.all",
-                                                         se = TRUE,
-                                                         zstat = TRUE,
-                                                         pvalue = TRUE,
-                                                         ci = TRUE,
-                                                         level = 0.95,
-                                                         cov.std = TRUE,
-                                                         remove.eq = TRUE,
-                                                         remove.ineq = TRUE,
-                                                         remove.def = FALSE,
-                                                         partable = NULL,
-                                                         GLIST = NULL,
-                                                         est   = NULL) {
+standardizedSolution <-
+    standardizedsolution <- function(object,
+                                     type = "std.all",
+                                     se = TRUE,
+                                     zstat = TRUE,
+                                     pvalue = TRUE,
+                                     ci = TRUE,
+                                     level = 0.95,
+                                     cov.std = TRUE,
+                                     remove.eq = TRUE,
+                                     remove.ineq = TRUE,
+                                     remove.def = FALSE,
+                                     partable = NULL,
+                                     GLIST = NULL,
+                                     est   = NULL,
+                                     add.attributes = FALSE) {
 
     stopifnot(type %in% c("std.all", "std.lv", "std.nox"))
 
@@ -291,7 +312,7 @@ standardizedSolution <- standardizedsolution <- function(object,
     } else {
         PARTABLE <- partable
     }
-    LIST <- PARTABLE[,c("lhs", "op", "rhs")]
+    LIST <- PARTABLE[,c("lhs", "op", "rhs", "exo")]
     if(!is.null(PARTABLE$group)) {
         LIST$group <- PARTABLE$group
     }
@@ -356,9 +377,9 @@ standardizedSolution <- standardizedsolution <- function(object,
         a <- (1 - level)/2; a <- c(a, 1 - a)
         fac <- qnorm(a)
         #if(object@Options$se != "bootstrap") {
-            ci <- LIST$est + LIST$se %o% fac
+            ci <- LIST$est.std + LIST$se %o% fac
         #} else {
-        #    ci <- rep(as.numeric(NA), length(LIST$est)) + LIST$se %o% fac
+        #    ci <- rep(as.numeric(NA), length(LIST$est.std)) + LIST$se %o% fac
         #}
 
         LIST$ci.lower <- ci[,1]; LIST$ci.upper <- ci[,2]
@@ -377,7 +398,7 @@ standardizedSolution <- standardizedsolution <- function(object,
     }
     # remove <> rows?
     if(remove.ineq) {
-        ineq.idx <- which(LIST$op == "<" || LIST$op == ">")
+        ineq.idx <- which(LIST$op %in% c("<",">"))
         if(length(ineq.idx) > 0L) {
             LIST <- LIST[-ineq.idx,]
         }
@@ -390,8 +411,16 @@ standardizedSolution <- standardizedsolution <- function(object,
         }
     }
 
-    # always add attributes (for now)
-    class(LIST) <- c("lavaan.data.frame", "data.frame")
+    if(add.attributes) {
+        class(LIST) <- c("lavaan.parameterEstimates", "lavaan.data.frame",
+                         "data.frame")
+        # LIST$exo is needed for printing
+        attr(LIST, "header") <- FALSE
+    } else {
+        LIST$exo <- NULL
+        class(LIST) <- c("lavaan.data.frame", "data.frame")
+    }
+
     LIST
 }
 
@@ -409,6 +438,7 @@ parameterEstimates <- parameterestimates <- function(object,
                                                      remove.eq = TRUE,
                                                      remove.ineq = TRUE,
                                                      remove.def = FALSE,
+                                                     remove.nonfree = FALSE,
                                                      rsquare = FALSE,
                                                      add.attributes = FALSE,
                                                      header = TRUE) {
@@ -456,7 +486,7 @@ parameterEstimates <- parameterestimates <- function(object,
     }
 
     PARTABLE <- as.data.frame(object@ParTable, stringsAsFactors = FALSE)
-    LIST <- PARTABLE[,c("lhs", "op", "rhs")]
+    LIST <- PARTABLE[,c("lhs", "op", "rhs", "free")]
     if(!is.null(PARTABLE$user)) {
         LIST$user <- PARTABLE$user
     }
@@ -474,6 +504,9 @@ parameterEstimates <- parameterestimates <- function(object,
         LIST$group <- PARTABLE$group
     } else {
         LIST$group <- rep(1L, length(LIST$lhs))
+    }
+    if(!is.null(PARTABLE$efa)) {
+        LIST$efa <- PARTABLE$efa
     }
     if(!is.null(PARTABLE$label)) {
         LIST$label <- PARTABLE$label
@@ -762,6 +795,17 @@ parameterEstimates <- parameterestimates <- function(object,
     # if no user-defined labels, remove label column
     if(sum(nchar(object@ParTable$label)) == 0L) LIST$label <- NULL
 
+    # remove non-free paramters? (but keep ==, >, < and :=)
+    if(remove.nonfree) {
+        nonfree.idx <- which( LIST$free == 0L &
+                              !LIST$op %in% c("==", ">", "<", ":=") )
+        if(length(nonfree.idx) > 0L) {
+            LIST <- LIST[-nonfree.idx,]
+        }
+    }
+    # remove 'free' column
+    LIST$free <- NULL
+
     # remove == rows?
     if(remove.eq) {
         eq.idx <- which(LIST$op == "==" & LIST$user == 1L)
@@ -777,7 +821,7 @@ parameterEstimates <- parameterestimates <- function(object,
     }
     # remove <> rows?
     if(remove.ineq) {
-        ineq.idx <- which(LIST$op == "<" || LIST$op == ">")
+        ineq.idx <- which(LIST$op %in% c("<", ">"))
         if(length(ineq.idx) > 0L) {
             LIST <- LIST[-ineq.idx,]
         }
@@ -878,7 +922,7 @@ function(object, type = "moments", labels=TRUE) {
 
 
 setMethod("vcov", "lavaan",
-function(object, labels = TRUE, remove.duplicated = FALSE) {
+function(object, type = "free", labels = TRUE, remove.duplicated = FALSE) {
 
     # check for convergence first!
     if(object@optim$npar > 0L && !object@optim$converged)
@@ -888,10 +932,22 @@ function(object, labels = TRUE, remove.duplicated = FALSE) {
         stop("lavaan ERROR: vcov not available if se=\"none\"")
     }
 
-    VarCov <- lav_object_inspect_vcov(object,
-                                      add.labels = labels,
-                                      add.class = TRUE,
-                                      remove.duplicated = remove.duplicated)
+    if(type == "user" || type == "joint" || type == "all" || type == "full" ||
+       type == "complete") {
+        if(remove.duplicated) {
+            stop("lavaan ERROR: argument \"remove.duplicated\" not supported if type = \"user\"")
+        }
+        VarCov <- lav_object_inspect_vcov_def(object, joint = TRUE,
+                                          add.labels = labels,
+                                          add.class = TRUE)
+    } else if(type == "free") {
+        VarCov <- lav_object_inspect_vcov(object,
+                                          add.labels = labels,
+                                          add.class = TRUE,
+                                          remove.duplicated = remove.duplicated)
+    } else {
+        stop("lavaan ERROR: type argument should be \"user\" or \"free\"")
+    }
 
     VarCov
 })

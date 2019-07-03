@@ -1,6 +1,7 @@
-lav_standardize_lv_x <- function(x, lavobject, partable = NULL, cov.std = TRUE) {
+lav_standardize_lv_x <- function(x, lavobject, partable = NULL, cov.std = TRUE,
+                                 rotation = FALSE) {
     # embed x in est
-    est <- lav_object_inspect_est(lavobject)
+    est <- lav_object_inspect_est(lavobject, unrotated = rotation)
     free.idx <- which(lavobject@ParTable$free > 0L)
     stopifnot(length(x) == length(free.idx))
     est[free.idx] <- x
@@ -9,13 +10,28 @@ lav_standardize_lv_x <- function(x, lavobject, partable = NULL, cov.std = TRUE) 
     lavmodel <- lav_model_set_parameters(lavmodel = lavobject@Model, x = x)
     GLIST <- lavmodel@GLIST
 
-    lav_standardize_lv(lavobject = lavobject, partable = partable, est = est,
-                       GLIST = GLIST, cov.std = cov.std)
+    x.stand.user <- lav_standardize_lv(lavobject = lavobject,
+                                       partable = partable, est = est,
+                                       GLIST = GLIST, cov.std = cov.std)
+
+    if(rotation) {
+        x.stand.free <- x.stand.user[free.idx]
+        x.rot <- lav_model_efa_rotate_x(x = x.stand.free,
+                     lavmodel = lavobject@Model,
+                     lavoptions = lavobject@Options,
+                     init.rot = FALSE, # standardized!
+                     extra = FALSE,
+                     type = "free")
+        x.stand.user[free.idx] <- x.rot
+    }
+
+    x.stand.user
 }
 
-lav_standardize_all_x <- function(x, lavobject, partable = NULL, cov.std = TRUE) {
+lav_standardize_all_x <- function(x, lavobject, partable = NULL, cov.std = TRUE,
+                                  rotation = FALSE) {
     # embed x in est
-    est <- lav_object_inspect_est(lavobject)
+    est <- lav_object_inspect_est(lavobject, unrotated = rotation)
     free.idx <- which(lavobject@ParTable$free > 0L)
     stopifnot(length(x) == length(free.idx))
     est[free.idx] <- x
@@ -24,13 +40,30 @@ lav_standardize_all_x <- function(x, lavobject, partable = NULL, cov.std = TRUE)
     lavmodel <- lav_model_set_parameters(lavmodel = lavobject@Model, x = x)
     GLIST <- lavmodel@GLIST
 
-    lav_standardize_all(lavobject = lavobject, partable = partable, est = est,
-                        est.std = NULL, GLIST = GLIST, cov.std = cov.std)
+    x.stand.user <- lav_standardize_all(lavobject = lavobject,
+                                        partable = partable, est = est,
+                                        est.std = NULL, GLIST = GLIST,
+                                        cov.std = cov.std)
+
+    if(rotation) {
+        x.stand.free <- x.stand.user[free.idx]
+        x.rot <- lav_model_efa_rotate_x(x = x.stand.free,
+                     lavmodel = lavobject@Model,
+                     lavoptions = lavobject@Options,
+                     init.rot = FALSE, # standardized!
+                     extra = FALSE,
+                     type = "free")
+        x.stand.user[free.idx] <- x.rot
+    }
+
+
+    x.stand.user
 }
 
-lav_standardize_all_nox_x <- function(x, lavobject, partable = NULL, cov.std = TRUE) {
+lav_standardize_all_nox_x <- function(x, lavobject, partable = NULL,
+                                      cov.std = TRUE, rotation = FALSE) {
     # embed x in est
-    est <- lav_object_inspect_est(lavobject)
+    est <- lav_object_inspect_est(lavobject, unrotated = rotation)
     free.idx <- which(lavobject@ParTable$free > 0L)
     stopifnot(length(x) == length(free.idx))
     est[free.idx] <- x
@@ -39,8 +72,23 @@ lav_standardize_all_nox_x <- function(x, lavobject, partable = NULL, cov.std = T
     lavmodel <- lav_model_set_parameters(lavmodel = lavobject@Model, x = x)
     GLIST <- lavmodel@GLIST
 
-    lav_standardize_all_nox(lavobject = lavobject, partable = partable, est = est,
-                            est.std = NULL, GLIST = GLIST, cov.std = cov.std)
+    x.stand.user <- lav_standardize_all_nox(lavobject = lavobject,
+                                            partable = partable, est = est,
+                                            est.std = NULL, GLIST = GLIST,
+                                            cov.std = cov.std)
+
+    if(rotation) {
+        x.stand.free <- x.stand.user[free.idx]
+        x.rot <- lav_model_efa_rotate_x(x = x.stand.free,
+                     lavmodel = lavobject@Model,
+                     lavoptions = lavobject@Options,
+                     init.rot = FALSE, # standardized!
+                     extra = FALSE,
+                     type = "free")
+        x.stand.user[free.idx] <- x.rot
+    }
+
+    x.stand.user
 }
 
 lav_unstandardize_ov_x <- function(x, lavobject) {
@@ -256,7 +304,23 @@ lav_standardize_all <- function(lavobject = NULL,
             est <- lav_object_inspect_est(lavobject)
         }
         if(lavmodel@conditional.x) {
-          cov.x <- lavobject@SampleStats@cov.x
+            if(is.null(cov.x)) {
+                # try SampleStats slot
+                if("SampleStats" %in% slotNames(lavobject)) {
+                    cov.x <- lavobject@SampleStats@cov.x
+                } else {
+                    # perhaps lavaanList object
+                    # extract it from GLIST per block
+                    cov.x <- vector("list", length = lavmodel@nblocks)
+                    for(b in seq_len(lavmodel@nblocks)) {
+                        # which mm belong to block b?
+                        mm.in.block <- ( seq_len(lavmodel@nmat[b]) +
+                                             cumsum(c(0, lavmodel@nmat))[b] )
+                        MLIST <- lavmodel@GLIST[mm.in.block]
+                        cov.x[[b]] <- MLIST[["cov.x"]]
+                    }
+                }
+            }
         }
     }
 
@@ -470,7 +534,23 @@ lav_standardize_all_nox <- function(lavobject = NULL,
             est <- lav_object_inspect_est(lavobject)
         }
         if(lavmodel@conditional.x) {
-          cov.x <- lavobject@SampleStats@cov.x
+            if(is.null(cov.x)) {
+                # try SampleStats slot
+                if("SampleStats" %in% slotNames(lavobject)) {
+                    cov.x <- lavobject@SampleStats@cov.x
+                } else {
+                    # perhaps lavaanList object
+                    # extract it from GLIST per block
+                    cov.x <- vector("list", length = lavmodel@nblocks)
+                    for(b in seq_len(lavmodel@nblocks)) {
+                        # which mm belong to block b?
+                        mm.in.block <- ( seq_len(lavmodel@nmat[b]) +
+                                             cumsum(c(0, lavmodel@nmat))[b] )
+                        MLIST <- lavmodel@GLIST[mm.in.block]
+                        cov.x[[b]] <- MLIST[["cov.x"]]
+                    }
+                }
+            }
         }
     }
 
