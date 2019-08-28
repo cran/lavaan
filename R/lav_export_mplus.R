@@ -96,8 +96,9 @@ lav2mplus <- function(lav, group.label=NULL) {
     if(ngroups == 1L) {
         body <- lav_one_group(lav)
     } else {
+        group.values <- lav_partable_group_values(lav)
         # group 1
-        body <- lav_one_group(lav[lav$group == 1,])
+        body <- lav_one_group(lav[lav$group == group.values[1],])
 
         if(is.null(group.label) || length(group.label) == 0L) {
             group.label <- paste(1:ngroups)
@@ -106,7 +107,7 @@ lav2mplus <- function(lav, group.label=NULL) {
         for(g in 2:ngroups) {
             body <- paste(body,
                           paste("\nMODEL ", group.label[g], ":\n", sep=""),
-                          lav_one_group(lav[lav$group == g,]),
+                          lav_one_group(lav[lav$group == group.values[g],]),
                           sep="")
         }
     }
@@ -153,6 +154,18 @@ lav_mplus_estimator <- function(object) {
     estimator <- object@Options$estimator
     if(estimator == "DWLS") {
         estimator <- "WLS"
+    }
+
+    # only 1 argument for 'test' is allowed
+    if(length(object@Options$test) > 1L) {
+        standard.idx <- which(object@Options$test == "standard")
+        if(length(standard.idx) > 1L) {
+            object@Options$test <- object@Options$test[-standard.idx]
+        }
+        if(length(object@Options$test) > 1L) {
+            warning("lavaan WARNING: only first (non-standard) test will be used")
+            object@Options$test <- object@Options$test[1]
+        }
     }
 
     if(estimator == "ML") {

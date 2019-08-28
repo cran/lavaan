@@ -137,6 +137,7 @@ Information about the data:
         the data.frame (if any).}
     \item{\code{"ngroups"}:}{Integer. The number of groups.}
     \item{\code{"group.label"}:}{A character vector. The group labels.}
+    \item{\code{"level.label"}:}{A character vector. The level labels.}
     \item{\code{"cluster"}:}{A character vector. The cluster variable(s)
         in the data.frame (if any).}
     \item{\code{"nlevels"}:}{Integer. The number of levels.}
@@ -362,6 +363,7 @@ Variance covariance matrix of the model parameters:
 Miscellaneous:
 
 \describe{
+    \item{\code{"coef.boot"}:}{Matrix containing estimated model parameters for         for each bootstrap sample. Only relevant when bootstrapping was used.}
     \item{\code{"UGamma"}:}{Matrix containing the product of 'U' and 'Gamma'
         matrices as used by the Satorra-Bentler correction. The trace of
         this matrix, divided by the degrees of freedom, gives the scaling
@@ -385,6 +387,10 @@ Miscellaneous:
         lavaan subprocedures.}
     \item{\code{"test"}:}{List. All available information regarding the
         (goodness-of-fit) test statistic(s).}
+    \item{\code{"baseline.test"}:}{List. All available information regarding the
+        (goodness-of-fit) test statistic(s) of the baseline model.}
+    \item{\code{"baseline.partable"}:}{Data.frame. The parameter table of
+        the (internal) baseline model.}
     \item{\code{"post.check"}:}{Post-fitting check if the solution is
         admissible. A warning is raised if negative variances are found, or if
         either \code{lavInspect(fit, "cov.lv")} or

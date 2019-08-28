@@ -116,11 +116,15 @@ lav_mvnorm_cluster_2l2implied <- function(Lp,
         mu.b <- mu.y
         mu.w.tilde <- numeric( p.tilde )
         mu.w.tilde[ ov.idx[[1]] ] <- mu.y
-        if(length(within.idx) > 0L) {
-            mu.w.tilde[  -within.idx ] <- 0
-        } else {
-            mu.w.tilde[] <- 0
-        }
+
+        # NO NEED TO SET THIS TO ZERO!
+        # otherwise, we get non-symmetric Hessian!! 0.6-5
+
+        #if(length(within.idx) > 0L) {
+        #    mu.w.tilde[  -within.idx ] <- 0
+        #} else {
+        #    mu.w.tilde[] <- 0
+        #}
         mu.w <- mu.w.tilde[ ov.idx[[1]] ]
     }
 
@@ -765,7 +769,19 @@ lav_mvnorm_cluster_scores_2l <- function(Y1           = NULL,
                                              drop = FALSE ] )
         Sigma.B <- Sigma.B.tilde[ , col.idx, drop = FALSE ]
     } else {
-        Sigma.B <- G.Sigma.b
+        p.tilde.star <- p.tilde*(p.tilde+1)/2
+        B.tilde <- lav_matrix_vech_reverse(seq_len(p.tilde.star))
+
+        Sigma.B.tilde <- matrix(0, nclusters, p.tilde.star)
+
+        col.idx <- lav_matrix_vech( B.tilde[ ov.idx[[1]], ov.idx[[1]],
+                                             drop = FALSE ] )
+        Sigma.B.tilde[ , col.idx ] <- G.Sigma.b
+
+        col.idx <- lav_matrix_vech( B.tilde[ ov.idx[[2]], ov.idx[[2]],
+                                             drop = FALSE ] )
+        Sigma.B <- Sigma.B.tilde[ , col.idx, drop = FALSE ]
+        #Sigma.B <- G.Sigma.b
     }
 
     SCORES <- cbind(Mu.W, Sigma.W, Mu.B, Sigma.B)
@@ -997,6 +1013,14 @@ lav_mvnorm_cluster_information_expected_delta <- function(Lp     = NULL,
     Delta.W.tilde.Mu[ov.idx[[1]],] <- Delta.W[1:nw,]
     Delta.B.tilde.Mu[ov.idx[[2]],] <- Delta.B[1:nb,]
 
+    # correct Delta to reflect Mu.W[ both.idx ] is added to Mu.B[ both.idx ]
+    # changed in 0.6-5
+    Delta.B.tilde.Mu[ Lp$both.idx[[2]], ] <-
+        ( Delta.B.tilde.Mu[ Lp$both.idx[[2]], ] +
+          Delta.W.tilde.Mu[ Lp$both.idx[[2]], ] )
+    Delta.W.tilde.Mu[Lp$both.idx[[2]], ] <- 0
+
+
     B.tilde <- lav_matrix_vech_reverse(seq_len(p.tilde.star))
     w.idx <- lav_matrix_vech( B.tilde[ ov.idx[[1]], ov.idx[[1]], drop = FALSE] )
     b.idx <- lav_matrix_vech( B.tilde[ ov.idx[[2]], ov.idx[[2]], drop = FALSE] )
@@ -1047,15 +1071,23 @@ lav_mvnorm_cluster_information_expected_delta <- function(Lp     = NULL,
         information.j <- information.j + n.s[clz]*info.j
     }
 
-    Sigma.W.inv <- lav_matrix_symmetric_inverse(S = Sigma.W, logdet = FALSE,
+
+    Sigma.W.inv <- lav_matrix_symmetric_inverse(S = sigma.w, logdet = FALSE,
                                                 Sinv.method = Sinv.method)
     I11.w <- Sigma.W.inv
     I22.w <- 0.5 * lav_matrix_duplication_pre_post(Sigma.W.inv %x% Sigma.W.inv)
     I.w <- lav_matrix_bdiag(I11.w, I22.w)
+
+    # force zero for means both.idx in within part
+    # changed in 0.6-5
+    I.w[Lp$both.idx[[2]],] <- 0
+    I.w[,Lp$both.idx[[2]]] <- 0
+
     information.w <- (nobs - nclusters) * ( t(Delta.W) %*% I.w %*% Delta.W )
 
     # unit information
     information <- 1/Lp$nclusters[[2]] * (information.w + information.j)
+
 
     information
 }
@@ -1380,6 +1412,8 @@ lav_mvnorm_cluster_em_h0 <- function(lavsamplestats = NULL,
 
         # fit two-group model
         local.partable <- lavpartable
+        # if a group column exists, delete it (it will be overriden anyway)
+        local.partable$group <- NULL
         level.idx <- which(names(local.partable) == "level")
         names(local.partable)[level.idx] <- "group"
         local.partable$est <- NULL

@@ -304,7 +304,8 @@ Estimation options:
      If \code{"boot"} or \code{"bootstrap"} or \code{"Bollen.Stine"}, the 
      Bollen-Stine bootstrap is used to compute the bootstrap probability value 
      of the test statistic. If \code{"default"}, the value depends on the
-     values of other arguments.}
+     values of other arguments. From version 0.6-5 onwards, the test argument
+     accepts a vector, and therefore multiple tests can be requested.}
    \item{\code{bootstrap}:}{Number of bootstrap draws, if bootstrapping is 
      used.}
    \item{\code{do.fit}:}{If \code{FALSE}, the model is not fit, and the 
@@ -325,6 +326,11 @@ Optimization options:
       the available options are \code{"nlminb"} (the default), \code{"BFGS"} and
       \code{"L-BFGS-B"}. For constrained
       optimization, the only available option is \code{"nlminb.constr"}.}
+    \item{\code{optim.force.converged}:}{Logical. If \code{TRUE}, pretend
+      the model has converged, no matter what.}
+    \item{\code{optim.dx.tol}}{Numeric. Tolerance used for checking if
+      the elements of the (unscaled) gradient are all zero (in absolute 
+      value). The default value is 0.001.}
 }
 
 Categorical estimation options:

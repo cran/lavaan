@@ -5,7 +5,7 @@
 ##
 ## perhaps we should add 0.0005 or something to avoid this?
 
-print.lavaan.data.frame <- function(x, ..., nd=3) {
+print.lavaan.data.frame <- function(x, ..., nd = 3L) {
 
     ROW.NAMES <- rownames(x)
     y <- as.data.frame(lapply(x, function(x) {
@@ -17,6 +17,11 @@ print.lavaan.data.frame <- function(x, ..., nd=3) {
     }
 
     print(y, ...)
+
+    if(!is.null(attr(x, "footer"))) {
+        cat("\n", attr(x, "footer"), "\n\n", sep = "")
+    }
+
     invisible(x)
 }
 
@@ -40,7 +45,7 @@ print.lavaan.list <- function(x, ...) {
 
 
 # prints only lower triangle of a symmetric matrix
-print.lavaan.matrix.symmetric <- function(x, ..., nd=3) {
+print.lavaan.matrix.symmetric <- function(x, ..., nd = 3L) {
     # print only lower triangle of a symmetric matrix
     # this function was inspired by the `print.correlation' function
     # in package nlme
@@ -48,23 +53,23 @@ print.lavaan.matrix.symmetric <- function(x, ..., nd=3) {
     ll <- lower.tri(x, diag=TRUE)
     y[ll] <- format(round(x[ll], digits=nd)); y[!ll] <- ""
     if (!is.null(colnames(x))) {
-      colnames(y) <- abbreviate(colnames(x), minlength = nd + 3)
+      colnames(y) <- abbreviate(colnames(x), minlength = nd + 3L)
     }
     print(y, ..., quote = FALSE)
     invisible(x)
 }
 
 
-print.lavaan.matrix <- function(x, ..., nd=3) {
+print.lavaan.matrix <- function(x, ..., nd = 3L) {
     y <- unclass(x)
     if (!is.null(colnames(x))) {
-      colnames(y) <- abbreviate(colnames(x), minlength = nd + 3)
+      colnames(y) <- abbreviate(colnames(x), minlength = nd + 3L)
     }
     print( round(y, nd), ... )
     invisible(x)
 }
 
-print.lavaan.vector <- function(x, ..., nd=3) {
+print.lavaan.vector <- function(x, ..., nd = 3L) {
     y <- unclass(x)
     #if(!is.null(names(x))) {
     #    names(y) <- abbreviate(names(x), minlength = nd + 3)
@@ -81,8 +86,8 @@ print.lavaan.character <- function(x) {
 print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
 
     # format for numeric values
-    num.format  <- paste("%", max(8, nd + 5), ".", nd, "f", sep = "")
-    char.format <- paste("%", max(8, nd + 5), "s", sep="")
+    num.format  <- paste("%", max(8L, nd + 5L), ".", nd, "f", sep = "")
+    char.format <- paste("%", max(8L, nd + 5L), "s", sep = "")
 
     # output sections
     GSECTIONS <- c("Latent Variables",
@@ -100,6 +105,9 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
 
     # header?
     header <- attr(x, "header")
+    if(is.null(header)) {
+        header <- FALSE
+    }
 
     if(header) {
         cat("\nParameter Estimates:\n\n")
@@ -110,55 +118,58 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
         # 3. bootstrap requested/successful draws
         if(!is.null(x$se)) {
 
+            # container
+            c1 <- c2 <- character(0L)
+
             if(attr(x, "se") != "bootstrap") {
                 # 1.
-                t0.txt <- sprintf("  %-35s", "Information")
+                c1 <- c(c1, "Information")
                 tmp.txt <- attr(x, "information")
-                t1.txt <- sprintf("  %15s",
-                                  paste(toupper(substring(tmp.txt,1,1)),
-                                  substring(tmp.txt,2), sep=""))
-                cat(t0.txt, t1.txt, "\n", sep="")
+                c2 <- c(c2, paste(toupper(substring(tmp.txt, 1, 1)),
+                                  substring(tmp.txt, 2), sep = ""))
 
                 # 2.
                 if(attr(x, "information") %in% c("expected", "first.order") ||
                    attr(x, "observed.information") == "h1") {
-                    t0.txt <- sprintf("  %-35s",
-                                      "Information saturated (h1) model")
+                    c1 <- c(c1, "Information saturated (h1) model")
                     tmp.txt <- attr(x, "h1.information")
-                    t1.txt <- sprintf("  %15s",
-                                      paste(toupper(substring(tmp.txt,1,1)),
-                                            substring(tmp.txt,2), sep=""))
-                    cat(t0.txt, t1.txt, "\n", sep="")
+                    c2 <- c(c2, paste(toupper(substring(tmp.txt,1,1)),
+                                      substring(tmp.txt, 2), sep = ""))
                 }
                 if(attr(x, "information") == "observed") {
-                    t0.txt <- sprintf("  %-35s",
-                                      "Observed information based on")
+                    c1 <- c(c1, "Observed information based on")
                     tmp.txt <- attr(x, "observed.information")
-                    t1.txt <- sprintf("  %15s",
-                                      paste(toupper(substring(tmp.txt,1,1)),
-                                      substring(tmp.txt,2), sep=""))
-                    cat(t0.txt, t1.txt, "\n", sep="")
+                    c2 <- c(c2, paste(toupper(substring(tmp.txt, 1, 1)),
+                                      substring(tmp.txt, 2), sep = ""))
                 }
             } # no bootstrap
 
             # 3.
-            t0.txt <- sprintf("  %-31s", "Standard Errors")
+            c1 <- c(c1, "Standard errors")
             tmp.txt <- attr(x, "se")
-            t1.txt <- sprintf("  %19s", paste(toupper(substring(tmp.txt,1,1)),
-                                              substring(tmp.txt,2), sep=""))
-            cat(t0.txt, t1.txt, "\n", sep="")
+            c2 <- c(c2, paste(toupper(substring(tmp.txt, 1, 1)),
+                                      substring(tmp.txt, 2), sep = ""))
 
             # 4.
             if(attr(x, "se") == "bootstrap" && !is.null(attr(x, "bootstrap"))) {
-                t0.txt <-
-                    sprintf("  %-40s", "Number of requested bootstrap draws")
-                t1.txt <- sprintf("  %10i", attr(x, "bootstrap"))
-                cat(t0.txt, t1.txt, "\n", sep="")
-                t0.txt <-
-                    sprintf("  %-40s", "Number of successful bootstrap draws")
-                t1.txt <- sprintf("  %10i", attr(x, "bootstrap.successful"))
-                cat(t0.txt, t1.txt, "\n", sep="")
+                c1 <- c(c1, "Number of requested bootstrap draws")
+                c2 <- c(c2, attr(x, "bootstrap"))
+                c1 <- c(c1, "Number of successful bootstrap draws")
+                c2 <- c(c2, attr(x, "bootstrap.successful"))
             }
+
+            # format c1/c2
+            c1 <- format(c1, width = 38L)
+            c2 <- format(c2,
+                   width = 13L + max(0, (nd - 3L)) * 4L, justify = "right")
+
+            # create character matrix
+            M <- cbind(c1, c2, deparse.level = 0)
+            colnames(M) <- rep("",  ncol(M))
+            rownames(M) <- rep(" ", nrow(M))
+
+            # print
+            write.table(M, row.names = TRUE, col.names = FALSE, quote = FALSE)
         }
     }
 
@@ -655,14 +666,14 @@ print.lavaan.fsr <- function(x, ..., nd = 3L, mm = FALSE, struc = FALSE) {
 
             # fit measures?
             b.options <- lavInspect(y$MM.FIT[[b]], "options")
-            if(b.options$test != "none") {
+            if(!(length(b.options$test) == 1L && b.options$test == "none")) {
                 cat("\n")
                 print(fitMeasures(y$MM.FIT[[b]], c("chisq", "df", "pvalue", "cfi", "rmsea", "srmr")))
             }
 
             # parameter estimates
-            PE <- parameterEstimates(y$MM.FIT[[b]], add.attributes = TRUE,
-                                     ci = FALSE)
+            PE <- parameterEstimates(y$MM.FIT[[b]], ci = FALSE,
+                                     output = "text", header = TRUE)
             print.lavaan.parameterEstimates(PE, ..., nd = nd)
             cat("\n")
         }
@@ -674,17 +685,17 @@ print.lavaan.fsr <- function(x, ..., nd = 3L, mm = FALSE, struc = FALSE) {
         cat("\n")
         #print.lavaan.parameterEstimates(y$PE, ..., nd = nd)
 
-        short.summary(y$STRUC.FIT)
+        lav_object_print_short_summary(y$STRUC.FIT)
         FIT <- fitMeasures(y$STRUC.FIT, fit.measures="default")
         if(FIT["df"] > 0) {
-            print.fit.measures( FIT )
+            print.lavaan.fitMeasures( FIT )
         }
     }
     PE <- parameterEstimates(y$STRUC.FIT, ci = FALSE,
                              remove.eq = FALSE, remove.system.eq = TRUE,
                              remove.ineq = FALSE, remove.def = FALSE,
                              remove.nonfree = FALSE,
-                             add.attributes = TRUE)
+                             output = "text", header = TRUE)
     print.lavaan.parameterEstimates(PE, ..., nd = nd)
 
     invisible(y)

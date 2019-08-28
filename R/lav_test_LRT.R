@@ -55,7 +55,7 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                           "Pr(>Chisq)" = c(NA, object@test[[1L]]$pvalue),
                           row.names = c("Saturated", "Model"),
                           check.names = FALSE)
-        attr(val, "heading") <- "Chi Square Test Statistic (unscaled)\n"
+        attr(val, "heading") <- "Chi-Squared Test Statistic (unscaled)\n"
         class(val) <- c("anova", class(val))
         return(val)
     }
@@ -273,11 +273,18 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
     if(type == "chisq") {
 
         if(scaled) {
+            txt <- paste("The ", dQuote("Chisq"), " column contains standard ",
+                      "test statistics, not the robust test that should be ",
+                      "reported per model. A robust difference test is a ",
+                      "function of two standard (not robust) statistics.",
+                      sep = "")
             attr(val, "heading") <-
-                paste("Scaled Chi Square Difference Test (method = \"",
-                      method, "\")\n", sep="")
+                paste("Scaled Chi-Squared Difference Test (method = ",
+                      dQuote(method), ")\n\n",
+                      lav_txt2message(txt, header = "lavaan NOTE:",
+                                           footer = " "), sep = "")
         } else {
-            attr(val, "heading") <- "Chi Square Difference Test\n"
+            attr(val, "heading") <- "Chi-Squared Difference Test\n"
         }
     } else if(type == "cf") {
         colnames(val)[c(3,4)] <- c("Cf", "Cf diff")

@@ -38,25 +38,30 @@ lav_lavaanList_summary <- function(object,
                                    print     = TRUE,
                                    nd = 3L) {
 
-    output <- list()
+    out <- list()
 
     if(header) {
-        output$header <- lav_lavaanList_short_summary(object, print = print)
+        out$header <- lav_lavaanList_short_summary(object, print = print)
 
         #if(print) {
         #    # show only basic information
         #    lav_lavaanList_short_summary(object)
         #}
     }
+    if(print) {
+        output <- "text"
+    } else {
+        output <- "data.frame"
+    }
 
     if(estimates && "partable" %in% object@meta$store.slots) {
         pe <- parameterEstimates(object, se = FALSE,
-                                 remove.system.eq = TRUE, remove.eq = TRUE,
-                                 remove.ineq = TRUE, remove.def = FALSE,
+                                 remove.system.eq = FALSE, remove.eq = FALSE,
+                                 remove.ineq = FALSE, remove.def = FALSE,
                                  remove.nonfree = FALSE,
                                  # zstat = FALSE, pvalue = FALSE, ci = FALSE,
                                  standardized = FALSE,
-                                 add.attributes = print)
+                                 output = output)
 
         # scenario 1: simulation
         if(!is.null(object@meta$lavSimulate)) {
@@ -143,7 +148,7 @@ lav_lavaanList_summary <- function(object,
             names(pe) <- NAMES
         }
 
-        # scenarior 5: just a bunch of fits, using different datasets
+        # scenario 5: just a bunch of fits, using different datasets
         else {
             # print the average value for est
             EST <- lav_lavaanList_partable(object, what = "est", type = "all")
@@ -152,7 +157,13 @@ lav_lavaanList_summary <- function(object,
             # more?
         }
 
-        output$pe <- pe
+        # remove ==,<,>
+        rm.idx <- which(pe$op %in% c("==", "<", ">"))
+        if(length(rm.idx) > 0L) {
+            pe <- pe[-rm.idx,]
+        }
+
+        out$pe <- pe
 
         if(print) {
             # print pe?
@@ -163,7 +174,7 @@ lav_lavaanList_summary <- function(object,
         print(object@meta$store.slots)
     }
 
-    invisible(output)
+    invisible(out)
 }
 
 setMethod("coef", "lavaanList",

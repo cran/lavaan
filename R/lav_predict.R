@@ -38,15 +38,34 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
     if(type %in% c("ov","yhat"))
         type <- "yhat"
 
+
+    # append.data? check level
+    if(append.data && level > 1L) {
+        warning("lavaan WARNING: append.data not available if level > 1L")
+        append.data <- FALSE
+    }
+
     # se?
-    if (acov != "none") se <- acov # ACOV implies SE
+    if (acov != "none") {
+        se <- acov # ACOV implies SE
+    }
     if(se != "none") {
         if(is.logical(se) && se) {
             se <- "standard"
-            if (acov != "none") acov <- se # reverse-imply upstream
+            if (acov != "none") {
+                acov <- se # reverse-imply upstream
+            }
         }
         if(type != "lv") {
             stop("lavaan ERROR: standard errors only available if type = \"lv\"")
+        }
+        if(lavInspect(object, "categorical")) {
+            se <- acov <- "none"
+            warning("lavaan WARNING: standard errors not available (yet) for non-normal data")
+        }
+        if(lavdata@missing %in% c("ml", "ml.x")) {
+            se <- acov <- "none"
+            warning("lavaan WARNING: standard errors not available (yet) for missing data + fiml")
         }
     }
 
@@ -104,7 +123,9 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
         # extract se here
         if(se != "none") {
             SE <- attr(out, "se")
-            if (acov != "none") ACOV <- attr(out, "acov")
+            if (acov != "none") {
+                ACOV <- attr(out, "acov")
+            }
         }
 
         # remove dummy lv? (removes attr!)
@@ -125,7 +146,7 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
                })
 
         # append original/new data? (also remove attr)
-        if(append.data) {
+        if(append.data && level == 1L) {
             out <- lapply(seq_len(lavdata@ngroups), function(g) {
                        ret <- cbind(out[[g]], data.obs[[g]])
                        ret
@@ -194,32 +215,42 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
         # label?
         if(label) {
             for(g in seq_len(lavdata@ngroups)) {
-                if(lavdata@nlevels > 1L && level == 2L) {
-                    gg <- (g - 1)*lavdata@nlevels + 2L
+                if(lavdata@nlevels > 1L) {
+                    gg <- (g - 1)*lavdata@nlevels + level
                 } else {
                     gg <- g
                 }
+
                 if(append.data) {
                     colnames(out[[g]]) <- c(lavpta$vnames$lv[[gg]],
-                                            ov.names[[gg]])
+                                            ov.names[[g]]) # !not gg
                 } else {
                     colnames(out[[g]]) <- lavpta$vnames$lv[[gg]]
                 }
-            }
-            if(se != "none") {
-                if(lavdata@nlevels > 1L && level == 2L) {
-                    gg <- (g - 1)*lavdata@nlevels + 2L
-                } else {
-                    gg <- g
-                }
-                colnames(SE[[g]]) <- lavpta$vnames$lv[[gg]]
 
-                if (acov != "none") {
-                  dimnames(ACOV[[g]]) <- list(lavpta$vnames$lv[[g]],
-                                              lavpta$vnames$lv[[g]])
+                if(se != "none") {
+                    colnames(SE[[g]]) <- lavpta$vnames$lv[[gg]]
+                }
+
+                if(acov != "none") {
+                    dimnames(ACOV[[g]]) <- list(lavpta$vnames$lv[[gg]],
+                                                lavpta$vnames$lv[[gg]])
+                }
+
+            } # g
+
+            # group.labels
+            if(lavdata@ngroups > 1L) {
+                names(out) <- lavdata@group.label
+                if(se != "none") {
+                    names(SE) <- lavdata@group.label
+                }
+                if(acov != "none") {
+                    names(ACOV) <- lavdata@group.label
                 }
             }
-        }
+
+        } # label
 
     # estimated value for the observed indicators, given (estimated)
     # factor scores
@@ -877,10 +908,12 @@ lav_predict_eta_ebm_ml <- function(lavobject = NULL,  # for convenience
     }
 
     # se?
-    if (acov != "none") se <- acov # ACOV implies SE
-    if(se != "none") {
-        warning("lavaan WARNING: standard errors are not available (yet) for the non-normal case")
+    if (acov != "none") {
+        se <- acov # ACOV implies SE
     }
+    #if(se != "none") {
+    #    warning("lavaan WARNING: standard errors are not available (yet) for the non-normal case")
+    #}
 
     VETAx <- computeVETAx(lavmodel = lavmodel)
     VETAx.inv <- VETAx

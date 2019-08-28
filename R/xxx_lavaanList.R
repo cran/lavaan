@@ -114,7 +114,7 @@ lavaanList <- function(model         = NULL,             # model
     # empty slots
     timingList <- ParTableList <- DataList <- SampleStatsList <-
         CacheList <- vcovList <- testList <- optimList <-
-        h1List <- loglikList <-
+        h1List <- loglikList <- baselineList <-
         impliedList <- funList <- list()
 
     # prepare store.slotsd slots
@@ -150,6 +150,9 @@ lavaanList <- function(model         = NULL,             # model
     }
     if("h1" %in% store.slots) {
         h1List <- vector("list", length = ndat)
+    }
+    if("baseline" %in% store.slots) {
+        baselineList <- vector("list", length = ndat)
     }
 
     if(!is.null(FUN)) {
@@ -246,7 +249,7 @@ lavaanList <- function(model         = NULL,             # model
         RES <- list(ok = FALSE, timing = NULL, ParTable = NULL,
                     Data = NULL, SampleStats = NULL, vcov = NULL,
                     test = NULL, optim = NULL, implied = NULL,
-                    fun = NULL)
+                    baseline = NULL, baseline.ok = FALSE, fun = NULL)
 
         if(data.ok.flag && inherits(lavobject, "lavaan") &&
            lavInspect(lavobject, "converged")) {
@@ -291,6 +294,12 @@ lavaanList <- function(model         = NULL,             # model
             }
             if("h1" %in% store.slots) {
                 RES$h1 <- lavobject@h1
+            }
+            if("baseline" %in% store.slots) {
+                RES$baseline <- lavobject@baseline
+                if(length(lavobject@baseline) > 0L) {
+                    RES$baseline.ok <- TRUE
+                }
             }
 
             # custom FUN
@@ -357,8 +366,14 @@ lavaanList <- function(model         = NULL,             # model
 
 
     # restructure
-    meta <- list(ndat = ndat, ok = sapply(RES, "[[", "ok"),
-                 store.slots = store.slots)
+    if("baseline" %in% store.slots) {
+        meta <- list(ndat = ndat, ok = sapply(RES, "[[", "ok"),
+                     baseline.ok = sapply(RES, "[[", "baseline.ok"),
+                     store.slots = store.slots)
+    } else {
+        meta <- list(ndat = ndat, ok = sapply(RES, "[[", "ok"),
+                     store.slots = store.slots)
+    }
 
     # extract store.slots slots
     if("timing" %in% store.slots) {
@@ -394,6 +409,9 @@ lavaanList <- function(model         = NULL,             # model
     if("loglik" %in% store.slots) {
         loglikList <- lapply(RES, "[[", "loglik")
     }
+    if("baseline" %in% store.slots) {
+        baselineList <- lapply(RES, "[[", "baseline")
+    }
     if(!is.null(FUN)) {
         funList <- lapply(RES, "[[", "fun")
     }
@@ -422,6 +440,7 @@ lavaanList <- function(model         = NULL,             # model
                       impliedList     = impliedList,
                       h1List          = h1List,
                       loglikList      = loglikList,
+                      baselineList    = baselineList,
 
                       funList         = funList,
 

@@ -194,12 +194,13 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             ov.names <- ov.names.y <- ov.names.x <- vector("list",
                                                        length = ngroups)
             for(g in seq_len(ngroups)) {
-                ov.names[[g]]   <- lav_partable_vnames(FLAT, type = "ov",
-                                                       group = group.values[g])
-                ov.names.y[[g]] <- lav_partable_vnames(FLAT, type = "ov.nox",
-                                                       group = group.values[g])
-                ov.names.x[[g]] <- lav_partable_vnames(FLAT, type = "ov.x",
-                                                       group = group.values[g])
+                # collapsed over levels (if any)
+                ov.names[[g]]   <- unique(unlist(lav_partable_vnames(FLAT,
+                                    type = "ov", group = group.values[g])))
+                ov.names.y[[g]] <- unique(unlist(lav_partable_vnames(FLAT,
+                                    type = "ov.nox", group = group.values[g])))
+                ov.names.x[[g]] <- unique(unlist(lav_partable_vnames(FLAT,
+                                    type = "ov.x", group = group.values[g])))
             }
         } else {
             ov.names   <- lav_partable_vnames(FLAT, type = "ov")
@@ -207,9 +208,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             ov.names.x <- lav_partable_vnames(FLAT, type = "ov.x")
         }
     } else {
-        ov.names   <- lav_partable_vnames(FLAT, type = "ov")
-        ov.names.y <- lav_partable_vnames(FLAT, type = "ov.nox")
-        ov.names.x <- lav_partable_vnames(FLAT, type = "ov.x")
+        # collapse over levels (if any)
+        ov.names   <- unique(unlist(lav_partable_vnames(FLAT, type = "ov")))
+        ov.names.y <- unique(unlist(lav_partable_vnames(FLAT, type = "ov.nox")))
+        ov.names.x <- unique(unlist(lav_partable_vnames(FLAT, type = "ov.x")))
     }
 
     # handle ov.names.l
@@ -275,10 +277,11 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             }
 
             ngroups <- lav_partable_ngroups(FLAT)
+            group.values <- lav_partable_group_values(FLAT)
             ov.names.l <- vector("list", length = ngroups)
             for(g in 1:ngroups) {
                 # note: lavNames() will return a list if any level:
-                ov.names.l[[g]] <- lavNames(FLAT, "ov", group = g)
+                ov.names.l[[g]] <- lavNames(FLAT, "ov", group = group.values[g])
             }
         } else {
             # no level: in model syntax
@@ -298,8 +301,13 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         } else {
             # check if all names in "ordered" occur in the dataset?
             if(!is.null(data)) {
-                missing.idx <- which(!ordered %in% names(data))
-                if(length(missing.idx) > 0L) {
+                if(inherits(data, "data.frame")) {
+                    NAMES <- names(data)
+                } else if(inherits(data, "matrix")) {
+                    NAMES <- colnames(data)
+                }
+                missing.idx <- which(!ordered %in% NAMES)
+                if(length(missing.idx) > 0L) { # FIXme: warn = FALSE has no eff
                     warning("lavaan WARNING: ordered variable(s): ",
                          paste(ordered[missing.idx], collapse = " "),
                          "\n  could not be found in the data and will be ignored")
@@ -557,13 +565,13 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                       as.data.frame.   = FALSE)
 
     } else if(inherits(model, "lavaan")) {
-        lavpartable <- parTable(model)
+        lavpartable <- as.list(parTable(model))
     } else if(is.list(model)) {
         # we already checked this when creating FLAT
         # but we may need to complete it
         lavpartable <- as.list(FLAT) # in case model is a data.frame
         # complete table
-        lavpartable <- lav_partable_complete(lavpartable)
+        lavpartable <- as.list(lav_partable_complete(lavpartable))
     } else {
         stop("lavaan ERROR: model [type = ", class(model),
              "] is not of type character or list")
@@ -770,8 +778,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                               th.idx           = lavsamplestats@th.idx,
                               cov.x            = lavsamplestats@cov.x,
                               mean.x           = lavsamplestats@mean.x)
-        timing$Model <- (proc.time()[3] - start.time)
-        start.time <- proc.time()[3]
 
         # if no data, call lav_model_set_parameters once (for categorical case)
         if(lavdata@data.type == "none" && lavmodel@categorical) {
@@ -807,6 +813,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                 }
             }
         }
+        timing$Model <- (proc.time()[3] - start.time)
+        start.time <- proc.time()[3]
 
     } # slotModel
 
@@ -1086,13 +1094,14 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                                     type = "user", extra = TRUE)
 
         # check if model has converged or not
-        if(!attr(x, "converged") && lavoptions$warn) {
-           warning("lavaan WARNING: the optimizer warns that a solution has NOT been found!")
-        }
+        #if(!attr(x, "converged") && lavoptions$warn) {
+        #   warning("lavaan WARNING: the optimizer warns that a solution has NOT been found!")
+        #}
     } else {
         x <- numeric(0L)
         attr(x, "iterations") <- 0L; attr(x, "converged") <- FALSE
         attr(x, "control") <- lavoptions$control
+        attr(x, "dx") <- numeric(0L)
         attr(x, "fx") <-
             lav_model_objective(lavmodel = lavmodel,
                 lavsamplestats = lavsamplestats, lavdata = lavdata,
@@ -1111,6 +1120,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     lavoptim <- list()
     x2 <- x; attributes(x2) <- NULL
     lavoptim$x <- x2
+    lavoptim$dx <- attr(x, "dx")
     lavoptim$npar <- length(x)
     lavoptim$iterations <- attr(x, "iterations")
     lavoptim$converged  <- attr(x, "converged")
@@ -1138,6 +1148,8 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if(lavoptions$implied) {
          lavimplied <- lav_model_implied(lavmodel)
     }
+    timing$implied <- (proc.time()[3] - start.time)
+    start.time <- proc.time()[3]
 
     lavloglik <- list()
     if(lavoptions$loglik) {
@@ -1147,8 +1159,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                        lavmodel       = lavmodel,
                                        lavoptions     = lavoptions)
     }
-
-    timing$implied <- (proc.time()[3] - start.time)
+    timing$loglik <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
 
@@ -1262,9 +1273,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     #### 13. lavtest ####
     #####################
     TEST <- NULL
-    if(lavoptions$test != "none" && attr(x, "converged")) {
+    if( !(length(lavoptions$test) == 1L && lavoptions$test == "none") &&
+        attr(x, "converged") ) {
         if(lavoptions$verbose) {
-            cat("Computing TEST for test =", lavoptions$test, "...")
+            cat("Computing TEST for test(s) =", lavoptions$test, "...")
         }
         TEST <- lav_model_test(lavmodel            = lavmodel,
                                lavpartable         = lavpartable,
@@ -1309,18 +1321,49 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                             x           = x,
                             VCOV        = VCOV,
                             TEST        = TEST)
-    timing$total <- (proc.time()[3] - start.time0)
+    timing$Fit <- (proc.time()[3] - start.time)
+    start.time <- proc.time()[3]
 
 
 
 
     ######################
-    #### 15. baseline ####
+    #### 15. baseline #### (since 0.6-5)
     ######################
     lavbaseline <- list()
-    if(is.logical(lavoptions$baseline) && lavoptions$baseline) {
-
+    if( lavoptions$do.fit &&
+       !("none" %in% lavoptions$test) &&
+        is.logical(lavoptions$baseline) && lavoptions$baseline ) {
+        if(lavoptions$verbose) {
+            cat("Fitting baseline model ... ")
+        }
+        fit.indep <- try(lav_object_independence(object = NULL,
+                         lavsamplestats = lavsamplestats,
+                         lavdata        = lavdata,
+                         lavcache       = lavcache,
+                         lavoptions     = lavoptions,
+                         lavpta         = lavpta,
+                         lavh1          = lavh1), silent = TRUE)
+        if(inherits(fit.indep, "try-error") ||
+           !fit.indep@optim$converged) {
+            if(lavoptions$warn) {
+                warning("lavaan WARNING: estimation of the baseline model failed.")
+            }
+            lavbaseline <- list()
+            if(lavoptions$verbose) {
+                cat(" FAILED.\n")
+            }
+        } else {
+            # store relevant information
+            lavbaseline <- list(partable = fit.indep@ParTable,
+                                test     = fit.indep@test)
+            if(lavoptions$verbose) {
+                cat(" done.\n")
+            }
+        }
     }
+    timing$baseline <- (proc.time()[3] - start.time)
+    start.time <- proc.time()[3]
 
 
     ######################
@@ -1388,6 +1431,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     ####################
     #### 17. lavaan ####
     ####################
+
+    # stop timer
+    timing$total <- (proc.time()[3] - start.time0)
+
     lavaan <- new("lavaan",
                   version      = as.character(packageVersion("lavaan")),
                   call         = mc,                  # match.call
@@ -1407,7 +1454,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                   vcov         = lavvcov,             # list
                   test         = lavtest,             # list
                   h1           = lavh1,               # list
-                  baseline     = list(),              # list
+                  baseline     = lavbaseline,         # list
                   external     = list()               # empty list
                  )
 
@@ -1419,66 +1466,35 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         lavInspect(lavaan, "post.check")
     }
 
-    # new in 0.6-2
     # FIXME: not scale independent (should use solve(Hessian) %*% g)
     # but Hessian is not always available (or expensive to compute)
-    hasExplicitConstraints <- FALSE
-    if(is.character(constraints) && any(nchar(constraints) > 0L)) {
-        hasExplicitConstraints <- TRUE
-    }
-    hasNonLinearEqConstraints <- FALSE
-    if(length(lavmodel@ceq.nonlinear.idx) > 0L) {
-        hasNonLinearEqConstraints <- TRUE
-    }
-    hasIneqConstraints <- FALSE
-    if(length(lavmodel@cin.linear.idx) > 0L ||
-       length(lavmodel@cin.nonlinear.idx) > 0L) {
-        hasIneqConstraints <- TRUE
-    }
-    if(!is.null(lavoptions$check.gradient) && lavoptions$check.gradient &&
-       lavTech(lavaan, "converged") &&
-       !hasExplicitConstraints      &&
-       !hasNonLinearEqConstraints   &&
-       !hasIneqConstraints) {
-        grad <- lavInspect(lavaan, "optim.gradient")
-        large.idx <- which(abs(grad) > 0.001)  # better 0.0001?
-        if(length(large.idx) > 0L) {
-            warning(
-  "lavaan WARNING: not all elements of the gradient are (near) zero;\n",
-"                  the optimizer may not have found a local solution;\n",
-"                  use lavInspect(fit, \"optim.gradient\") to investigate")
-        }
-    }
-
-    ########################
-    #### post: baseline ####
-    ########################
-    #lavbaseline <- list()
-    #if(is.logical(lavoptions$baseline) && lavoptions$baseline) {
-    #    fit.indep <- try(lav_object_independence(lavaan), silent = TRUE)
-    #    X2.null <- df.null <- as.numeric(NA)
-    #    X2.null.scaled <- df.null.scaled <- as.numeric(NA)
-    #    if(inherits(fit.indep, "try-error")) {
-    #        warning("lavaan WARNING: estimation of the baseline model failed.")
-    #    } else {
-    #        X2.null <- fit.indep@test[[1]]$stat
-    #        df.null <- fit.indep@test[[1]]$df
-    #        if(length(fit.indep@test) > 1L) {
-    #            X2.null.scaled <- fit.indep@test[[2]]$stat
-    #            df.null.scaled <- fit.indep@test[[2]]$df
-    #        }
-    #    }
-    #
-    #    # store in list
-    #    lavbaseline <- list(X2.null = X2.null,
-    #                        df.null = df.null,
-    #                        X2.null.scaled = X2.null.scaled,
-    #                        df.null.scaled = df.null.scaled)
-    #
-    #    # add to lavaan object
-    #    lavaan@baseline <- lavbaseline
+    #hasExplicitConstraints <- FALSE
+    #if(is.character(constraints) && any(nchar(constraints) > 0L)) {
+    #    hasExplicitConstraints <- TRUE
     #}
-
+    #hasNonLinearEqConstraints <- FALSE
+    #if(length(lavmodel@ceq.nonlinear.idx) > 0L) {
+    #    hasNonLinearEqConstraints <- TRUE
+    #}
+    #hasIneqConstraints <- FALSE
+    #if(length(lavmodel@cin.linear.idx) > 0L ||
+    #   length(lavmodel@cin.nonlinear.idx) > 0L) {
+    #    hasIneqConstraints <- TRUE
+    #}
+    #if(!is.null(lavoptions$check.gradient) && lavoptions$check.gradient &&
+    #   lavTech(lavaan, "converged") &&
+    #   !hasExplicitConstraints      &&
+    #   !hasNonLinearEqConstraints   &&
+    #   !hasIneqConstraints) {
+    #    grad <- lavInspect(lavaan, "optim.gradient")
+    #    large.idx <- which(abs(grad) > 0.001)  # better 0.0001?
+    #    if(length(large.idx) > 0L) {
+    #        warning(
+#  "lavaan WARNING: not all elements of the gradient are (near) zero;\n",
+#"                  the optimizer may not have found a local solution;\n",
+#"                  use lavInspect(fit, \"optim.gradient\") to investigate")
+#        }
+#    }
 
 
     lavaan
@@ -1538,7 +1554,8 @@ cfa <- sem <- function(# user-specified model: can be syntax, parameter Table
     # default options for sem/cfa call
     mc$int.ov.free     = TRUE
     mc$int.lv.free     = FALSE
-    mc$auto.fix.first  = !std.lv
+    #mc$auto.fix.first  = !std.lv
+    mc$auto.fix.first  = TRUE # (re)set in lav_options_set
     mc$auto.fix.single = TRUE
     mc$auto.var        = TRUE
     mc$auto.cov.lv.x   = TRUE
@@ -1605,7 +1622,8 @@ growth <- function(# user-specified model: can be syntax, parameter Table
     mc$model.type      = "growth"
     mc$int.ov.free     = FALSE
     mc$int.lv.free     = TRUE
-    mc$auto.fix.first  = !std.lv
+    #mc$auto.fix.first  = !std.lv
+    mc$auto.fix.first  = TRUE # (re)set in lav_options_set
     mc$auto.fix.single = TRUE
     mc$auto.var        = TRUE
     mc$auto.cov.lv.x   = TRUE

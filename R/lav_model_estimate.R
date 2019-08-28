@@ -76,12 +76,30 @@ lav_model_estimate <- function(lavmodel       = NULL,
                             cov.x = lavsamplestats@cov.x)
         } else {
             # needs good estimates for lv variances!
+            # if there is a single 'marker' indicator, we could use
+            # its observed variance as an upper bound
+
+            # for the moment, set them to 1.0 (instead of 0.05)
+
+            # TODO: USE Bentler's 1982 approach to get an estimate of
+            # VETA; use those diagonal elements...
+            # but only if we have 'marker' indicators for each LV
+            LV.VAR <- vector("list", lavmodel@ngroups)
+            for(g in seq_len(lavmodel@ngroups)) {
+                mm.in.group <- 1:lavmodel@nmat[g] + cumsum(c(0,lavmodel@nmat))[g]
+                MLIST     <- lavmodel@GLIST[ mm.in.group ]
+                LAMBDA <- MLIST$lambda
+                n.lv <- ncol(LAMBDA)
+                LV.VAR[[g]] <- rep(1.0, n.lv)
+            }
+
             parscale <- lav_standardize_all(lavobject = NULL,
                             est = rep(1, length(lavpartable$lhs)),
                             #est.std = rep(1, length(lavpartable$lhs)),
                             # here, we use whatever the starting values are
                             # for the latent variances...
                             cov.std = FALSE, ov.var = OV.VAR,
+                            lv.var = LV.VAR,
                             lavmodel = lavmodel, lavpartable = lavpartable,
                             cov.x = lavsamplestats@cov.x)
         }
@@ -232,7 +250,9 @@ lav_model_estimate <- function(lavmodel       = NULL,
         # for L-BFGS-B
         #if(infToMax && is.infinite(fx)) fx <- 1e20
         if(!is.finite(fx)) {
+            fx.group <- attr(fx, "fx.group")
             fx <- 1e20
+            attr(fx, "fx.group") <- fx.group # only for lav_model_fit()
         }
 
         fx
@@ -477,16 +497,8 @@ lav_model_estimate <- function(lavmodel       = NULL,
 
         iterations <- optim.out$iterations
         x          <- optim.out$par
-        if(optim.out$convergence == 0) {
-            # optimizer is happy, but do we have a zero gradient
-            # check 'unscaled' gradient (for now)
-            grad <- gradient_function_numerical(x)
-            if( all(abs(grad) < lavoptions$optim.dx.tol) ) {
-                converged <- TRUE
-            } else {
-                # warning here?
-                converged <- FALSE
-            }
+        if(optim.out$convergence == 0L) {
+            converged <- TRUE
         } else {
             converged <- FALSE
         }
@@ -528,23 +540,12 @@ lav_model_estimate <- function(lavmodel       = NULL,
 
         iterations <- optim.out$iterations
         x          <- optim.out$par
-        if(optim.out$convergence == 0) {
-            # optimizer is happy, but do we have a zero gradient
-            # check 'unscaled' gradient (for now)
-
-            # should we treat bounds differently?
-
-
-            grad <- gradient_function(x)
-            if( all(abs(grad) < lavoptions$optim.dx.tol) ) {
-                converged <- TRUE
-            } else {
-                # warning here?
-                converged <- FALSE
-            }
+        if(optim.out$convergence == 0L) {
+            converged <- TRUE
         } else {
             converged <- FALSE
         }
+
     } else if(OPTIMIZER == "BFGS") {
 
         # warning: Bollen example with estimator=GLS does NOT converge!
@@ -684,6 +685,60 @@ lav_model_estimate <- function(lavmodel       = NULL,
 
     fx <- objective_function(x) # to get "fx.group" attribute
 
+    # check convergence
+    if(converged) {
+        # check.gradient
+        if(!is.null(GRADIENT) &&
+           OPTIMIZER %in% c("NLMINB", "BFGS", "L-BFGS-B")) {
+
+            # compute unscaled gradient
+            dx <- GRADIENT(x)
+
+            # NOTE: unscaled gradient!!!
+            if(converged && lavoptions$check.gradient &&
+               any(abs(dx) > lavoptions$optim.dx.tol)) {
+
+                # ok, identify the non-zero elements
+                non.zero <- which(abs(dx) > lavoptions$optim.dx.tol)
+
+                # which ones are 'boundary' points, defined by lower/upper?
+                bound.idx <- integer(0L)
+                if(!is.null(lavpartable$lower)) {
+                    bound.idx <- c(bound.idx, which(lower == x))
+                }
+                if(!is.null(lavpartable$upper)) {
+                    bound.idx <- c(bound.idx, which(upper == x))
+                }
+                if(length(bound.idx) > 0L) {
+                    non.zero <- non.zero[- which(non.zero %in% bound.idx) ]
+                }
+
+                # this has many implications ... so should be careful to
+                # avoid false alarm
+                if(length(non.zero) > 0L) {
+                    converged <- FALSE
+
+                    if(lavoptions$warn) {
+                        warning(
+  "lavaan WARNING: the optimizer (", OPTIMIZER, ") ",
+                   "claimed the model converged,\n",
+"                  but not all elements of the gradient are (near) zero;\n",
+"                  the optimizer may not have found a local solution\n",
+"                  use check.gradient = FALSE to skip this check.")
+                    }
+                }
+            }
+        } else {
+            dx <- numeric(0L)
+        }
+    } else {
+       dx <- numeric(0L)
+       # give warning here (new in 0.6-5)
+       if(lavoptions$warn) {
+           warning("lavaan WARNING: the optimizer warns that a solution has NOT been found!")
+       }
+    }
+
     # transform back
     # 3.
     #if(lavoptions$optim.var.transform == "sqrt" &&
@@ -707,6 +762,7 @@ lav_model_estimate <- function(lavmodel       = NULL,
     attr(x, "iterations") <- iterations
     attr(x, "control")    <- control
     attr(x, "fx")         <- fx
+    attr(x, "dx")         <- dx
     attr(x, "parscale")   <- parscale
     if(!is.null(optim.out$con.jac)) attr(x, "con.jac")    <- optim.out$con.jac
     if(!is.null(optim.out$lambda))  attr(x, "con.lambda") <- optim.out$lambda

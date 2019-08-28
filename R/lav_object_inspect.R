@@ -107,6 +107,11 @@ lavInspect.lavaan <- function(object,
     } else if(what == "list") {
         parTable(object)
 
+    #### bootstrap coef ####
+    } else if(what %in% c("boot", "bootstrap", "boot.coef", "coef.boot")) {
+        lav_object_inspect_boot(object, add.labels = add.labels,
+                                add.class = add.class)
+
     #### fit indices ####
     } else if(what == "fit" ||
               what == "fitmeasures" ||
@@ -114,6 +119,15 @@ lavInspect.lavaan <- function(object,
               what == "fit.indices") {
         fitMeasures(object)
 
+    #### baseline model ####
+    } else if(what == "baseline.partable") {
+        out <- as.data.frame(object@baseline$partable, stringsAsFactors = FALSE)
+        if(add.class) {
+            class(out) <- c("lavaan.data.frame", "data.frame")
+        }
+        return(out)
+    } else if(what == "baseline.test") {
+        object@baseline$test
 
     #### modification indices ####
     } else if(what == "mi" ||
@@ -218,6 +232,8 @@ lavInspect.lavaan <- function(object,
         object@Data@ordered
     } else if(what == "group.label") {
         object@Data@group.label
+    } else if(what == "level.label") {
+        object@Data@level.label
     } else if(what == "nobs") {
         unlist( object@Data@nobs )
     } else if(what == "norig") {
@@ -639,7 +655,13 @@ lav_object_inspect_start <- function(object) {
     OUT
 }
 
-lav_object_inspect_boot <- function(object) {
+lav_object_inspect_boot <- function(object, add.labels = FALSE,
+                                    add.class = FALSE) {
+
+    if(object@Options$se   != "bootstrap" &&
+       !any(c("bootstrap", "bollen.stine") %in% object@Options$test)) {
+        stop("lavaan ERROR: bootstrap was not used.")
+    }
 
     # from 0.5-19. they are in a separate slot
     tmp <- try(slot(object,"boot"), silent = TRUE)
@@ -650,6 +672,16 @@ lav_object_inspect_boot <- function(object) {
     } else {
         # 0.5-19 way
         BOOT <- object@boot$coef
+    }
+
+    # add coef names
+    if(add.labels) {
+        colnames(BOOT) <- names(coef(object))
+    }
+
+    # add class
+    if(add.class) {
+        class(BOOT) <- c("lavaan.matrix", "matrix")
     }
 
     BOOT
@@ -2176,11 +2208,13 @@ lav_object_inspect_gradient <- function(object,
                     nclusters <- lavdata@Lp[[1]]$nclusters[[2]]
                     dx <- dx * (2 * N) / nclusters
                 } else {
+                    group.values <- lav_partable_group_values(lavpartable)
                     for(g in seq_len(lavdata@ngroups)) {
                         N <- lavdata@Lp[[g]]$nclusters[[1]]
                         nclusters <- lavdata@Lp[[g]]$nclusters[[2]]
                         g.idx <-
-                          which((lavpartable$group == g)[lavpartable$free > 0L])
+                          which((lavpartable$group ==
+                                 group.values[g])[lavpartable$free > 0L])
                         dx[g.idx] <- dx[g.idx] * (2 * N) / nclusters
                     }
                 }
