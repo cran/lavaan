@@ -74,7 +74,11 @@ lavInspect.lavaan <- function(object,
         lav_object_inspect_modelmatrices(object, what = "est",
             add.labels = add.labels, add.class = add.class,
             list.by.group = list.by.group,
-            #list.by.group = FALSE, for semTools only
+            drop.list.single.group = drop.list.single.group)
+    } else if(what == "est.unrotated") {
+        lav_object_inspect_modelmatrices(object, what = "est.unrotated",
+            add.labels = add.labels, add.class = add.class,
+            list.by.group = list.by.group,
             drop.list.single.group = drop.list.single.group)
     } else if(what == "dx.free") {
         lav_object_inspect_modelmatrices(object, what = "dx.free",
@@ -728,6 +732,13 @@ lav_object_inspect_modelmatrices <- function(object, what = "free",
         START <- lav_object_inspect_start(object)
     } else if (what == "est") {
         EST <- lav_object_inspect_est(object)
+    } else if(what == "est.unrotated") {
+        if(!is.null(object@Options$rotation) &&
+           object@Options$rotation == "none") {
+            EST <- lav_object_inspect_est(object, unrotated = FALSE)
+        } else {
+            EST <- lav_object_inspect_est(object, unrotated = TRUE)
+        }
     }
 
     for(mm in 1:length(GLIST)) {
@@ -765,7 +776,7 @@ lav_object_inspect_modelmatrices <- function(object, what = "free",
             m.user.idx <- object@Model@m.user.idx[[mm]]
             x.user.idx <- object@Model@x.user.idx[[mm]]
             GLIST[[mm]][m.user.idx] <- START[x.user.idx]
-        } else if(what == "est") {
+        } else if(what %in% c("est", "est.unrotated")) {
             # fill in estimated parameter values
             m.user.idx <- object@Model@m.user.idx[[mm]]
             x.user.idx <- object@Model@x.user.idx[[mm]]
@@ -1594,7 +1605,7 @@ lav_object_inspect_mean_lv <- function(object,
     # labels + class
     for(b in seq_len(nblocks)) {
         if(add.labels && length(OUT[[b]]) > 0L) {
-            names(OUT[[b]]) <- object@pta$vnames$lv.regular[[b]]
+            names(OUT[[b]]) <- object@pta$vnames$lv[[b]]
         }
         if(add.class) {
             class(OUT[[b]]) <- c("lavaan.vector", "numeric")
@@ -1636,7 +1647,7 @@ lav_object_inspect_cov_all <- function(object, correlation.metric = FALSE,
 
         if(add.labels) {
             NAMES <- c(object@pta$vnames$ov.model[[b]],
-                       object@pta$vnames$lv.regular[[b]])
+                       object@pta$vnames$lv[[b]])
             colnames(OUT[[b]]) <- rownames(OUT[[b]]) <- NAMES
         }
         if(add.class) {
@@ -2436,12 +2447,12 @@ lav_object_inspect_vcov <- function(object, standardized = FALSE,
     lavoptions <- object@Options
 
     # rotation?
-    #if( (.hasSlot(lavmodel, "nefa")) && (lavmodel@nefa > 0L) &&
-    #    (lavoptions$rotation != "none") ) {
-    #    rotation <- TRUE
-    #} else {
-    #    rotation <- FALSE
-    #}
+    if( (.hasSlot(lavmodel, "nefa")) && (lavmodel@nefa > 0L) &&
+        (lavoptions$rotation != "none") ) {
+        rotation <- TRUE
+    } else {
+        rotation <- FALSE
+    }
 
     npar <- max(object@ParTable$free)
     if(object@optim$npar == 0) {
@@ -2493,22 +2504,22 @@ lav_object_inspect_vcov <- function(object, standardized = FALSE,
 
 
 
-        #if(rotation) {
-        #    JAC <- numDeriv::jacobian(func = FUN, x = object@optim$x,
-        #               method = "simple",
-        #               method.args = list(eps = 1e-03), # default is 1e-04
-        #               lavobject = object, rotation = rotation)
-        #} else {
+        if(rotation) {
+            JAC <- numDeriv::jacobian(func = FUN, x = object@optim$x,
+                       method = "simple",
+                       method.args = list(eps = 1e-03), # default is 1e-04
+                       lavobject = object, rotation = rotation)
+        } else {
 
-        x.vec <- lav_model_get_parameters(lavmodel)
-        JAC <- try(lav_func_jacobian_complex(func = FUN, x = x.vec,
-                       lavobject = object),
-                   silent = TRUE)
-        if(inherits(JAC, "try-error")) { # eg. pnorm()
-            JAC <- lav_func_jacobian_simple(func = FUN, x = x.vec,
-                       lavobject = object)
+            x.vec <- lav_model_get_parameters(lavmodel)
+            JAC <- try(lav_func_jacobian_complex(func = FUN, x = x.vec,
+                           lavobject = object),
+                       silent = TRUE)
+            if(inherits(JAC, "try-error")) { # eg. pnorm()
+                JAC <- lav_func_jacobian_simple(func = FUN, x = x.vec,
+                           lavobject = object)
+            }
         }
-        #}
 
         # JAC contains *all* parameters in the parameter table
         if(free.only) {
@@ -3074,6 +3085,7 @@ lav_object_inspect_loglik_casewise <- function(object, log. = TRUE,
     lavdata <- object@Data
     lavsamplestats <- object@SampleStats
     lavimplied <- object@implied
+    lavoptions <- object@Options
 
     G <- lavdata@ngroups
     OUT <- vector("list", G)
@@ -3090,25 +3102,42 @@ lav_object_inspect_loglik_casewise <- function(object, log. = TRUE,
 
     for(g in 1:G) {
 
-        if(lavdata@missing == "listwise") {
-            if(object@Model@meanstructure) {
-                MEAN <- lavimplied$mean[[g]]
+        if(lavsamplestats@missing.flag) {
+            OUT[[g]] <-
+                lav_mvnorm_missing_llik_casewise(Y = lavdata@X[[g]],
+                                        wt = lavdata@weights[[g]],
+                                        Mu = lavimplied$mean[[g]],
+                                        Sigma = lavimplied$cov[[g]],
+                                        x.idx  = lavsamplestats@x.idx[[g]])
+        } else { # single-level, complete data
+            if(lavoptions$conditional.x) {
+                if(!is.null(lavdata@weights[[g]])) {
+                    stop("lavaan ERROR: no support (yet) if weights are used.")
+                }
+                OUT[[g]] <- lav_mvreg_loglik_data(
+                                      Y          = lavdata@X[[g]],
+                                      eXo        = lavdata@eXo[[g]],
+                                      res.int    = lavimplied$res.int[[g]],
+                                      res.slopes = lavimplied$res.slopes[[g]],
+                                      res.cov    = lavimplied$res.cov[[g]],
+                                      casewise   = TRUE)
+
             } else {
-                MEAN <- lavsamplestats@mean[[g]]
+
+                if(object@Model@meanstructure) {
+                    MEAN <- lavimplied$mean[[g]]
+                } else {
+                    MEAN <- lavsamplestats@mean[[g]]
+                }
+                OUT[[g]] <-
+                    lav_mvnorm_loglik_data(Y  = lavdata@X[[g]],
+                                           wt = lavdata@weights[[g]],
+                                           Mu = MEAN,
+                                           Sigma = lavimplied$cov[[g]],
+                                           x.idx = lavsamplestats@x.idx[[g]],
+                                           casewise = TRUE)
             }
-            OUT[[g]] <- lav_mvnorm_loglik_data(Y  = lavdata@X[[g]],
-                                               wt = lavdata@weights[[g]],
-                                               Mu = MEAN,
-                                               Sigma = lavimplied$cov[[g]],
-                                               casewise = TRUE)
-        } else if(lavdata@missing == "ml") {
-            OUT[[g]] <- lav_mvnorm_missing_llik_casewise(Y = lavdata@X[[g]],
-                                               wt = lavdata@weights[[g]],
-                                               Mu = lavimplied$mean[[g]],
-                                               Sigma = lavimplied$cov[[g]])
-        } else {
-            stop("lavaan ERROR: casewise (log)likeloods contributions not available if missing = ", dQuote(lavdata@missing))
-        }
+        } # single-level, complete data
 
         # log. = FALSE?
         if(!log.) {
@@ -3124,6 +3153,7 @@ lav_object_inspect_loglik_casewise <- function(object, log. = TRUE,
             class(OUT[[g]]) <- c("lavaan.vector", "numeric")
 
         }
+
     } # g
 
     if(G == 1L && drop.list.single.group) {

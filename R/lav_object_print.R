@@ -54,8 +54,14 @@ lav_object_print_optim <- function(object, nd = 3L) {
         c2 <- c(c2, nrow(object@Model@cin.JAC))
     }
     if(nrow(object@Model@con.jac) > 0L) {
-        c1 <- c(c1, "Row rank of the constraints matrix")
-        c2 <- c(c2, qr(object@Model@con.jac)$rank)
+        con.jac.rank <- qr(object@Model@con.jac)$rank
+        if(con.jac.rank == (nrow(object@Model@ceq.JAC) +
+                            nrow(object@Model@cin.JAC)) ) {
+            # nothing to do (don't print, as this is redundant information)
+        } else {
+            c1 <- c(c1, "Row rank of the constraints matrix")
+            c2 <- c(c2, qr(object@Model@con.jac)$rank)
+        }
     }
 
     # empty last row
@@ -89,7 +95,9 @@ lav_object_print_rotation <- function(object, header = FALSE, nd = 3L) {
 
     # rotation method
     c1 <- c(c1, "Rotation method")
-    if(object@Options$rotation.args$orthogonal) {
+    if(object@Options$rotation == "none") {
+        MM <- toupper(object@Options$rotation)
+    } else if(object@Options$rotation.args$orthogonal) {
         MM <- paste(toupper(object@Options$rotation), " ", "ORTHOGONAL",
                     sep = "")
     } else {
@@ -98,40 +106,45 @@ lav_object_print_rotation <- function(object, header = FALSE, nd = 3L) {
     }
     c2 <- c(c2, MM)
 
-    # method options
-    if(object@Options$rotation == "geomin") {
-        c1 <- c(c1, "Geomin epsilon")
-        c2 <- c(c2, object@Options$rotation.args$geomin.epsilon)
-    } else if(object@Options$rotation == "orthomax") {
-        c1 <- c(c1, "Orthomax gamma")
-        c2 <- c(c2, object@Options$rotation.args$orthomax.gamma)
-    } else if(object@Options$rotation == "cf") {
-        c1 <- c(c1, "Crawford-Ferguson gamma")
-        c2 <- c(c2, object@Options$rotation.args$cf.gamma)
-    } else if(object@Options$rotation == "oblimin") {
-        c1 <- c(c1, "Oblimin gamma")
-        c2 <- c(c2, object@Options$rotation.args$oblimin.gamma)
+
+    if(object@Options$rotation != "none") {
+
+        # method options
+        if(object@Options$rotation == "geomin") {
+            c1 <- c(c1, "Geomin epsilon")
+            c2 <- c(c2, object@Options$rotation.args$geomin.epsilon)
+        } else if(object@Options$rotation == "orthomax") {
+            c1 <- c(c1, "Orthomax gamma")
+            c2 <- c(c2, object@Options$rotation.args$orthomax.gamma)
+        } else if(object@Options$rotation == "cf") {
+            c1 <- c(c1, "Crawford-Ferguson gamma")
+            c2 <- c(c2, object@Options$rotation.args$cf.gamma)
+        } else if(object@Options$rotation == "oblimin") {
+            c1 <- c(c1, "Oblimin gamma")
+            c2 <- c(c2, object@Options$rotation.args$oblimin.gamma)
+        }
+
+        # rotation algorithm
+        c1 <- c(c1, "Rotation algorithm (rstarts)")
+        tmp <- paste(toupper(object@Options$rotation.args$algorithm),
+                     " (", object@Options$rotation.args$rstarts, ")", sep = "")
+        c2 <- c(c2, tmp)
+
+        # Standardized metric (or not)
+        c1 <- c(c1, "Standardized metric")
+        if(object@Options$rotation.args$std.ov) {
+            c2 <- c(c2, "TRUE")
+        } else {
+            c2 <- c(c2, "FALSE")
+        }
+
+        # Row weights
+        c1 <- c(c1, "Row weights")
+        tmp.txt <- object@Options$rotation.args$row.weights
+        c2 <- c(c2, paste(toupper(substring(tmp.txt, 1, 1)),
+                          substring(tmp.txt, 2), sep = ""))
+
     }
-
-    # rotation algorithm
-    c1 <- c(c1, "Rotation algorithm (rstarts)")
-    tmp <- paste(toupper(object@Options$rotation.args$algorithm),
-                 " (", object@Options$rotation.args$rstarts, ")", sep = "")
-    c2 <- c(c2, tmp)
-
-    # Standardized metric (or not)
-    c1 <- c(c1, "Standardized metric")
-    if(object@Options$rotation.args$std.ov) {
-        c2 <- c(c2, "TRUE")
-    } else {
-        c2 <- c(c2, "FALSE")
-    }
-
-    # Row weights
-    c1 <- c(c1, "Row weights")
-    tmp.txt <- object@Options$rotation.args$row.weights
-    c2 <- c(c2, paste(toupper(substring(tmp.txt, 1, 1)),
-                      substring(tmp.txt, 2), sep = ""))
 
     # empty row
     c1 <- c(c1, ""); c2 <- c(c2, "")
@@ -159,10 +172,11 @@ lav_object_print_rotation <- function(object, header = FALSE, nd = 3L) {
 lav_object_print_test_statistics <- function(object, nd = 3L) {
 
     num.format  <- paste("%", max(8L, nd + 5L), ".", nd, "f", sep = "")
+    lavoptions <- object@Options
 
     # check if test == "none", @test is empty, or estimator = "MML"
-    if(object@Options$test[1] == "none" || length(object@test) == 0L ||
-       object@Options$estimator == "MML") {
+    if(lavoptions$test[1] == "none" || length(object@test) == 0L ||
+       lavoptions$estimator == "MML") {
         return( character(0L) )
     }
 
@@ -255,7 +269,7 @@ lav_object_print_test_statistics <- function(object, nd = 3L) {
                                sprintf(num.format, TEST[[block]]$df)),
                         sprintf(num.format, TEST[[block]]$pvalue),
                         sprintf(num.format, TEST[[block]]$scaling.factor))
-                if(!is.null(TEST[[block]]$shift.parameter)) {
+                if(TEST[[block]]$test == "scaled.shifted") {
                     if(object@Data@ngroups == 1L) {
                         c1 <- c(c1, "Shift parameter")
                         c2 <- c(c2, "")
@@ -274,6 +288,10 @@ lav_object_print_test_statistics <- function(object, nd = 3L) {
                         }
                     }
                 } # shift
+                #c1 <- c(c1, paste("    for the", TEST[[block]]$label))
+                c1 <- c(c1, paste("    ", TEST[[block]]$label))
+                c2 <- c(c2, "")
+                c3 <- c(c3, "")
             }
         }
 
@@ -285,7 +303,38 @@ lav_object_print_test_statistics <- function(object, nd = 3L) {
             c1 <- c("", c1); c2 <- c("", c2); c3 <- c("", c3)
         }
 
-        # format c1/c2
+        # if information type is different from 'se', print it
+        if(length(lavoptions$information) > 1L &&
+           lavoptions$information[1] != lavoptions$information[2]) {
+            c1 <- c(c1, "Information")
+            tmp.txt <- lavoptions$information[2]
+            c2 <- c(c2, paste(toupper(substring(tmp.txt,1,1)),
+                                      substring(tmp.txt, 2), sep = ""))
+            c3 <- c(c3, "")
+        }
+        # if h1.information type is different from 'se', print it
+        if(length(lavoptions$h1.information) > 1L &&
+           lavoptions$h1.information[1] != lavoptions$h1.information[2]) {
+            c1 <- c(c1, "Information saturated (h1) model")
+            tmp.txt <- lavoptions$h1.information[2]
+            c2 <- c(c2, paste(toupper(substring(tmp.txt,1,1)),
+                                      substring(tmp.txt, 2), sep = ""))
+            c3 <- c(c3, "")
+        }
+        # if observed.information type is different from 'se', print it
+        if(length(lavoptions$observed.information) > 1L &&
+           lavoptions$information[2] == "observed" &&
+           (lavoptions$observed.information[1] !=
+            lavoptions$observed.information[2]) ) {
+            c1 <- c(c1, "Observed information based on")
+            tmp.txt <- lavoptions$observed.information[2]
+            c2 <- c(c2, paste(toupper(substring(tmp.txt,1,1)),
+                                      substring(tmp.txt, 2), sep = ""))
+            c3 <- c(c3, "")
+        }
+
+
+        # format c1/c2/c3 (note: fitMeasures uses 35/16/8)
         c1 <- format(c1, width = 43L)
         c2 <- format(c2, width = 8L + max(0, (nd - 3L)) * 4L, justify = "right")
         c3 <- format(c3, width = 8L + nd, justify = "right")
@@ -301,11 +350,6 @@ lav_object_print_test_statistics <- function(object, nd = 3L) {
 
         # print
         write.table(M, row.names = TRUE, col.names = FALSE, quote = FALSE)
-
-        # additional comment if twocolumn
-        if(twocolumn && TEST[[1]]$df > 0L) {
-            cat("    for the", TEST[[block]]$label, "\n")
-        }
 
         # multiple groups?
         ngroups <- object@Data@ngroups
@@ -365,7 +409,7 @@ lav_object_print_short_summary <- function(object, nd = 3L) {
     if(object@Options$estimator == "MML") {
         fm <- fitMeasures(object, c("logl", "aic", "bic", "bic2"),
                           output = "text")
-        print.lavaan.fitMeasures(fm, nd = nd)
+        print.lavaan.fitMeasures(fm, nd = nd, add.h0 = FALSE)
     }
 
 }

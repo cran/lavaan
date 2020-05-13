@@ -28,6 +28,27 @@ lav_test_yuan_bentler <- function(lavobject      = NULL,
         TEST$standard  <- TEST.unscaled
     }
 
+    # E.inv ok?
+    if( length(lavoptions$information) == 1L &&
+        length(lavoptions$h1.information) == 1L &&
+        length(lavoptions$observed.information) == 1L) {
+        E.inv.recompute <- FALSE
+    } else if( (lavoptions$information[1] == lavoptions$information[2]) &&
+        (lavoptions$h1.information[1] == lavoptions$h1.information[2]) &&
+        (lavoptions$observed.information[1] ==
+         lavoptions$observed.information[2]) ) {
+        E.inv.recompute <- FALSE
+    } else {
+        E.inv.recompute <- TRUE
+        # change information options
+        lavoptions$information[1] <- lavoptions$information[2]
+        lavoptions$h1.information[1] <- lavoptions$h1.information[2]
+        lavoptions$observed.information[1] <- lavoptions$observed.information[2]
+    }
+    if(!is.null(E.inv)) {
+        E.inv.recompute <- FALSE # user-provided
+    }
+
     # check test
     if(!all(test %in% c("yuan.bentler",
                         "yuan.bentler.mplus"))) {
@@ -36,7 +57,7 @@ lav_test_yuan_bentler <- function(lavobject      = NULL,
     }
 
     # information
-    information <- lavoptions$information
+    information <- lavoptions$information[1]
 
     # x.idx
     if(lavoptions$conditional.x) {
@@ -50,7 +71,7 @@ lav_test_yuan_bentler <- function(lavobject      = NULL,
 
 
     # do we have E.inv?
-    if(is.null(E.inv)) {
+    if(is.null(E.inv) || E.inv.recompute) {
         E.inv <- try(lav_model_information(lavmodel       = lavmodel,
                                            lavsamplestats = lavsamplestats,
                                            lavdata        = lavdata,
@@ -72,6 +93,7 @@ lav_test_yuan_bentler <- function(lavobject      = NULL,
     if(TEST$standard$df == 0L || TEST$standard$df < 0) {
         TEST[[test[1]]] <- c(TEST$standard, scaling.factor = as.numeric(NA),
                              label = character(0))
+        TEST[[test[1]]]$test <- test[1] # to prevent lavTestLRT error when robust test is detected for some but not all models
         return(TEST)
     }
 

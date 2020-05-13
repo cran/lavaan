@@ -1,6 +1,6 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.6-5
+Version: 0.6-6
 Authors@R: c(person(given   = "Yves", family = "Rosseel",
                     role    = c("aut", "cre"),
                     email   = "Yves.Rosseel@UGent.be",
@@ -50,7 +50,7 @@ LazyData: yes
 ByteCompile: true
 URL: http://lavaan.org
 NeedsCompilation: no
-Packaged: 2019-08-28 19:09:35 UTC; yves
+Packaged: 2020-05-13 15:21:43 UTC; yves
 Author: Yves Rosseel [aut, cre] (<https://orcid.org/0000-0002-4129-4477>),
   Terrence D. Jorgensen [aut] (<https://orcid.org/0000-0001-5111-6773>),
   Daniel Oberski [ctb],
@@ -65,4 +65,4 @@ Author: Yves Rosseel [aut, cre] (<https://orcid.org/0000-0002-4129-4477>),
   Florian Scharf [ctb]
 Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
 Repository: CRAN
-Date/Publication: 2019-08-28 21:40:05 UTC
+Date/Publication: 2020-05-13 16:40:02 UTC

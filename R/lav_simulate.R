@@ -33,8 +33,12 @@ lavSimulateData <- function(model  = NULL,
     dotdotdot$data <- NULL
     dotdotdot$sample.cov <- NULL
 
+
     # add sample.nobs/group.label to lavaan call
     dotdotdot$sample.nobs <- sample.nobs
+
+    # always use meanstructure = TRUE
+    dotdotdot$meanstructure <- TRUE
 
 
     # remove 'ordered' argument: we will first pretend we generate
@@ -60,10 +64,11 @@ lavSimulateData <- function(model  = NULL,
     lavdata     <- fit.pop@Data
     lavmodel    <- fit.pop@Model
     lavpartable <- fit.pop@ParTable
+    lavoptions  <- fit.pop@Options
 
     # number of groups/levels
-    ngroups <- lavdata@ngroups
-    nblocks <- length(fit.pop@implied$cov) # usually ngroups * nlevels
+    ngroups <- lav_partable_ngroups(lavpartable)
+    nblocks <- lav_partable_nblocks(lavpartable)
 
     # check sample.nobs argument
     if(lavdata@nlevels > 1L) {
@@ -128,8 +133,12 @@ lavSimulateData <- function(model  = NULL,
     # generate data per BLOCK
     for(b in seq_len(nblocks)) {
 
-        COV <- lavimplied$cov[[b]]
-        MU  <- lavimplied$mean[[b]]
+        if(lavoptions$conditional.x) {
+            stop("lavaan ERROR: conditional.x is not ready yet")
+        } else {
+            COV <- lavimplied$cov[[b]]
+            MU  <- lavimplied$mean[[b]]
+        }
 
         # if empirical = TRUE, rescale by N/(N-1), so that estimator=ML
         # returns exact results

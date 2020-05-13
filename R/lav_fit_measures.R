@@ -1162,19 +1162,25 @@ lav_fit_measures <- function(object, fit.measures = "all",
         }
 
         # the default!
-        if(object@Options$mimic == "lavaan") {
+        if(object@Options$mimic %in% c("lavaan", "EQS")) {
             if(categorical) {
                 indices["srmr"] <- SRMR_BENTLER_NOMEAN
             } else {
                 indices["srmr"] <- SRMR_BENTLER
             }
-        } else if(object@Options$mimic == "EQS") {
-            indices["srmr"] <- SRMR_BENTLER
         } else if(object@Options$mimic == "Mplus") {
-            if(object@Options$information == "expected") {
-                indices["srmr"] <- SRMR_BENTLER
+            if(object@Options$information[1] == "expected") {
+                if(categorical) {
+                    indices["srmr"] <- SRMR_BENTLER_NOMEAN
+                } else {
+                    indices["srmr"] <- SRMR_BENTLER
+                }
             } else {
-                indices["srmr"] <- SRMR_MPLUS
+                if(categorical) {
+                    indices["srmr"] <- SRMR_MPLUS_NOMEAN
+                } else {
+                    indices["srmr"] <- SRMR_MPLUS
+                }
             }
         }
 
@@ -1183,8 +1189,18 @@ lav_fit_measures <- function(object, fit.measures = "all",
         indices["srmr_bentler_nomean"] <- SRMR_BENTLER_NOMEAN
         indices["crmr"]                <- CRMR
         indices["crmr_nomean"]         <- CRMR_NOMEAN
-        indices["srmr_mplus"]          <- SRMR_MPLUS
-        indices["srmr_mplus_nomean"]   <- SRMR_MPLUS_NOMEAN
+
+        # only correct for non-categorical:
+        if(object@Model@categorical) {
+            # FIXME! Compute Mplus 8.1 way to compute SRMR in the
+            #        categorical setting
+            #        See 'SRMR in Mplus (2018)' document on Mplus website
+            indices["srmr_mplus"]          <- as.numeric(NA)
+            indices["srmr_mplus_nomean"]   <- as.numeric(NA)
+        } else {
+            indices["srmr_mplus"]          <- SRMR_MPLUS
+            indices["srmr_mplus_nomean"]   <- SRMR_MPLUS_NOMEAN
+        }
         #if(categorical) {
             indices["rmr"]             <- RMR
         #} else {
@@ -1261,7 +1277,7 @@ lav_fit_measures <- function(object, fit.measures = "all",
 
     if(any(c("cn_05", "cn_01") %in% fit.measures)) {
         # catch df=0, X2=0
-        if(df == 0 && X2 == 0) {
+        if(df == 0 && X2 < .Machine$double.eps) {
             CN_05 <- as.numeric(NA)
             CN_01 <- as.numeric(NA)
         } else {
@@ -1414,7 +1430,7 @@ lav_fit_measures <- function(object, fit.measures = "all",
 }
 
 # print a nice summary of the fit measures
-print.lavaan.fitMeasures <- function(x, ..., nd = 3L, add.h0 = FALSE) {
+print.lavaan.fitMeasures <- function(x, ..., nd = 3L, add.h0 = TRUE) {
 
     names.x <- names(x)
 

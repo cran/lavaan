@@ -18,9 +18,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                       NACOV             = NULL,
                                       gamma.n.minus.one = FALSE,
                                       se                = "standard",
-                                      information       = "expected",
+                                      test              = "standard",
                                       ridge             = 1e-5,
-                                      optim.method      = "nlminb",
                                       zero.add          = c(0.5, 0.0),
                                       zero.keep.margins = TRUE,
                                       zero.cell.warn    = TRUE,
@@ -43,6 +42,15 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     DataOv <- lavdata@ov
     eXo <- lavdata@eXo
     WT  <- lavdata@weights
+
+    # new in 0.6-6
+    # if sampling weights have been used, redefine nobs:
+    # per group, we define nobs == sum(wt)
+    for(g in seq_len(ngroups)) {
+        if(!is.null(WT[[g]])) {
+            nobs[[g]] <- sum(WT[[g]])
+        }
+    }
 
     # sample statistics per group
 
@@ -120,10 +128,15 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         # FIXME: check dimension of WLS.V!!
     }
 
-    NACOV.compute <- TRUE
+    NACOV.compute <- FALSE # since 0.6-6
     if(is.null(NACOV)) {
         NACOV      <- vector("list", length = ngroups)
         NACOV.user <- FALSE
+        if(se == "robust.sem" || test %in% c("satorra.bentler",
+                                             "mean.var.adjusted",
+                                             "scaled.shifted")) {
+            NACOV.compute <- TRUE
+        }
     } else if(is.logical(NACOV)) {
         if(!NACOV) {
             NACOV.compute <- FALSE
@@ -133,7 +146,6 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         NACOV.user <- FALSE
         NACOV      <- vector("list", length = ngroups)
     } else {
-        NACOV.compute <- FALSE
         if(!is.list(NACOV)) {
             if(ngroups == 1L) {
                 NACOV <- list(NACOV)
@@ -220,15 +232,14 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
             if(conditional.x) {
                 CAT <- muthen1984(Data=X[[g]],
+                                  wt = WT[[g]],
                                   ov.names=ov.names[[g]],
                                   ov.types=ov.types,
                                   ov.levels=ov.levels,
                                   ov.names.x=ov.names.x[[g]],
                                   eXo=eXo[[g]],
                                   group = g, # for error messages only
-                                  missing = missing, # listwise or pairwise?
                                   WLS.W = WLS.W,
-                                  optim.method = optim.method,
                                   zero.add = zero.add,
                                   zero.keep.margins = zero.keep.margins,
                                   zero.cell.warn = FALSE,
@@ -236,15 +247,14 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                   verbose=debug)
             } else {
                 CAT <- muthen1984(Data=X[[g]],
+                                  wt = WT[[g]],
                                   ov.names=ov.names[[g]],
                                   ov.types=ov.types,
                                   ov.levels=ov.levels,
                                   ov.names.x=NULL,
                                   eXo=NULL,
                                   group = g, # for error messages only
-                                  missing = missing, # listwise or pairwise?
                                   WLS.W = WLS.W,
-                                  optim.method = optim.method,
                                   zero.add = zero.add,
                                   zero.keep.margins = zero.keep.margins,
                                   zero.cell.warn = FALSE,
@@ -616,7 +626,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                             # ginv does the trick, but perhaps this is overkill
                             # just removing the zero rows/cols, invert, and
                             # fill back in the zero rows/cols would do it
-                            WLS.V[[g]] <- MASS::ginv(NACOV[[g]])
+                            #WLS.V[[g]] <- MASS::ginv(NACOV[[g]])
+                            WLS.V[[g]] <- lav_matrix_symmetric_inverse(NACOV[[g]])
                         }
                     } else if(estimator == "DWLS") {
                         dacov <- diag(NACOV[[g]])
@@ -796,6 +807,13 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
         if(!is.list(sample.mean.x)) {
             sample.mean.x <- list(sample.mean.x)
         }
+    } else if(is.null(sample.cov.x) && length(unlist(ov.names.x)) > 0L) {
+        # fixed.x = TRUE, but only joint sample.cov is provided
+        conditional.x <- FALSE
+        fixed.x <- TRUE
+
+        # create sample.cov.x and sample.mean.x later...
+
     } else {
         conditional.x <- FALSE
         fixed.x <- FALSE
@@ -1138,8 +1156,17 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
 
                 # fixed.x?
                 if(fixed.x) {
-                    cov.x[[g]]  <- unclass(unname(sample.cov.x[[g]]))
-                    mean.x[[g]] <- unclass(unname(sample.mean.x[[g]]))
+                    if(is.null(sample.cov.x)) {
+                        cov.x[[g]] <- cov[[g]][x.idx[[g]], x.idx[[g]], 
+                                               drop = FALSE]
+                    } else {
+                        cov.x[[g]]  <- unclass(unname(sample.cov.x[[g]]))
+                    }
+                    if(is.null(sample.mean.x)) {
+                        mean.x[[g]] <- mean[[g]][x.idx[[g]]]
+                    } else {
+                        mean.x[[g]] <- unclass(unname(sample.mean.x[[g]]))
+                    }
                 }
             }
         }

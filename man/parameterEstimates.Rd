@@ -5,13 +5,16 @@
 \description{
 Parameter estimates of a latent variable model.}
 \usage{
-parameterEstimates(object, se = TRUE, zstat = TRUE, pvalue = TRUE,
-                   ci = TRUE, level = 0.95, boot.ci.type = "perc",
-                   standardized = FALSE, cov.std = TRUE, fmi = FALSE,
-                   remove.system.eq = TRUE, remove.eq = TRUE,
-                   remove.ineq = TRUE, remove.def = FALSE,
-                   remove.nonfree = FALSE, rsquare = FALSE, 
-                   add.attributes = FALSE,
+parameterEstimates(object, 
+                   se = TRUE, zstat = TRUE, pvalue = TRUE, ci = TRUE, 
+                   standardized = FALSE, 
+                   fmi = FALSE, level = 0.95, boot.ci.type = "perc", 
+                   cov.std = TRUE, fmi.options = list(), 
+                   rsquare = FALSE, 
+                   remove.system.eq = TRUE, remove.eq = TRUE, 
+                   remove.ineq = TRUE, remove.def = FALSE, 
+                   remove.nonfree = FALSE, 
+                   add.attributes = FALSE, 
                    output = "data.frame", header = FALSE)
 }
 \arguments{
@@ -51,6 +54,9 @@ fraction of missing information for each estimated parameter. Only
 available if
 \code{estimator="ML"}, \code{missing="(fi)ml"}, and \code{se="standard"}.
 See references for more information.}
+\item{fmi.options}{List. If non-empty, arguments can be provided to alter
+the default options when the model is fitted with the complete(d) data;
+otherwise, the same options are used as the original model.}
 \item{remove.eq}{Logical. If \code{TRUE}, filter the output by removing all
 rows containing user-specified equality constraints, if any.}
 \item{remove.system.eq}{Logical. If \code{TRUE}, filter the output by

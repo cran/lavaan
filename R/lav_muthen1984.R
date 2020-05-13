@@ -18,10 +18,9 @@ muthen1984 <- function(Data              = NULL,
                        ov.levels         = NULL,
                        ov.names.x        = character(0L),
                        eXo               = NULL,
+                       wt                = NULL,
                        verbose           = FALSE,
-                       missing           = "listwise",
                        WLS.W             = TRUE,
-                       optim.method      = "nlminb",
                        zero.add          = c(0.5, 0.0),
                        zero.keep.margins = TRUE,
                        zero.cell.warn    = FALSE,
@@ -30,27 +29,6 @@ muthen1984 <- function(Data              = NULL,
 
     # just in case Data is a vector
     Data <- as.matrix(Data)
-
-
-    # internal function lav_crossprod2
-    if(missing == "listwise") {
-        lav_crossprod2 <- base::crossprod
-    } else { # pairwise, we can have missing values
-        lav_crossprod2 <- function(x, y) sum(x * y, na.rm = TRUE)
-    }
-
-    # pairwise version
-    # FIXME: surely a much better/faster solution is possible??
-    lav_crossprod_matrix <- function(A) {
-        ndim <- NCOL(A)
-        # off-diagonal
-        upper <- apply(combn(NCOL(A),2),2,
-                       function(x) sum(A[,x[1]] * A[,x[2]], na.rm=TRUE))
-        tmp <- diag(apply(A, 2, function(x) sum(x*x, na.rm=TRUE)))
-        tmp[ lav_matrix_vechru_idx(ndim, diagonal = FALSE) ] <- upper
-        tmp[ lav_matrix_vech_idx(  ndim, diagonal = FALSE) ] <- upper
-        tmp
-    }
 
     nvar <- NCOL(Data); N <- NROW(Data)
     num.idx <- which(ov.types == "numeric")
@@ -69,7 +47,7 @@ muthen1984 <- function(Data              = NULL,
         cat("Exogenous variable names:\n"); print(ov.names.x); cat("\n")
     }
 
-    step1 <- lav_samplestats_step1(Y = Data, ov.names = ov.names,
+    step1 <- lav_samplestats_step1(Y = Data, wt = wt, ov.names = ov.names,
         ov.types = ov.types, ov.levels = ov.levels, ov.names.x = ov.names.x,
         eXo = eXo, scores.flag = WLS.W, group = group)
 
@@ -104,12 +82,11 @@ muthen1984 <- function(Data              = NULL,
     # stage two -- correlations
 
     if(verbose) cat("\n\nSTEP 2: covariances/correlations:\n")
-    COR <- lav_samplestats_step2(UNI = FIT, ov.names = ov.names,
+    COR <- lav_samplestats_step2(UNI = FIT, wt = wt, ov.names = ov.names,
                                  zero.add = zero.add,
                                  zero.keep.margins = zero.keep.margins,
                                  zero.cell.warn = zero.cell.warn,
-                                 zero.cell.tables = zero.cell.tables,
-                                 optim.method = optim.method)
+                                 zero.cell.tables = zero.cell.tables)
     empty.cell.tables <- attr(COR, "zero.cell.tables")
     attr(COR, "zero.cell.tables") <- NULL
 
@@ -139,6 +116,13 @@ muthen1984 <- function(Data              = NULL,
 
     A11.size <- NCOL(SC.TH) + NCOL(SC.SL) + NCOL(SC.VAR)
 
+
+
+
+
+
+
+
     # A21
     A21 <- matrix(0, pstar, A11.size)
     H22 <- diag(pstar) # for the delta rule
@@ -161,124 +145,182 @@ muthen1984 <- function(Data              = NULL,
                 var.idx_j <- NCOL(SC.TH) + match(j, num.idx)
             }
             if(ov.types[i] == "numeric" && ov.types[j] == "numeric") {
-                SC.COR.UNI <- pp_cor_scores(rho=COR[i,j],
-                                            fit.y1=FIT[[i]],
-                                            fit.y2=FIT[[j]])
+                SC.COR.UNI <- lav_bvreg_cor_scores(rho    = COR[i,j],
+                                                   fit.y1 = FIT[[i]],
+                                                   fit.y2 = FIT[[j]],
+                                                   wt     = wt)
 
                 # RHO
-                SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                if(is.null(wt)) {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                } else {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho / wt # unweight
+                }
 
                 # TH
                 A21[pstar.idx, th.idx_i] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.mu.y1)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.mu.y1)
                 A21[pstar.idx, th.idx_j] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.mu.y2)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.mu.y2)
                 # SL
                 if(nexo > 0L) {
                     A21[pstar.idx, sl.idx_i] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y1)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y1)
                     A21[pstar.idx, sl.idx_j] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y2)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y2)
                 }
                 # VAR
                 A21[pstar.idx, var.idx_i] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.var.y1)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.var.y1)
                 A21[pstar.idx, var.idx_j] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.var.y2)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.var.y2)
                 # H21 only needed for VAR
                 H21[pstar.idx, var.idx_i] <-
                     (sqrt(VAR[j]) * COR[i,j]) / (2*sqrt(VAR[i]))
                 H21[pstar.idx, var.idx_j] <-
                     (sqrt(VAR[i]) * COR[i,j]) / (2*sqrt(VAR[j]))
                 H22[pstar.idx, pstar.idx] <- sqrt(VAR[i]) * sqrt(VAR[j])
+
+
+
+
             } else if(ov.types[i] == "numeric" && ov.types[j] == "ordered") {
-                SC.COR.UNI <- ps_cor_scores(rho=COR[i,j],
-                                            fit.y1=FIT[[i]],
-                                            fit.y2=FIT[[j]])
+                SC.COR.UNI <- lav_bvmix_cor_scores(rho    = COR[i,j],
+                                                   fit.y1 = FIT[[i]],
+                                                   fit.y2 = FIT[[j]],
+                                                   wt     = wt)
                 # RHO
-                SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                if(is.null(wt)) {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                } else {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho / wt # unweight
+                }
 
                 # TH
                 A21[pstar.idx, th.idx_i] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.mu.y1)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.mu.y1)
                 A21[pstar.idx, th.idx_j] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.th.y2)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.th.y2)
                 # SL
                 if(nexo > 0L) {
                     A21[pstar.idx, sl.idx_i] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y1)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y1)
                     A21[pstar.idx, sl.idx_j] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y2)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y2)
                 }
                 # VAR
                 A21[pstar.idx, var.idx_i] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.var.y1)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.var.y1)
                 # H21 only need for VAR
                 H21[pstar.idx,  var.idx_i] <- COR[i,j] / (2*sqrt(VAR[i]))
                 H22[pstar.idx, pstar.idx] <- sqrt(VAR[i])
+
+
+
             } else if(ov.types[j] == "numeric" && ov.types[i] == "ordered") {
-                SC.COR.UNI <- ps_cor_scores(rho=COR[i,j],
-                                            fit.y1=FIT[[j]],
-                                            fit.y2=FIT[[i]])
+                SC.COR.UNI <- lav_bvmix_cor_scores(rho    = COR[i,j],
+                                                   fit.y1 = FIT[[j]],
+                                                   fit.y2 = FIT[[i]],
+                                                   wt     = wt)
                 # RHO
-                SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                if(is.null(wt)) {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                } else {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho / wt # unweight
+                }
 
                 # TH
                 A21[pstar.idx, th.idx_j] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.mu.y1)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.mu.y1)
                 A21[pstar.idx, th.idx_i] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.th.y2)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.th.y2)
                 # SL
                 if(nexo > 0L) {
                     A21[pstar.idx, sl.idx_j] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y1)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y1)
                     A21[pstar.idx, sl.idx_i] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y2)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y2)
                 }
                 # VAR
                 A21[pstar.idx, var.idx_j] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.var.y1)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.var.y1)
                 # H21 only for VAR
                 H21[pstar.idx, var.idx_j] <- COR[i,j] / (2*sqrt(VAR[j]))
                 H22[pstar.idx, pstar.idx] <- sqrt(VAR[j])
+
+
+
             } else if(ov.types[i] == "ordered" && ov.types[j] == "ordered") {
                 # polychoric correlation
-                SC.COR.UNI <- pc_cor_scores(rho=COR[i,j],
-                                            fit.y1=FIT[[i]],
-                                            fit.y2=FIT[[j]])
+                SC.COR.UNI <- lav_bvord_cor_scores(rho    = COR[i,j],
+                                                   fit.y1 = FIT[[i]],
+                                                   fit.y2 = FIT[[j]],
+                                                   wt     = wt)
                 # RHO
-                SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                if(is.null(wt)) {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho
+                } else {
+                    SC.COR[,pstar.idx] <- SC.COR.UNI$dx.rho / wt # unweight
+                }
 
                 # TH
                 A21[pstar.idx, th.idx_i] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.th.y1)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.th.y1)
                 A21[pstar.idx, th.idx_j] <-
-                    lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.th.y2)
+                    lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                         SC.COR.UNI$dx.th.y2)
                 # SL
                 if(nexo > 0L) {
                     A21[pstar.idx, sl.idx_i] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y1)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y1)
                     A21[pstar.idx, sl.idx_j] <-
-                        lav_crossprod2(SC.COR[,pstar.idx], SC.COR.UNI$dx.sl.y2)
+                        lav_matrix_crossprod(SC.COR[,pstar.idx],
+                                             SC.COR.UNI$dx.sl.y2)
                 }
                 # NO VAR
             }
         }
     }
+    if(!is.null(wt)) {
+        SC.COR <- SC.COR * wt # reweight
+    }
+
+
+
 
 
     # stage three
+
     SC <- cbind(SC.TH, SC.SL, SC.VAR, SC.COR)
-    if(missing == "listwise") {
-        INNER <- crossprod(SC)
-    } else {
-        INNER <- lav_crossprod_matrix(SC)
-    }
+    INNER <- lav_matrix_crossprod(SC)
 
     # A11
     # new approach (2 June 2012): A11 is just a 'sparse' version of
     # (the left upper block of) INNER
     A11 <- matrix(0, A11.size, A11.size)
+    if(!is.null(wt)) {
+        INNER2 <- lav_matrix_crossprod(SC / wt, SC)
+    } else {
+        INNER2 <- INNER
+    }
     for(i in 1:nvar) {
         th.idx <- th.start.idx[i]:th.end.idx[i]
         sl.idx <- integer(0L)
@@ -292,7 +334,7 @@ muthen1984 <- function(Data              = NULL,
             var.idx <- NCOL(SC.TH) + NCOL(SC.SL) + match(i, num.idx)
         }
         a11.idx <- c(th.idx, sl.idx, var.idx)
-        A11[a11.idx, a11.idx] <- INNER[a11.idx, a11.idx]
+        A11[a11.idx, a11.idx] <- INNER2[a11.idx, a11.idx]
     }
 
     ##### DEBUG ######
@@ -316,11 +358,16 @@ muthen1984 <- function(Data              = NULL,
     # A22 (diagonal)
     A22 <- matrix(0, pstar, pstar)
     for(i in seq_len(pstar)) {
-        A22[i,i] <- sum( SC.COR[,i]*SC.COR[,i], na.rm=TRUE )
+        if(is.null(wt)) {
+            A22[i,i] <- sum( SC.COR[,i] * SC.COR[,i], na.rm=TRUE )
+        } else {
+            A22[i,i] <- sum( SC.COR[,i] * SC.COR[,i]/wt, na.rm=TRUE )
+        }
     }
 
     # A12 (zero)
     A12 <- matrix(0, NROW(A11), NCOL(A22))
+
 
     #B <- rbind( cbind(A11,A12),
     #            cbind(A21,A22) )
@@ -393,6 +440,7 @@ muthen1984 <- function(Data              = NULL,
         WLS.W[NUM.idx,] <- -WLS.W[NUM.idx,]
         WLS.W[,NUM.idx] <- -WLS.W[,NUM.idx]
     }
+
 
     out <- list(TH=TH, SLOPES=SLOPES, VAR=VAR, COR=COR, COV=COV,
                 SC=SC, TH.NOX=TH.NOX,TH.NAMES=TH.NAMES, TH.IDX=TH.IDX,

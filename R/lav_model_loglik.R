@@ -59,10 +59,13 @@ lav_model_loglik <- function(lavdata        = NULL,
             } else if(lavsamplestats@missing.flag) {
                 logl.group[g] <-
                     lav_mvnorm_missing_loglik_samplestats(
-                        Yp    = lavsamplestats@missing[[g]],
-                        Mu    = lavimplied$mean[[g]],
-                        Sigma = lavimplied$cov[[g]],
-                        x.idx = lavsamplestats@x.idx[[g]])
+                        Yp     = lavsamplestats@missing[[g]],
+                        Mu     = lavimplied$mean[[g]],
+                        Sigma  = lavimplied$cov[[g]],
+                        x.idx  = lavsamplestats@x.idx[[g]],
+                        x.mean = lavsamplestats@mean.x[[g]],
+                        x.cov  = lavsamplestats@cov.x[[g]])
+
             } else { # single-level, complete data
                 if(lavoptions$conditional.x) {
                     logl.group[g] <- lav_mvreg_loglik_samplestats(
@@ -138,5 +141,6 @@ lav_model_loglik <- function(lavdata        = NULL,
                 estimator     = lavoptions$estimator,
                 conditional.x = lavoptions$conditional.x,
                 fixed.x       = lavoptions$fixed.x)
+
     out
 }

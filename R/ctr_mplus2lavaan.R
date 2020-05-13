@@ -7,10 +7,10 @@
 
 trimSpace <- function(string) {
   stringTrim <- sapply(string, function(x) {
-        x <- sub("^\\s*", "", x, perl=TRUE)
-        x <- sub("\\s*$","", x, perl=TRUE)
-        return(x)
-      }, USE.NAMES=FALSE)
+    x <- sub("^\\s*", "", x, perl=TRUE)
+    x <- sub("\\s*$","", x, perl=TRUE)
+    return(x)
+  }, USE.NAMES=FALSE)
   return(stringTrim)
 }
 
@@ -210,10 +210,10 @@ parseConstraints <- function(cmd) {
 
         #if Mplus uses a purely numeric constraint, then add ".con" prefix to be consistent with R naming.
         con.split <- sapply(con.split, function(x) {
-              if (! suppressWarnings(is.na(as.numeric(x)))) {
-                make.names(paste0(".con", x))
-              } else { x }
-            })
+          if (! suppressWarnings(is.na(as.numeric(x)))) {
+            make.names(paste0(".con", x))
+          } else { x }
+        })
 
         #determine the parameters that precede the parentheses (either first character for p == 1 or character after preceding parentheses)
         prestrStart <- ifelse(p > 1, attr(parens, "capture.start")[p-1] + attr(parens, "capture.length")[p-1] + 1, 1)
@@ -352,52 +352,52 @@ expandGrowthCmd <- function(cmd) {
 #function to wrap long lines at a certain width, splitting on + symbols to be consistent with R syntax
 wrapAfterPlus <- function(cmd, width=90, exdent=5) {
   result <- lapply(cmd, function(line) {
-        if (nchar(line) > width) {
-          split <- c()
-          spos <- 1L
+    if (nchar(line) > width) {
+      split <- c()
+      spos <- 1L
 
-          plusMatch <- gregexpr("+", line, fixed=TRUE)[[1]]
-          mpos <- 1L
+      plusMatch <- gregexpr("+", line, fixed=TRUE)[[1]]
+      mpos <- 1L
 
-          if (plusMatch[1L] > 0L) {
-            #split after plus symbol
-            charsRemain <- nchar(line)
-            while(charsRemain > 0L) {
-              toProcess <- substr(line, nchar(line) - charsRemain + 1, nchar(line))
-              offset <- nchar(line) - charsRemain + 1
+      if (plusMatch[1L] > 0L) {
+        #split after plus symbol
+        charsRemain <- nchar(line)
+        while(charsRemain > 0L) {
+          toProcess <- substr(line, nchar(line) - charsRemain + 1, nchar(line))
+          offset <- nchar(line) - charsRemain + 1
 
-              if (nchar(remainder <- substr(line, offset, nchar(line))) <= (width - exdent)) {
-                #remainder of line fits within width -- no need to continue wrapping
-                split[spos] <- remainder
-                charsRemain <- 0
-              } else {
-
-                wrapAt <- which(plusMatch < (width + offset - exdent))
-                wrapAt <- wrapAt[length(wrapAt)] #at the final +
-
-                split[spos] <- substr(line, offset, plusMatch[wrapAt])
-                charsRemain <- charsRemain - nchar(split[spos])
-                spos <- spos + 1
-              }
-            }
-
-            #remove leading and trailing chars
-            split <- trimSpace(split)
-
-            #handle exdent
-            split <- sapply(1:length(split), function(x) {
-                  if (x > 1) paste0(paste(rep(" ", exdent), collapse=""), split[x])
-                  else split[x]
-                })
-
-            return(split)
+          if (nchar(remainder <- substr(line, offset, nchar(line))) <= (width - exdent)) {
+            #remainder of line fits within width -- no need to continue wrapping
+            split[spos] <- remainder
+            charsRemain <- 0
           } else {
-            return(strwrap(line, width=width, exdent=exdent)) #convention strwrap when no + present
+
+            wrapAt <- which(plusMatch < (width + offset - exdent))
+            wrapAt <- wrapAt[length(wrapAt)] #at the final +
+
+            split[spos] <- substr(line, offset, plusMatch[wrapAt])
+            charsRemain <- charsRemain - nchar(split[spos])
+            spos <- spos + 1
           }
-        } else {
-          return(line)
         }
-      })
+
+        #remove leading and trailing chars
+        split <- trimSpace(split)
+
+        #handle exdent
+        split <- sapply(1:length(split), function(x) {
+          if (x > 1) paste0(paste(rep(" ", exdent), collapse=""), split[x])
+          else split[x]
+        })
+
+        return(split)
+      } else {
+        return(strwrap(line, width=width, exdent=exdent)) #convention strwrap when no + present
+      }
+    } else {
+      return(line)
+    }
+  })
 
   #bind together multi-line expansions into single vector
   return(unname(do.call(c, result)))
@@ -514,8 +514,11 @@ mplus2lavaan.constraintSyntax <- function(syntax) {
 }
 
 mplus2lavaan.modelSyntax <- function(syntax) {
-  if (length(syntax) > 1L) { stop("mplus2lavaan.modelSyntax syntax argument should be a single string, not a vector") }
-  if (!is.character(syntax)) { stop("mplus2lavaan.modelSyntax accepts a single character string containing all model syntax") }
+  if (is.character(syntax)) {
+    if (length(syntax) > 1L) { syntax <- paste(syntax, collapse="\n") } #concatenate into a long string separated by newlines
+  } else {
+    stop("mplus2lavaan.modelSyntax accepts a single character string or character vector containing all model syntax")
+  }
 
   #because this is now exposed as a function in the package, handle the case of the user passing in full .inp file as text
   #we should only be interested in the MODEL and MODEL CONSTRAINT sections
@@ -557,19 +560,19 @@ mplus2lavaan.modelSyntax <- function(syntax) {
   syntax.split <- trimSpace(unlist( strsplit(syntax, ";") ))
 
   #format of parTable to mimic.
-# 'data.frame':	34 obs. of  12 variables:
-#  $ id    : int  1 2 3 4 5 6 7 8 9 10 ...
-#  $ lhs   : chr  "ind60" "ind60" "ind60" "dem60" ...
-#  $ op    : chr  "=~" "=~" "=~" "=~" ...
-#  $ rhs   : chr  "x1" "x2" "x3" "y1" ...
-#  $ user  : int  1 1 1 1 1 1 1 1 1 1 ...
-#  $ group : int  1 1 1 1 1 1 1 1 1 1 ...
-#  $ free  : int  0 1 2 0 3 4 5 0 6 7 ...
-#  $ ustart: num  1 NA NA 1 NA NA NA 1 NA NA ...
-#  $ exo   : int  0 0 0 0 0 0 0 0 0 0 ...
-#  $ label : chr  "" "" "" "" ...
-#  $ eq.id : int  0 0 0 0 0 0 0 0 0 0 ...
-#  $ unco  : int  0 1 2 0 3 4 5 0 6 7 ...
+  # 'data.frame':	34 obs. of  12 variables:
+  #  $ id    : int  1 2 3 4 5 6 7 8 9 10 ...
+  #  $ lhs   : chr  "ind60" "ind60" "ind60" "dem60" ...
+  #  $ op    : chr  "=~" "=~" "=~" "=~" ...
+  #  $ rhs   : chr  "x1" "x2" "x3" "y1" ...
+  #  $ user  : int  1 1 1 1 1 1 1 1 1 1 ...
+  #  $ group : int  1 1 1 1 1 1 1 1 1 1 ...
+  #  $ free  : int  0 1 2 0 3 4 5 0 6 7 ...
+  #  $ ustart: num  1 NA NA 1 NA NA NA 1 NA NA ...
+  #  $ exo   : int  0 0 0 0 0 0 0 0 0 0 ...
+  #  $ label : chr  "" "" "" "" ...
+  #  $ eq.id : int  0 0 0 0 0 0 0 0 0 0 ...
+  #  $ unco  : int  0 1 2 0 3 4 5 0 6 7 ...
 
   #vector of lavaan syntax
   lavaan.out <- c()
@@ -612,15 +615,15 @@ mplus2lavaan.modelSyntax <- function(syntax) {
           cmd <- sapply(1:length(lhs.split), function(i) paste(lhs.split[i], lav.operator, rhs.split[i]))
         } else {
 
-          #insert plus signs on the rhs
-          rhs <- gsub("\\s+", " + ", rhs, perl=TRUE)
+          #insert plus signs on the rhs as long as it isn't preceded or followed by a plus already
+          rhs <- gsub("(?<!\\+)\\s+(?!\\+)", " + ", rhs, perl=TRUE)
 
           if (length(lhs.split) > 1L) {
             #expand using possible combinations
             cmd <- sapply(lhs.split, function(larg) {
-                  pair <- paste(larg, lav.operator, rhs)
-                  return(pair)
-                })
+              pair <- paste(larg, lav.operator, rhs)
+              return(pair)
+            })
           } else {
             cmd <- paste(lhs, lav.operator, rhs)
           }
@@ -642,15 +645,19 @@ mplus2lavaan.modelSyntax <- function(syntax) {
           #Tricky syntax shift (and corresponding kludge). For means, need to put constraint on RHS as pre-multiplier of 1 (e.g., x1 ~ 5*1).
           #But parseConstraints returns constraints multiplied by parameters
           cmd <- sapply(means.scales.split, function(v) {
-                #shift pre-multiplier
-                if ((premult <- regexpr("([^\\*]+)\\*([^\\*]+)", v, perl=TRUE))[1L] > 0) {
-                  modifier <- substr(v, attr(premult, "capture.start")[1L], attr(premult, "capture.start")[1L] + attr(premult, "capture.length")[1L] - 1)
-                  paramName <- substr(v, attr(premult, "capture.start")[2L], attr(premult, "capture.start")[2L] + attr(premult, "capture.length")[2L] - 1)
-                  paste0(paramName, " ~ ", modifier, "*1")
-                } else {
-                  paste(v, "~ 1")
-                }
-              })
+            #shift pre-multiplier
+            if ((premult <- regexpr("([^\\*]+\\*[^\\*]+)\\*([^\\*]+)", v, perl=TRUE))[1L] > 0) { #double modifier: label and constraint
+              modifier <- substr(v, attr(premult, "capture.start")[1L], attr(premult, "capture.start")[1L] + attr(premult, "capture.length")[1L] - 1)
+              paramName <- substr(v, attr(premult, "capture.start")[2L], attr(premult, "capture.start")[2L] + attr(premult, "capture.length")[2L] - 1)
+              paste0(paramName, " ~ ", modifier, "*1")
+            } else if ((premult <- regexpr("([^\\*]+)\\*([^\\*]+)", v, perl=TRUE))[1L] > 0) {
+              modifier <- substr(v, attr(premult, "capture.start")[1L], attr(premult, "capture.start")[1L] + attr(premult, "capture.length")[1L] - 1)
+              paramName <- substr(v, attr(premult, "capture.start")[2L], attr(premult, "capture.start")[2L] + attr(premult, "capture.length")[2L] - 1)
+              paste0(paramName, " ~ ", modifier, "*1")
+            } else {
+              paste(v, "~ 1")
+            }
+          })
 
         } else if (operator == "{"){
           #only include constraints on RHS
@@ -670,6 +677,20 @@ mplus2lavaan.modelSyntax <- function(syntax) {
 
       #handle threshold substitution: $ -> |
       cmd <- gsub("$", "|", cmd, fixed=TRUE)
+
+      #if we have both starting/fixed values and constraints, these must be handled by separate commands.
+      #starting and fixed values are already handled in the pipeline by this point, so should be evident in the command
+      #bfi BY lab1*start(1)*bfi_1 ==> bfi BY lab1*bfi_1 + start(1)*bfi_1
+      double_asterisks <- grepl("\\s*[\\w\\(\\)\\.]+\\*[\\w\\(\\)\\.]+\\*[\\w\\(\\)\\.]+", cmd, perl=TRUE)
+
+      if (isTRUE(double_asterisks[1])) {
+        ss <- strsplit(cmd, "*", fixed=TRUE)[[1]]
+        if(length(ss) != 3) {
+          warning("problem interpreting double asterisk syntax: ", cmd)  #sanity check on my logic
+        } else {
+          cmd <- paste0(ss[1], "*", ss[3], " + ", ss[2], "*", ss[3])
+        }
+      }
 
       lavaan.out <- c(lavaan.out, cmd)
 
@@ -692,13 +713,13 @@ mplus2lavaan <- function(inpfile, run=TRUE) {
   if (!file.exists(inpfile)) { stop("Could not find file: ", inpfile) }
 
   #for future consideration. For now, require a .inp file
-#  if (length(inpfile) == 1L && grepl("\\.inp$", inpfile)) {
-#    if (!file.exists(inpfile)) { stop("Could not find file: ", inpfile) }
-#    inpfile.text <- scan(inpfile, what="character", sep="\n", strip.white=FALSE, blank.lines.skip=FALSE, quiet=TRUE)
-#  } else {
-#    #assume that inpfile itself is syntax (e.g., in a character vector)
-#    inpfile.text <- inpfile
-#  }
+  #  if (length(inpfile) == 1L && grepl("\\.inp$", inpfile)) {
+  #    if (!file.exists(inpfile)) { stop("Could not find file: ", inpfile) }
+  #    inpfile.text <- scan(inpfile, what="character", sep="\n", strip.white=FALSE, blank.lines.skip=FALSE, quiet=TRUE)
+  #  } else {
+  #    #assume that inpfile itself is syntax (e.g., in a character vector)
+  #    inpfile.text <- inpfile
+  #  }
 
   inpfile.text <- scan(inpfile, what="character", sep="\n", strip.white=FALSE, blank.lines.skip=FALSE, quiet=TRUE)
   sections <- divideInputIntoSections(inpfile.text, inpfile)
@@ -946,9 +967,9 @@ readMplusInputData <- function(mplus.inp, inpfile) {
     dat <- read.table(datFile, header=FALSE, col.names=mplus.inp$variable$names, colClasses="numeric")
     #loop over variables in missList and set missing values to NA
     dat[,names(missList)] <- lapply(names(missList), function(vmiss) {
-            dat[which(dat[,vmiss] %in% missList[[vmiss]]), vmiss] <- NA
-            return(dat[,vmiss])
-        })
+      dat[which(dat[,vmiss] %in% missList[[vmiss]]), vmiss] <- NA
+      return(dat[,vmiss])
+    })
 
     names(dat) <- mplus.inp$variable$names #loses these from the lapply
 

@@ -123,29 +123,35 @@ lav_options_default <- function(mimic = "lavaan") {
                 link                   = "default",
                 representation         = "default",
                 do.fit                 = TRUE,
+                bounds                 = "none", # new in 0.6-6
 
                 # inference
-                information            = "default",
-                h1.information         = "structured",
-                #h1.information.se      = "structured",
-                #h1.information.test    = "structured",
                 se                     = "default",
                 test                   = "default",
+
+                # information (se + test)
+                information            = c("default",    "default"),
+                h1.information         = c("structured", "structured"),
+                observed.information   = c("hessian",    "default"),
+
+                # information se only
+                information.meat       = "default",
+                h1.information.meat    = "default",
+
                 bootstrap              = 1000L,
-                observed.information   = "hessian",
                 gamma.n.minus.one      = FALSE,
                 #gamma.unbiased         = FALSE,
 
                 # optimization
                 control                = list(),
                 optim.method           = "nlminb",
-                optim.method.cor       = "nlminb",
                 optim.force.converged  = FALSE,
                 optim.gradient         = "analytic",
                 optim.init_nelder_mead = FALSE,
                 optim.var.transform    = "none",
                 optim.parscale         = "none",
-                optim.dx.tol           = 1e-03, # not too scrict
+                optim.dx.tol           = 1e-03, # not too strict
+                optim.bounds           = list(),
                 em.iter.max            = 10000L,
                 em.fx.tol              = 1e-08,
                 em.dx.tol              = 1e-04,
@@ -180,6 +186,9 @@ lav_options_default <- function(mimic = "lavaan") {
                 baseline.conditional.x.free.slopes = TRUE,
                 implied                = TRUE,
                 loglik                 = TRUE,
+
+                # storage of information
+                store.vcov             = "default",
 
                 # verbosity
                 verbose                = FALSE,
@@ -288,6 +297,11 @@ lav_options_set <- function(opt = NULL) {
         opt$group.equal <- unique(c(opt$group.equal, "intercepts"))
     }
 
+    # convenience (since 0.6-6)
+    if(opt$se == "sandwich") {
+        opt$se <- "robust.huber.white"
+    }
+
 
     # representation
     if(opt$representation == "default") {
@@ -343,21 +357,20 @@ lav_options_set <- function(opt = NULL) {
         }
 
         # information
-        if(opt$information == "default") {
+        if(opt$information[1] == "default") {
             if(opt$se == "robust.cluster") {
-                opt$information <- "observed"
+                opt$information[1] <- "observed"
             } else {
-                opt$information <- "expected"
+                opt$information[1] <- "expected"
             }
         }
-        #} else if(opt$information %in% c("observed", "first.order")) {
-        #    # nothing to do
-        #} else {
-        #    stop("lavaan ERROR: `information' argument must be \"observed\" in the multilevel case (for now)")
-        #}
-
-        #opt$fixed.x = FALSE
-        #opt$control <- list(gradient = "numerical")
+        if(length(opt$information) > 1L && opt$information[2] == "default") {
+            if(opt$se == "robust.cluster") {
+                opt$information[2] <- "observed"
+            } else {
+                opt$information[2] <- "expected"
+            }
+        }
     }
 
     # multilevel
@@ -380,7 +393,7 @@ lav_options_set <- function(opt = NULL) {
         # se
         if(opt$se == "default") {
             opt$se <- "standard"
-        } else if(opt$se %in% c("none", "standard", "robust.huber.white")) {
+        } else if(opt$se %in% c("none", "standard", "robust.huber.white", "sandwich")) {
             # nothing to do
         } else if(opt$se == "robust.sem") {
             opt$se <- "robust.huber.white"
@@ -389,17 +402,12 @@ lav_options_set <- function(opt = NULL) {
         }
 
         # information
-        if(opt$information == "default") {
-            opt$information <- "observed"
+        if(opt$information[1] == "default") {
+            opt$information[1] <- "observed"
         }
-        #} else if(opt$information %in% c("observed", "first.order")) {
-        #    # nothing to do
-        #} else {
-        #    stop("lavaan ERROR: `information' argument must be \"observed\" in the multilevel case (for now)")
-        #}
-
-        #opt$fixed.x = FALSE
-        #opt$control <- list(gradient = "numerical")
+        if(length(opt$information) > 1L && opt$information[2] == "default") {
+            opt$information[2] <- "observed"
+        }
     }
 
 
@@ -559,17 +567,24 @@ lav_options_set <- function(opt = NULL) {
             opt$se <- opt$missing
         }
         # information
-        if(opt$information == "default") {
+        if(opt$information[1] == "default") {
             # for both two.stage and robust.two.stage
-            opt$information <- "observed"
-        } else if(opt$information == "first.order") {
+            opt$information[1] <- "observed"
+        } else if(opt$information[1] == "first.order") {
             warning("lavaan WARNING: information will be set to ",
                      dQuote("observed"), " if missing = ",
                      dQuote(opt$missing) )
-            opt$information <- "observed"
+            opt$information[1] <- "observed"
         }
         # observed.information (ALWAYS "h1" for now)
-        opt$observed.information <- "h1"
+        opt$observed.information[1] <- "h1"
+
+        if(length(opt$information) > 1L && opt$information[2] == "default") {
+            # for both two.stage and robust.two.stage
+            opt$information[2] <- "observed"
+        }
+        # observed.information (ALWAYS "h1" for now)
+        opt$observed.information[2] <- "h1"
 
 
         # test
@@ -621,7 +636,10 @@ lav_options_set <- function(opt = NULL) {
     # estimator and se
     if(opt$se == "boot" || opt$se == "bootstrap") {
         opt$se <- "bootstrap"
-        opt$information <- "observed"
+        opt$information[1] <- "observed"
+        if(length(opt$information) > 1L && opt$information[2] == "default") {
+            opt$information[2] <- "observed"
+        }
         opt$bootstrap <- as.integer(opt$bootstrap)
         stopifnot(opt$bootstrap > 0L)
     }
@@ -651,13 +669,25 @@ lav_options_set <- function(opt = NULL) {
         } else if(opt$se == "first.order") {
             # backwards compatibility
             opt$se <- "standard"
-            opt$information <- "first.order"
+            opt$information[1] <- "first.order"
+            if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+                opt$information[2] <- "first.order"
+            }
         } else if(opt$se == "observed") {
             opt$se <- "standard"
-            opt$information <- "observed"
+            opt$information[1] <- "observed"
+            if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+                opt$information[2] <- "observed"
+            }
         } else if(opt$se == "expected") {
             opt$se <- "standard"
-            opt$information <- "expected"
+            opt$information[1] <- "expected"
+            if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+                opt$information[2] <- "expected"
+            }
         } else if(opt$se == "robust") {
             if(opt$missing %in% c("ml", "ml.x")) {
                 opt$se <- "robust.huber.white"
@@ -689,13 +719,10 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use ML estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
-        #if(!(opt$information %in% c("expected", "default"))) {
-        #    warning("lavaan WARNING: information will be set to ",
-        #            dQuote("expected"), " for estimator = ",
-        #            dQuote(toupper(est.orig)) )
-        #}
-        #opt$information <- "expected"
+        if(opt$se != "none" && opt$se != "external") {
+            opt$se <- "robust.sem"
+        }
+        #opt$information[1] <- "expected"
         # in 0.6, we allow for information = "observed" as well
         opt$missing <- "listwise"
     } else if(opt$estimator == "mlf") {
@@ -706,7 +733,11 @@ lav_options_set <- function(opt = NULL) {
         }
         if(opt$se != "none" && opt$se != "external") {
             opt$se <- "standard"
-            opt$information <- "first.order"
+            opt$information[1] <- "first.order"
+            if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+                opt$information[2] <- "first.order"
+            }
         }
     } else if(opt$estimator == "mlr") {
         opt$estimator <- "ML"
@@ -906,7 +937,11 @@ lav_options_set <- function(opt = NULL) {
         #opt$missing <- "listwise"
     } else if(opt$estimator == "pml") {
         opt$estimator <- "PML"
-        opt$information <- "observed"
+        opt$information[1] <- "observed"
+        if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+            opt$information[2] <- "observed"
+        }
         if(opt$se == "default") {
             opt$se <- "robust.huber.white"
         }
@@ -916,7 +951,11 @@ lav_options_set <- function(opt = NULL) {
         #opt$missing <- "listwise"
     } else if(opt$estimator %in% c("fml","umn")) {
         opt$estimator <- "FML"
-        opt$information <- "observed"
+        opt$information[1] <- "observed"
+        if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+            opt$information[2] <- "observed"
+        }
         if(opt$se == "default") {
             opt$se <- "standard"
         }
@@ -926,7 +965,11 @@ lav_options_set <- function(opt = NULL) {
         #opt$missing <- "listwise"
     } else if(opt$estimator == "reml") {
         opt$estimator <- "REML"
-        opt$information <- "observed"
+        opt$information[1] <- "observed"
+        if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+            opt$information[2] <- "observed"
+        }
         if(opt$se == "default") {
             opt$se <- "standard"
         }
@@ -936,7 +979,12 @@ lav_options_set <- function(opt = NULL) {
         opt$missing <- "listwise"
     } else if(opt$estimator %in% c("mml")) {
         opt$estimator <- "MML"
-        opt$information <- "observed"
+        opt$information[1] <- "observed"
+        opt$meanstructure <- TRUE
+        if(length(opt$information) > 1L &&
+               opt$information[2] == "default") {
+            opt$information[2] <- "observed"
+        }
         if(opt$se == "default") {
             opt$se <- "standard"
         }
@@ -1026,46 +1074,128 @@ lav_options_set <- function(opt = NULL) {
         }
     }
 
-    # information
-    if(opt$information == "default") {
+    # se information
+    if(opt$information[1] == "default") {
         if(opt$missing %in% c("ml", "ml.x") ||
            opt$se == "robust.huber.white"   ||
            opt$se == "first.order") {
            #nchar(opt$constraints) > 0L) {
-            opt$information <- "observed"
+            opt$information[1] <- "observed"
         } else {
-            opt$information <- "expected"
+            opt$information[1] <- "expected"
         }
-    } else if(opt$information %in% c("observed", "expected", "first.order")) {
+    } else if(opt$information[1] %in%
+              c("observed", "expected", "first.order")) {
         # nothing to do
     } else {
         stop("lavaan ERROR: information must be either \"expected\", \"observed\", or \"first.order\"\n")
     }
 
-    if(opt$h1.information == "structured" ||
-       opt$h1.information == "unstructured") {
+    # test information
+    if(length(opt$information) == 1L) {
+        opt$information <- rep(opt$information, 2L)
+    }
+    if(opt$information[2] == "default") {
+        if(opt$missing %in% c("ml", "ml.x") ||
+           opt$se == "robust.huber.white"   ||
+           opt$se == "first.order") {
+           #nchar(opt$constraints) > 0L) {
+            opt$information[2] <- "observed"
+        } else {
+            opt$information[2] <- "expected"
+        }
+    } else if(opt$information[2] %in%
+              c("observed", "expected", "first.order")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: information[2] must be either \"expected\", \"observed\", or \"first.order\"\n")
+    }
+
+    # information meat
+    if(length(opt$information.meat) > 1L) {
+        warning("lavaan WARNING: only first element of information.meat is used")
+        opt$information.meat <- opt$information.meat[1]
+    }
+    if(opt$information.meat == "default") {
+        opt$information.meat <- "first.order"
+    } else if(opt$information %in% c("first.order")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: information.meat must be \"first.order\" (for now) \n")
+    }
+
+    if(opt$observed.information[1] == "hessian" ||
+       opt$observed.information[1] == "h1") {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: observed.information must be either \"hessian\", or \"h1\"\n")
+    }
+
+    if(length(opt$observed.information) == 1L) {
+        opt$observed.information <- rep(opt$observed.information, 2L)
+    }
+    if(opt$observed.information[2] == "hessian" ||
+       opt$observed.information[2] == "h1") {
+        # do nothing
+    } else if(opt$observed.information[2] == "default") {
+        if(opt$test %in% c("satorra.bentler",
+                           "yuan.bentler",
+                           "yuan.bentler.mplus",
+                           "mean.var.adjusted",
+                           "scaled.shifted")) {
+            if(opt$estimator == "PML" || opt$test == "yuan.bentler.mplus") {
+                opt$observed.information[2] <- "hessian"
+            } else {
+                opt$observed.information[2] <- "h1" # CHANGED in 0.6-6!
+            }
+        } else {
+            # default is "hessian"
+            opt$observed.information[2] <- "hessian"
+        }
+    } else {
+        stop("lavaan ERROR: observed.information[2] must be either \"hessian\", or \"h1\"\n")
+    }
+
+    if(opt$h1.information[1] == "structured" ||
+       opt$h1.information[1] == "unstructured") {
         # nothing to do
     } else {
         stop("lavaan ERROR: h1.information must be either \"structured\" or \"unstructured\"\n")
     }
-    #if(opt$h1.information.test == "structured" ||
-    #   opt$h1.information.test == "unstructured") {
-    #    # nothing to do
-    #} else {
-    #    stop("lavaan ERROR: h1.information.se must be either \"structured\" or \"unstructured\"\n")
-    #}
+
+    if(length(opt$h1.information) == 1L) {
+        opt$h1.information <- rep(opt$h1.information, 2L)
+    }
+    if(opt$h1.information[2] == "structured" ||
+       opt$h1.information[2] == "unstructured") {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: h1.information[2] must be either \"structured\" or \"unstructured\"\n")
+    }
+
+    if(length(opt$h1.information.meat) > 1L) {
+        warning("lavaan WARNING: only first element of h1.information.meat is used")
+        opt$h1.information.meat <- opt$h1.information.meat[1]
+    }
+    if(opt$h1.information.meat == "default") {
+        opt$h1.information.meat <- opt$h1.information[1]
+    } else if(opt$h1.information.meat == "structured" ||
+              opt$h1.information.meat == "unstructured") {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: h1.information.meat must be either \"structured\" or \"unstructured\"\n")
+    }
 
     # check information if estimator is uls/wls and friends
     if(opt$estimator %in% c("ULS", "WLS", "DWLS")) {
-        if(opt$information != "expected") {
+        if(opt$information[1] != "expected") {
             warning("lavaan WARNING: information will be set to ",
                     dQuote("expected"), " for estimator = ", dQuote(opt$estimator))
-            opt$information <- "expected"
+            opt$information[1] <- "expected"
+            opt$information[2] <- "expected"
         }
-        #if(opt$h1.information != "structured") { # default value
-        #    warning("lavaan WARNING: h1.information is not used if estimator = ", dQuote(opt$estimator))
-        opt$h1.information <- "unstructured"
-        #}
+        opt$h1.information[1] <- "unstructured" # FIXME: allow option?
+        opt$h1.information[2] <- "unstructured" # FIXME: allow option?
     }
 
     # conditional.x
@@ -1236,6 +1366,60 @@ lav_options_set <- function(opt = NULL) {
              \"mean.var.adjusted\", \"scaled.shifted\", or \"bollen.stine\"")
     }
 
+
+    # optim.bounds
+    if(!is.null(opt$optim.bounds) && length(opt$optim.bounds) > 0L) {
+        # opt$bounds should be "default"
+        if(is.null(opt$bounds) || opt$bounds == "none") {
+            opt$bounds <- "user"
+        } else {
+            stop("lavaan ERROR: bounds and optim.bounds arguments can not be used together")
+        }
+    }
+
+    # bounds
+    if(is.null(opt$bounds)) {
+        opt$bounds <- "none" # for now
+    } else if(is.logical(opt$bounds)) {
+        if(opt$bounds) {
+            opt$bounds <- "default"
+        } else {
+            opt$bounds <- "none"
+        }
+    }
+
+    # handle different 'profiles'
+    if(opt$bounds == "none") {
+        opt$optim.bounds <- list(lower = character(0L),
+                                 upper = character(0L))
+    } else if(opt$bounds == "user") {
+        # nothing to do
+    } else if(opt$bounds == "default") {
+        opt$optim.bounds <- list(lower = c("ov.var", "lv.var", "loadings"),
+                                 upper = c("ov.var", "lv.var", "loadings"),
+                                 lower.factor = c(1.2, 1.0, 1.1),
+                                 upper.factor = c(1.2, 1.3, 1.1),
+                                 min.reliability.marker = 0.1,
+                                 min.var.lv.exo = 0.0,
+                                 min.var.lv.endo = 0.0)
+    } else if(opt$bounds == "pos.var") {
+        opt$optim.bounds <- list(lower = c("ov.var", "lv.var"),
+                                 lower.factor = c(1, 1),
+                                 min.reliability.marker = 0.0,
+                                 min.var.lv.exo = 0.0,
+                                 min.var.lv.endo = 0.0)
+    } else if(opt$bounds == "pos.ov.var") {
+        opt$optim.bounds <- list(lower = c("ov.var"),
+                                 lower.factor = 1)
+    } else if(opt$bounds == "pos.lv.var") {
+        opt$optim.bounds <- list(lower = c("lv.var"),
+                                 lower.factor = 1,
+                                 min.reliability.marker = 0.0,
+                                 min.var.lv.exo = 0.0,
+                                 min.var.lv.endo = 0.0)
+    } else {
+        stop("lavaan ERROR: unknown `bounds' option: ", opt$bounds)
+    }
 
     if(opt$debug) { cat("lavaan DEBUG: lavaanOptions OUT\n"); str(opt) }
 

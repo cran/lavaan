@@ -119,10 +119,13 @@ bootstrap.internal <- function(object          = NULL,
         if(FUN == "coef") {
             t.star <- matrix(as.numeric(NA), R, lavmodel@nx.free)
             lavoptions$test <- "none"
+            lavoptions$baseline <- FALSE; lavoptions$h1 <- FALSE
         } else if(FUN == "test") {
             t.star <- matrix(as.numeric(NA), R, 1L)
+            lavoptions$baseline <- FALSE; lavoptions$h1 <- FALSE
         } else if(FUN == "coeftest") {
             t.star <- matrix(as.numeric(NA), R, lavmodel@nx.free + 1L)
+            lavoptions$baseline <- FALSE; lavoptions$h1 <- FALSE
         }
     }
 
@@ -325,6 +328,8 @@ bootstrap.internal <- function(object          = NULL,
                                estimator     = lavoptions$estimator,
                                mimic         = lavoptions$mimic,
                                meanstructure = lavoptions$meanstructure,
+                               se            = lavoptions$se,
+                               test          = lavoptions$test,
                                conditional.x = lavoptions$conditional.x,
                                group.w.free  = lavoptions$group.w.free,
                                #missing.h1    = (FUN != "coef"), # not if fixed.x, otherwise starting values fails!

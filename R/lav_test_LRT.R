@@ -14,8 +14,6 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                        scaled.shifted = TRUE,
                        H1 = TRUE, type = "Chisq", model.names = NULL) {
 
-    if(object@optim$npar > 0L && !object@optim$converged)
-        stop("lavaan ERROR: model did not converge")
     type <- tolower(type)
     method <- tolower( gsub("[-_\\.]", "", method ) )
 
@@ -25,8 +23,11 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
     mcall <- match.call(expand.dots = TRUE)
     dots <- list(...)
 
-    modp <- if(length(dots))
-        sapply(dots, is, "lavaan") else logical(0)
+    modp <- if(length(dots)) {
+        sapply(dots, is, "lavaan")
+    } else {
+         logical(0)
+    }
 
     # some general properties (taken from the first model)
     estimator <- object@Options$estimator
@@ -40,24 +41,7 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
         if(type == "cf") {
             warning("lavaan WARNING: `type' argument is ignored for a single model")
         }
-        aic <- bic <- c(NA, NA)
-        if(estimator == "ML") {
-            aic <- c(NA, AIC(object))
-            bic <- c(NA, BIC(object))
-        }
-
-        val <- data.frame(Df = c(0, object@test[[1L]]$df),
-                          AIC = aic,
-                          BIC = bic,
-                          Chisq = c(0, object@test[[1L]]$stat),
-                          "Chisq diff" = c(NA, object@test[[1L]]$stat),
-                          "Df diff" = c(NA, object@test[[1L]]$df),
-                          "Pr(>Chisq)" = c(NA, object@test[[1L]]$pvalue),
-                          row.names = c("Saturated", "Model"),
-                          check.names = FALSE)
-        attr(val, "heading") <- "Chi-Squared Test Statistic (unscaled)\n"
-        class(val) <- c("anova", class(val))
-        return(val)
+        return(lav_test_lrt_single_model(object))
     }
 
     # list of models
@@ -80,7 +64,9 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
 
     # put them in order (using degrees of freedom)
     ndf <- sapply(mods, function(x) x@test[[1]]$df)
-    mods <- mods[order(ndf)]
+    order.idx <- order(ndf)
+    mods <- mods[order.idx]
+    ndf <- ndf[order.idx]
 
     # here come the checks -- eventually, an option may skip this
     if(TRUE) {
@@ -105,6 +91,11 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
            sum(mean.structure) < length(mean.structure)) {
             warning("lavaan WARNING: not all models have a meanstructure")
         }
+
+        # 4. all converged?
+        if(!all(sapply(mods, lavInspect, "converged"))) {
+            warning("lavaan WARNING: not all models converged")
+        }
     }
 
     mods.scaled <- unlist( lapply(mods, function(x) {
@@ -112,7 +103,8 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
               "mean.var.adjusted", "scaled.shifted") %in%
             unlist(sapply(slot(x, "test"), "[", "test")) ) }))
 
-    if(all(mods.scaled)) {
+    if(all(mods.scaled | ndf == 0) && any(mods.scaled)) {
+        # Note: if df=0, test is not really robust, hence the above condition
         scaled <- TRUE
         # which type?
         TEST <- object@test[[2]]$test
@@ -122,6 +114,49 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
     } else {
         stop("lavaan ERROR: some models (but not all) have scaled test statistics")
     }
+
+    # select method
+    if(method == "default") {
+        if(estimator == "PML") {
+            method <- "mean.var.adjusted.PLRT"
+        } else if(scaled) {
+            if(TEST %in% c("satorra.bentler", "yuan.bentler",
+                           "yuan.bentler.mplus")) {
+                method <- "satorra.bentler.2001"
+            } else {
+                method <- "satorra.2000"
+            }
+        } else {
+            # nothing to do
+        }
+    } else if(method == "meanvaradjustedplrt" ||
+              method == "mean.var.adjusted.PLRT") {
+        method <- "mean.var.adjusted.PLRT"
+        stopifnot(estimator == "PML")
+    } else if(method == "satorra2000") {
+        method <- "satorra.2000"
+    } else if(method == "satorrabentler2001") {
+        method <- "satorra.bentler.2001"
+    } else if(method == "satorrabentler2010") {
+        method <- "satorra.bentler.2010"
+    } else {
+        stop("lavaan ERROR: unknown method for scaled difference test: ", method)
+    }
+
+    # check method if scaled = FALSE
+    if(type == "chisq" && !scaled &&
+        method %in% c("mean.var.adjusted.PLRT",
+                      "satorra.bentler.2001",
+                      "satorra.2000",
+                      "satorra.bentler.2010")) {
+
+            warning("lavaan WARNING: method = ", dQuote(method),
+                    "\n\t but no robust test statistics were used;",
+                    "\n\t switching to the standard chi-square difference test")
+
+        method = "default"
+    }
+
 
     # which models have used a MEANSTRUCTURE?
     mods.meanstructure <- sapply(mods, function(x) {
@@ -152,32 +187,15 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
     STAT.delta  <- c(NA, diff(STAT))
     Df.delta     <- c(NA, diff(Df))
 
+    # check for negative values in STAT.delta
+    if(any(STAT.delta[-1] < 0)) {
+        warning("lavaan WARNING: some restricted models fit better than less ",
+                "\n\t restricted models; either these models are not nested, or",
+                "\n\t the less restricted model failed to reach a global optimum.")
+    }
+
     # correction for scaled test statistics
     if(type == "chisq" && scaled) {
-
-        # select method
-        if(method == "default") {
-            if(estimator == "PML") {
-                method <- "mean.var.adjusted.PLRT"
-            } else if(TEST %in% c("satorra.bentler", "yuan.bentler",
-                                  "yuan.bentler.mplus")) {
-                method <- "satorra.bentler.2001"
-            } else {
-                method <- "satorra.2000"
-            }
-        } else if(method == "meanvaradjustedplrt" ||
-                  method == "mean.var.adjusted.PLRT") {
-            method <- "mean.var.adjusted.PLRT"
-            stopifnot(estimator == "PML")
-        } else if(method == "satorra2000") {
-            method <- "satorra.2000"
-        } else if(method == "satorrabentler2001") {
-            method <- "satorra.bentler.2001"
-        } else if(method == "satorrabentler2010") {
-            method <- "satorra.bentler.2010"
-        } else {
-            stop("lavaan ERROR: unknown method for scaled difference test: ", method)
-        }
 
         if(method == "satorra.bentler.2001") {
             # use formula from Satorra & Bentler 2001
@@ -294,5 +312,46 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
 
     return(val)
 
+}
+
+
+# anova table for a single model
+lav_test_lrt_single_model <- function(object) {
+
+    estimator <- object@Options$estimator
+
+    aic <- bic <- c(NA, NA)
+    if(estimator == "ML") {
+        aic <- c(NA, AIC(object))
+        bic <- c(NA, BIC(object))
+    }
+
+    if(length(object@test) > 1L) {
+        val <- data.frame(Df = c(0, object@test[[2L]]$df),
+                          AIC = aic,
+                          BIC = bic,
+                          Chisq = c(0, object@test[[2L]]$stat),
+                          "Chisq diff" = c(NA, object@test[[2L]]$stat),
+                          "Df diff" = c(NA, object@test[[2L]]$df),
+                          "Pr(>Chisq)" = c(NA, object@test[[2L]]$pvalue),
+                          row.names = c("Saturated", "Model"),
+                          check.names = FALSE)
+        attr(val, "heading") <- "Chi-Squared Test Statistic (scaled)\n"
+    } else {
+        val <- data.frame(Df = c(0, object@test[[1L]]$df),
+                          AIC = aic,
+                          BIC = bic,
+                          Chisq = c(0, object@test[[1L]]$stat),
+                          "Chisq diff" = c(NA, object@test[[1L]]$stat),
+                          "Df diff" = c(NA, object@test[[1L]]$df),
+                          "Pr(>Chisq)" = c(NA, object@test[[1L]]$pvalue),
+                          row.names = c("Saturated", "Model"),
+                          check.names = FALSE)
+        attr(val, "heading") <- "Chi-Squared Test Statistic (unscaled)\n"
+    }
+
+    class(val) <- c("anova", class(val))
+
+    val
 }
 

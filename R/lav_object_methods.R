@@ -63,7 +63,7 @@ function(object, header       = TRUE,
         } else {
             FIT <- fitMeasures(object, fit.measures="default")
             res$FIT = FIT
-            print.lavaan.fitMeasures( FIT, nd = nd )
+            print.lavaan.fitMeasures( FIT, nd = nd, add.h0 = FALSE )
         }
     }
 
@@ -73,7 +73,9 @@ function(object, header       = TRUE,
                                  cov.std = cov.std,
                                  remove.eq = FALSE, remove.system.eq = TRUE,
                                  remove.ineq = FALSE, remove.def = FALSE,
-                                 remove.nonfree = FALSE, output = "text",
+                                 remove.nonfree = FALSE, 
+                                 #remove.nonfree.scales = TRUE,
+                                 output = "text",
                                  header = TRUE)
         if(standardized && std.nox) {
             #PE$std.all <- PE$std.nox
@@ -140,7 +142,8 @@ standardizedSolution <-
     }
 
     # no se if class is not lavaan
-    if(class(object) != "lavaan") {
+    # using class() -- can't use inherits(), as this includes blavaan
+    if(class(object)[1L] != "lavaan") {
         if(missing(se) || !se) {
             se <- FALSE
             zstat <- FALSE
@@ -156,6 +159,9 @@ standardizedSolution <-
     LIST <- PARTABLE[,c("lhs", "op", "rhs", "exo")]
     if(!is.null(PARTABLE$group)) {
         LIST$group <- PARTABLE$group
+    }
+    if(!is.null(PARTABLE$block)) {
+        LIST$block <- PARTABLE$block
     }
 
     # add std and std.all columns
@@ -255,37 +261,53 @@ standardizedSolution <-
     if(output == "text") {
         class(LIST) <- c("lavaan.parameterEstimates", "lavaan.data.frame",
                          "data.frame")
-        # LIST$exo is needed for printing
+        # LIST$exo is needed for printing, don't remove it
+        attr(LIST, "group.label") <- object@Data@group.label
+        attr(LIST, "level.label") <- object@Data@level.label
         #attr(LIST, "header") <- FALSE
     } else {
         LIST$exo <- NULL
+        LIST$block <- NULL
         class(LIST) <- c("lavaan.data.frame", "data.frame")
     }
 
     LIST
 }
 
-parameterEstimates <- parameterestimates <- function(object,
-                                                     se    = TRUE,
-                                                     zstat = TRUE,
-                                                     pvalue = TRUE,
-                                                     ci = TRUE,
-                                                     level = 0.95,
-                                                     boot.ci.type = "perc",
-                                                     standardized = FALSE,
-                                                     cov.std = TRUE,
-                                                     fmi = FALSE,
-                                                     remove.system.eq = TRUE,
-                                                     remove.eq = TRUE,
-                                                     remove.ineq = TRUE,
-                                                     remove.def = FALSE,
-                                                     remove.nonfree = FALSE,
-                                                     rsquare = FALSE,
-                                                     add.attributes = FALSE,
-                                                     output = "data.frame",
-                                                     header = FALSE) {
+parameterEstimates <- 
+parameterestimates <- function(object,
 
-    if("lavaan.fsr" %in% class(object)) {
+                               # select columns
+                               se           = TRUE,
+                               zstat        = TRUE,
+                               pvalue       = TRUE,
+                               ci           = TRUE,
+                               standardized = FALSE,
+                               fmi          = FALSE,
+
+                               # control
+                               level        = 0.95,
+                               boot.ci.type = "perc",
+                               cov.std      = TRUE,
+                               fmi.options  = list(),
+
+                               # add rows
+                               rsquare = FALSE,
+ 
+                               # remove rows
+                               remove.system.eq      = TRUE,
+                               remove.eq             = TRUE,
+                               remove.ineq           = TRUE,
+                               remove.def            = FALSE,
+                               remove.nonfree        = FALSE,
+                               #remove.nonfree.scales = FALSE,
+
+                               # output
+                               add.attributes = FALSE,
+                               output = "data.frame",
+                               header = FALSE) {
+
+    if(inherits(object, "lavaan.fsr")) {
         return(object$PE)
     }
 
@@ -296,7 +318,8 @@ parameterEstimates <- parameterestimates <- function(object,
 
 
     # no se if class is not lavaan
-    if(class(object) != "lavaan") {
+    # can't use inherits(), as this would return TRUE if object is from blavaan
+    if(class(object)[1L] != "lavaan") {
         if(missing(se) || !se) {
             se <- FALSE
             zstat <- FALSE
@@ -391,6 +414,12 @@ parameterEstimates <- parameterestimates <- function(object,
         LIST$est <- lav_model_get_parameters(object@Model, type = "user",
                                              extra = TRUE)
     }
+    if(!is.null(PARTABLE$lower)) {
+        LIST$lower <- PARTABLE$lower
+    }
+    if(!is.null(PARTABLE$upper)) {
+        LIST$upper <- PARTABLE$upper
+    }
 
 
     # add se, zstat, pvalue
@@ -405,13 +434,17 @@ parameterEstimates <- parameterestimates <- function(object,
                 LIST$pvalue <- 2 * (1 - pnorm( abs(LIST$z) ))
                 # remove p-value if bounds have been used
                 if(!is.null(PARTABLE$lower)) {
-                   b.idx <- which(PARTABLE$lower > -Inf)
+                   b.idx <- which(abs(PARTABLE$lower - PARTABLE$est) <
+                                      sqrt(.Machine$double.eps) &
+                                  PARTABLE$free > 0L)
                    if(length(b.idx) > 0L) {
                        LIST$pvalue[b.idx] <- as.numeric(NA)
                    }
                 }
                 if(!is.null(PARTABLE$upper)) {
-                   b.idx <- which(PARTABLE$upper < Inf)
+                   b.idx <- which(abs(PARTABLE$upper - PARTABLE$est) <
+                                      sqrt(.Machine$double.eps) &
+                                  PARTABLE$free > 0L)
                    if(length(b.idx) > 0L) {
                        LIST$pvalue[b.idx] <- as.numeric(NA)
                    }
@@ -612,39 +645,49 @@ parameterEstimates <- parameterestimates <- function(object,
     # fractional missing information (if estimator="fiml")
     if(fmi) {
         SE.orig <- LIST$se
-        lavmodel <- object@Model; implied <- object@implied
-        COV <- if(lavmodel@conditional.x) implied$res.cov else implied$cov
-        MEAN <- if(lavmodel@conditional.x) implied$res.int else implied$mean
 
-        # provide rownames
-        for(g in 1:object@Data@ngroups)
-            rownames(COV[[g]]) <- object@Data@ov.names[[g]]
-
-        # if estimator="ML" and likelihood="normal" --> rescale
-        if(object@Options$estimator == "ML" &&
-           object@Options$likelihood == "normal") {
-            for(g in 1:object@Data@ngroups) {
-                N <- object@Data@nobs[[g]]
-                COV[[g]] <- (N+1)/N * COV[[g]]
-            }
+        # new in 0.6-6, use 'EM' based (unstructured) sample statistics
+        # otherwise, it would be as if we use expected info, while the
+        # original use observed, producing crazy results
+        if(object@Data@ngroups > 1L) {
+            EM.cov  <- lapply(lavInspect(object, "sampstat.h1"), "[[", "cov")
+            EM.mean <- lapply(lavInspect(object, "sampstat.h1"), "[[", "mean")
+        } else {
+            EM.cov  <- lavInspect(object, "sampstat.h1")$cov
+            EM.mean <- lavInspect(object, "sampstat.h1")$mean
         }
 
-        # fit another model, using the model-implied moments as input data
-        step2 <- lavaan(slotOptions  = object@Options,
-                        slotParTable = object@ParTable,
-                        sample.cov   = COV,
-                        sample.mean  = MEAN,
-                        sample.nobs  = object@Data@nobs)
-        SE2 <- lav_object_inspect_se(step2)
-        SE.step2 <- ifelse(SE2 == 0.0, as.numeric(NA), SE2)
-        if(rsquare) {
-            # add additional elements, since LIST$se is now longer
-            r2.idx <- which(LIST$op == "r2")
-            if(length(r2.idx) > 0L) {
-                SE.step2 <- c(SE.step2, rep(as.numeric(NA), length(r2.idx)))
-            }
+        PT <- parTable(object)
+        PT$ustart <- PT$est
+        PT$start <- PT$est <- NULL
+
+        this.options <- object@Options
+        if(!is.null(fmi.options) && is.list(fmi.options)) {
+            # modify original options
+            this.options <- modifyList(this.options, fmi.options)
         }
-        LIST$fmi <- 1-(SE.step2*SE.step2/(SE.orig*SE.orig))
+        # override
+        this.options$optim.method <- "none"
+        this.options$sample.cov.rescale <- FALSE
+        this.options$check.gradient <- FALSE
+        this.options$baseline <- FALSE
+        this.options$h1 <- FALSE
+        this.options$test <- FALSE
+
+        fit.complete <- lavaan(model = PT,
+                               sample.cov   = EM.cov,
+                               sample.mean  = EM.mean,
+                               sample.nobs  = lavInspect(object, "nobs"),
+                               slotOptions  = this.options)
+
+        SE.comp <- parameterEstimates(fit.complete, ci = FALSE, fmi = FALSE,
+            zstat = FALSE, pvalue = FALSE, remove.system.eq = FALSE,
+            remove.eq = FALSE, remove.ineq = FALSE,
+            remove.def = FALSE, remove.nonfree = FALSE,
+            rsquare = rsquare, add.attributes = FALSE)$se
+
+        SE.comp <- ifelse(SE.comp == 0.0, as.numeric(NA), SE.comp)
+        LIST$fmi <- 1 - (SE.comp * SE.comp) / (SE.orig * SE.orig)
     }
 
     # if single level, remove level column
@@ -662,7 +705,7 @@ parameterEstimates <- parameterestimates <- function(object,
     # if no user-defined labels, remove label column
     if(sum(nchar(object@ParTable$label)) == 0L) LIST$label <- NULL
 
-    # remove non-free paramters? (but keep ==, >, < and :=)
+    # remove non-free parameters? (but keep ==, >, < and :=)
     if(remove.nonfree) {
         nonfree.idx <- which( LIST$free == 0L &
                               !LIST$op %in% c("==", ">", "<", ":=") )
@@ -670,6 +713,19 @@ parameterEstimates <- parameterestimates <- function(object,
             LIST <- LIST[-nonfree.idx,]
         }
     }
+
+    # remove non-free scales (categorical only), except 'user-specified'
+    #
+    # (not yet public)
+    #  
+    #if(remove.nonfree.scales) {
+    #    nonfree.scales.idx <- which( LIST$free == 0L & LIST$op == "~*~" &
+    #                                 LIST$user == 0L)
+    #    if(length(nonfree.scales.idx) > 0L) {
+    #        LIST <- LIST[-nonfree.scales.idx,]
+    #    }
+    #}
+
     # remove 'free' column
     LIST$free <- NULL
 
@@ -708,7 +764,8 @@ parameterEstimates <- parameterestimates <- function(object,
         class(LIST) <- c("lavaan.parameterEstimates", "lavaan.data.frame",
                          "data.frame")
         if(header) {
-            attr(LIST, "information") <- object@Options$information
+            attr(LIST, "information") <- object@Options$information[1]
+            attr(LIST, "information.meat") <- object@Options$information.meat
             attr(LIST, "se") <- object@Options$se
             attr(LIST, "group.label") <- object@Data@group.label
             attr(LIST, "level.label") <- object@Data@level.label
@@ -716,13 +773,15 @@ parameterEstimates <- parameterestimates <- function(object,
             attr(LIST, "bootstrap.successful") <- bootstrap.successful
             attr(LIST, "missing") <- object@Options$missing
             attr(LIST, "observed.information") <-
-                object@Options$observed.information
-            attr(LIST, "h1.information") <- object@Options$h1.information
+                object@Options$observed.information[1]
+            attr(LIST, "h1.information") <- object@Options$h1.information[1]
+            attr(LIST, "h1.information.meat") <- object@Options$h1.information.meat
             attr(LIST, "header") <- header
             # FIXME: add more!!
         }
     } else {
         LIST$exo <- NULL
+        LIST$lower <- LIST$upper <- NULL
         class(LIST) <- c("lavaan.data.frame", "data.frame")
     }
 

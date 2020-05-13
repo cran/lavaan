@@ -28,7 +28,7 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
 
     # prepare
     LRT <- rep(as.numeric(NA), R)
-    if((h1@optim$fx - h0@optim$fx) > (.Machine$double.eps * 10)) {
+    if((h1@optim$fx - h0@optim$fx) > sqrt(.Machine$double.eps)) {
         # restricted fit should not be better!
         cat(" ... h0@optim$fx = ", h0@optim$fx, "h1@optim$fx = ", h1@optim$fx,
             "h0 should not be better!\n")
@@ -228,6 +228,8 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
                                mimic         = h0@Options$mimic,
                                meanstructure = h0@Options$meanstructure,
                                conditional.x = h0@Options$conditional.x,
+                               se            = h0@Options$se,
+                               test          = h0@Options$test,
                                group.w.free  = h0@Options$group.w.free,
                                missing.h1    = TRUE,
                                verbose  = FALSE), silent=TRUE)
@@ -241,6 +243,8 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
         h0@Options$verbose <- FALSE
         h0@Options$se <- "none"
         h0@Options$test <- "standard"
+        h0@Options$baseline <- FALSE
+        h0@Options$h1 <- FALSE
 
         #Fit h0 model
         fit.h0 <- lavaan(slotOptions     = h0@Options,
@@ -260,6 +264,8 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
         h1@Options$verbose <- FALSE
         h1@Options$se <- "none"
         h1@Options$test <- "standard"
+        h1@Options$baseline <- FALSE
+        h1@Options$h1 <- FALSE
 
         #Fit h1 model
         fit.h1 <- lavaan(slotOptions     = h1@Options,
@@ -279,7 +285,7 @@ bootstrapLRT <- function (h0 = NULL, h1 = NULL, R = 1000L,
                 " fx = ", fit.h1@optim$fx, "\n")
 
         # store LRT
-        if((fit.h1@optim$fx - fit.h0@optim$fx) > (.Machine$double.eps * 10)) {
+        if((fit.h1@optim$fx - fit.h0@optim$fx) > sqrt(.Machine$double.eps)) {
             #if((fit.h1@optim$fx - fit.h0@optim$fx) > 0.0) {
             if (verbose)
                 cat("  ... ... LRT  = <NA> h0 > h1, delta = ", fit.h1@optim$fx - fit.h0@optim$fx, "\n")

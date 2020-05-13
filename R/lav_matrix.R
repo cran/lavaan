@@ -932,14 +932,38 @@ lav_matrix_trace <- function(..., check = TRUE) {
     out
 }
 
-# crossproduct, but handling NAs pairwise
+# crossproduct, but handling NAs pairwise, if needed
+# otherwise, just call base::crossprod
 lav_matrix_crossprod <- function(A, B) {
-    if(missing(B)) {
-        B <- A
-    }
-    out <- apply(A, 2L, function(x) colSums(B * x, na.rm = TRUE))
 
-    as.matrix(out)
+    # single argument?
+    if(missing(B)) {
+        if(!anyNA(A)) {
+            return(base::crossprod(A))
+        }
+        B <- A
+    # no missings?
+    } else if(!anyNA(A) && !anyNA(B)) {
+        return(base::crossprod(A, B))
+    }
+
+    # A and B must be matrices
+    if(!inherits(A, "matrix")) {
+        A <- matrix(A)
+    }
+    if(!inherits(B, "matrix")) {
+        B <- matrix(B)
+    }
+
+    out <- apply(B, 2L, function(x) colSums(A * x, na.rm = TRUE))
+
+    # only when A is a vector, and B is a matrix, we get back a vector
+    # while the result should be a matrix with 1-row
+    if(!is.matrix(out)) {
+        out <- t(matrix(out))
+    }
+
+    out
 }
 
 
@@ -1359,3 +1383,111 @@ lav_matrix_transform_mean_cov <- function(Y,
 
     X
 }
+
+# weighted column means
+#
+# for each column in Y: mean = sum(wt * Y)/sum(wt)
+#
+# if we have missing values, we use only the observations and weights
+# that are NOT missing
+#
+lav_matrix_mean_wt <- function(Y, wt = NULL) {
+
+    Y <- unname(as.matrix(Y))
+    DIM <- dim(Y)
+
+    if(is.null(wt)) {
+        return(colMeans(Y, na.rm = TRUE))
+    }
+
+    if(anyNA(Y)) {
+        WT <- wt * !is.na(Y)
+        wN <- .colSums(WT, m = DIM[1], n = DIM[2])
+        out <- .colSums(wt * Y, m = DIM[1], n = DIM[2], na.rm = TRUE) / wN
+    } else {
+        out <- .colSums(wt * Y, m = DIM[1], n = DIM[2]) / sum(wt)
+    }
+
+    out
+}
+
+# weighted column variances
+#
+# for each column in Y: var = sum(wt * (Y - w.mean(Y))^2) / N
+#
+# where N = sum(wt) - 1 (method = "unbiased") assuming wt are frequency weights
+#   or  N = sum(wt)     (method = "ML")
+#
+# Note: another approach (when the weights are 'reliability weights' is to
+#       use N = sum(wt) - sum(wt^2)/sum(wt) (not implemented here)
+#
+# if we have missing values, we use only the observations and weights
+# that are NOT missing
+#
+lav_matrix_var_wt <- function(Y, wt = NULL, method = c("unbiased", "ML")) {
+
+    Y <- unname(as.matrix(Y))
+    DIM <- dim(Y)
+
+    if(is.null(wt)) {
+        wt <- rep(1, nrow(Y))
+    }
+
+    if(anyNA(Y)) {
+        WT <- wt * !is.na(Y)
+        wN <- .colSums(WT, m = DIM[1], n = DIM[2])
+        w.mean <- .colSums(wt * Y, m = DIM[1], n = DIM[2], na.rm = TRUE) / wN
+        Ytc <- t( t(Y) - w.mean )
+        tmp <- .colSums(wt * Ytc*Ytc, m = DIM[1], n = DIM[2], na.rm = TRUE)
+        out <- switch(match.arg(method), unbiased = tmp / (wN - 1),
+                                               ML = tmp / wN)
+    } else {
+        w.mean <- .colSums(wt * Y, m = DIM[1], n = DIM[2]) / sum(wt)
+        Ytc <- t( t(Y) - w.mean )
+        tmp <- .colSums(wt * Ytc*Ytc, m = DIM[1], n = DIM[2])
+        out <- switch(match.arg(method), unbiased = tmp / (sum(wt) - 1),
+                                               ML = tmp / sum(wt))
+    }
+
+    out
+}
+
+# weighted variance-covariance matrix
+#
+# always dividing by sum(wt) (for now) (=ML version)
+#
+# if we have missing values, we use only the observations and weights
+# that are NOT missing
+#
+# same as cov.wt(Y, wt, method = "ML")
+#
+lav_matrix_cov_wt <- function(Y, wt = NULL) {
+
+    Y <- unname(as.matrix(Y))
+    DIM <- dim(Y)
+
+    if(is.null(wt)) {
+        wt <- rep(1, nrow(Y))
+    }
+
+    if(anyNA(Y)) {
+        tmp <- na.omit( cbind(Y, wt) )
+        Y <- tmp[, seq_len(DIM[2]), drop = FALSE]
+        wt <- tmp[,DIM[2] + 1L]
+        DIM[1] <- nrow(Y)
+        w.mean <- .colSums(wt * Y, m = DIM[1], n = DIM[2]) / sum(wt)
+        Ytc <- t( t(Y) - w.mean )
+        tmp <- crossprod(sqrt(wt) * Ytc)
+        out <- tmp / sum(wt)
+    } else {
+        w.mean <- .colSums(wt * Y, m = DIM[1], n = DIM[2]) / sum(wt)
+        Ytc <- t( t(Y) - w.mean )
+        tmp <- crossprod(sqrt(wt) * Ytc)
+        out <- tmp / sum(wt)
+    }
+
+    out
+}
+
+
+

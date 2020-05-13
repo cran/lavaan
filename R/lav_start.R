@@ -21,26 +21,13 @@ lav_start <- function(start.method    = "default",
     categorical <- any(lavpartable$op == "|")
 
     # conditional.x?
-    conditional.x <- any(lavpartable$exo == 1L & lavpartable$op == "~")
+    conditional.x <- any(lavpartable$exo == 1L &
+                         lavpartable$op %in% c("~", "<~"))
     #ord.names <- unique(lavpartable$lhs[ lavpartable$op == "|" ])
 
     # nlevels?
     nlevels <- lav_partable_nlevels(lavpartable)
 
-    # shortcut for 'simple'
-    # be we should also take care of the 'fixed.x' issue
-    if(identical(start.method, "simple")) {
-        start <- numeric( length(lavpartable$ustart) )
-        start[ which(lavpartable$op == "=~") ] <- 1.0
-        start[ which(lavpartable$op == "~*~") ] <- 1.0
-        ov.names.ord <- vnames(lavpartable, "ov.ord")
-        var.idx <- which(lavpartable$op == "~~" & lavpartable$lhs == lavpartable$rhs &
-                         !(lavpartable$lhs %in% ov.names.ord))
-        start[var.idx] <- 1.0
-        user.idx <- which(!is.na(lavpartable$ustart))
-        start[user.idx] <- lavpartable$ustart[user.idx]
-        return(start)
-    }
 
     # check start.method
     if(mimic == "lavaan") {
@@ -51,11 +38,27 @@ lav_start <- function(start.method    = "default",
         # FIXME: use LISREL/EQS/AMOS/.... schems
         start.initial <- "lavaan"
     }
-    start.user    <- NULL
+
+    # start.method
+    start.user <- NULL
     if(is.character(start.method)) {
         start.method. <- tolower(start.method)
         if(start.method. == "default") {
             # nothing to do
+        } else if(start.method == "simple") {
+            start <- numeric( length(lavpartable$ustart) )
+            start[ which(lavpartable$op == "=~") ] <- 1.0
+            start[ which(lavpartable$op == "~*~") ] <- 1.0
+            ov.names.ord <- vnames(lavpartable, "ov.ord")
+            var.idx <- which(lavpartable$op == "~~" &
+                             lavpartable$lhs == lavpartable$rhs &
+                             !(lavpartable$lhs %in% ov.names.ord))
+            start[var.idx] <- 1.0
+            user.idx <- which(!is.na(lavpartable$ustart))
+            start[user.idx] <- lavpartable$ustart[user.idx]
+            return(start)
+        } else if(start.method == "est") {
+            return(lavpartable$est)
         } else if(start.method. %in% c("simple", "lavaan", "mplus")) {
             start.initial <- start.method.
         } else {
@@ -66,6 +69,7 @@ lav_start <- function(start.method    = "default",
     } else if(inherits(start.method, "lavaan")) {
         start.user <- parTable(start.method)
     }
+
     # check model list elements, if provided
     if(!is.null(start.user)) {
         if(is.null(start.user$lhs) ||
@@ -93,8 +97,7 @@ lav_start <- function(start.method    = "default",
 
     # 1. =~ factor loadings:
     if(categorical) {
-        # if std.lv=TRUE, more likely initial Sigma.hat is positive definite
-        # 0.8 is too large
+        # if std.lv=TRUE, 0.8 is too large
         start[ which(lavpartable$op == "=~") ] <- 0.7
     } else {
         start[ which(lavpartable$op == "=~") ] <- 1.0
@@ -141,14 +144,16 @@ lav_start <- function(start.method    = "default",
         } else {
             ov.names.num <- ov.names
         }
-        lv.names    <- vnames(lavpartable, "lv",   group = group.values[g])
-        ov.names.x  <- vnames(lavpartable, "ov.x", group = group.values[g])
+        lv.names     <- vnames(lavpartable, "lv",     group = group.values[g])
+        lv.names.efa <- vnames(lavpartable, "lv.efa", group = group.values[g])
+        ov.names.x   <- vnames(lavpartable, "ov.x",   group = group.values[g])
 
         # just for the nlevels >1 case
-        ov.names <- unique(unlist(ov.names))
+        ov.names     <- unique(unlist(ov.names))
         ov.names.num <- unique(unlist(ov.names.num))
-        lv.names <- unique(unlist(lv.names))
-        ov.names.x <- unique(unlist(ov.names.x))
+        lv.names     <- unique(unlist(lv.names))
+        lv.names.efa <- unique(unlist(lv.names.efa))
+        ov.names.x   <- unique(unlist(ov.names.x))
 
 
         # residual ov variances (including exo/ind, to be overriden)
@@ -184,6 +189,10 @@ lav_start <- function(start.method    = "default",
            model.type %in% c("sem", "cfa") ) {
             # fabin3 estimator (2sls) of Hagglund (1982) per factor
             for(f in lv.names) {
+                # not for efa factors
+                if(f %in% lv.names.efa) {
+                    next
+                }
                 lambda.idx <- which( lavpartable$lhs == f &
                                      lavpartable$op == "=~" &
                                      lavpartable$group == group.values[g] )
@@ -224,7 +233,9 @@ lav_start <- function(start.method    = "default",
                                                 method = "fabin3")
 
                     # factor loadings
-                    start[lambda.idx] <- fabin$lambda
+                    tmp <- fabin$lambda
+                    tmp[ !is.finite(tmp) ] <- 1.0 # just in case (eg 0/0)
+                    start[lambda.idx] <- tmp
 
                     # factor variance
                     #if(!std.lv) {
@@ -261,8 +272,67 @@ lav_start <- function(start.method    = "default",
                     #    start[res.idx][neg.idx] <- 0.05
                     #}
                 }
-            }
-        } # fabin
+            } # fabin3
+
+            # efa?
+            nefa <- lav_partable_nefa(lavpartable)
+            if(nefa > 0L) {
+                efa.values <- lav_partable_efa_values(lavpartable)
+
+                for(set in seq_len(nefa)) {
+                    # determine ov idx for this set
+                    ov.efa <-
+                        unique(lavpartable$rhs[ lavpartable$op == "=~" &
+                                                lavpartable$block == g &
+                                                lavpartable$efa == efa.values[set]])
+                    lv.efa <-
+                        unique(lavpartable$lhs[ lavpartable$op == "=~" &
+                                                lavpartable$block == g &
+                                                lavpartable$efa == efa.values[set]])
+                    lambda.idx <- which( lavpartable$lhs %in% lv.efa &
+                                         lavpartable$op == "=~" &
+                                         lavpartable$group == group.values[g] )
+
+                    theta.idx <- which( lavpartable$lhs %in% ov.efa &
+                                        lavpartable$op == "~~" &
+                                        lavpartable$lhs == lavpartable$rhs &
+                                        lavpartable$group == group.values[g] )
+
+                    # get observed indicators for these EFA lv variables
+                    ov.idx <- match(unique(lavpartable$rhs[lambda.idx]),
+                                    ov.names)
+
+                    if(length(ov.idx) > 0L && !any(is.na(ov.idx))) {
+                        if(lavsamplestats@missing.flag && nlevels == 1L) {
+                            COV <- lavsamplestats@missing.h1[[g]]$sigma[ov.idx,
+                                                      ov.idx, drop = FALSE]
+                        } else {
+                            if(conditional.x) {
+                                COV <- lavsamplestats@res.cov[[g]][ov.idx,
+                                                          ov.idx, drop = FALSE]
+                            } else {
+                                COV <- lavsamplestats@cov[[g]][ov.idx,
+                                                          ov.idx, drop = FALSE]
+                            }
+                         }
+
+                        # EFA solution with zero upper-right corner
+                        EFA <- lav_efa_extraction_uls_corner(S = COV,
+                                              nfactors = length(lv.efa))
+
+                        # factor loadings
+                        tmp <- as.numeric(EFA$LAMBDA)
+                        tmp[ !is.finite(tmp) ] <- 1.0 # just in case (eg 0/0)
+                        start[lambda.idx] <- tmp
+
+                        # residual variances
+                        tmp <- diag(EFA$THETA)
+                        tmp[ !is.finite(tmp) ] <- 1.0 # just in case
+                        start[theta.idx] <- tmp
+                    }
+                } # set
+            } # efa
+        } # factor loadings
 
         if(model.type == "unrestricted") {
            # fill in 'covariances' from lavsamplestats
@@ -541,6 +611,22 @@ lav_start <- function(start.method    = "default",
         #                    lavpartable$lhs %in% lv.names)
     }
 
+
+    # adjust if outside bounds -- new in 0.6-6
+    if(!is.null(lavpartable$lower)) {
+        bad.idx <- which(start < lavpartable$lower)
+        if(length(bad.idx)) {
+            start[bad.idx] <- lavpartable$lower[bad.idx]
+        }
+    }
+    if(!is.null(lavpartable$upper)) {
+        bad.idx <- which(start > lavpartable$upper)
+        if(length(bad.idx)) {
+            start[bad.idx] <- lavpartable$upper[bad.idx]
+        }
+    }
+
+
     # override if a user list with starting values is provided
     # we only look at the 'est' column for now
     if(!is.null(start.user)) {
@@ -574,6 +660,15 @@ lav_start <- function(start.method    = "default",
     # override if the model syntax contains explicit starting values
     user.idx <- which(!is.na(lavpartable$ustart))
     start[user.idx] <- lavpartable$ustart[user.idx]
+
+    # final check: no NaN or other non-finite values
+    bad.idx <- which(!is.finite(start))
+    if(length(bad.idx) > 0L) {
+        cat("starting values:\n")
+        print( start )
+        warning("lavaan WARNING: some starting values are non-finite; replacing them with 0.5; please provide better starting values.\n")
+        start[ bad.idx ] <- 0.5
+    }
 
     if(debug) {
         cat("lavaan DEBUG: lavaanStart\n")
