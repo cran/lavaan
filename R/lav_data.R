@@ -66,6 +66,9 @@ lavData <- function(data              = NULL,          # data.frame
     if(is.null(warn)) {
         warn <- TRUE
     }
+    if(allow.single.case) { # eg, in lavPredict
+        warn <- FALSE
+    }
 
     # four scenarios:
     #    0) data is already a lavData object: do nothing
@@ -192,9 +195,9 @@ lavData <- function(data              = NULL,          # data.frame
         }
 
         # get ov.names
-        if (is.null(ov.names)) {
+        if(is.null(ov.names)) {
             ov.names <- lapply(sample.cov, row.names)
-        } else if (!is.list(ov.names)) {
+        } else if(!is.list(ov.names)) {
             # duplicate ov.names for each group
             tmp <- ov.names; ov.names <- vector("list", length = ngroups)
             ov.names[1:ngroups] <- list(tmp)
@@ -240,6 +243,24 @@ lavData <- function(data              = NULL,          # data.frame
         # if std.ov = TRUE, give a warning (suggested by Peter Westfall)
         if(std.ov && warn) {
             warning("lavaan WARNING: std.ov argument is ignored if only sample statistics are provided.")
+        }
+
+        # check variances (new in 0.6-7)
+        for(g in seq_len(ngroups)) {
+            VAR <- diag(sample.cov[[g]])
+            # 1. finite?
+            if(!all(is.finite(VAR))) {
+                stop("lavaan ERROR: at least one variance in the sample covariance matrix is not finite.")
+            }
+            # 2. near zero (or negative)?
+            if(any(VAR < .Machine$double.eps)) {
+                stop("lavaan ERROR: at least one variance in the sample covariance matrix is (near) zero or negative.")
+            }
+            # 3. very large?
+            max.var <- max(VAR)
+            if(max.var > 1000000) {
+                warning("lavaan WARNING: some observed variances in the sample covariance matrix are larger than 1000000.")
+            }
         }
 
         # construct lavData object
@@ -368,10 +389,12 @@ lavData <- function(data              = NULL,          # data.frame
         Lp <- vector("list", length = ngroups)
         for(g in 1:ngroups) {
             if(nlevels > 1L) {
+                # ALWAYS add ov.names.x at the end, even if conditional.x
+                OV.NAMES <- unique(c(ov.names[[g]], ov.names.x[[g]]))
                 Lp[[g]] <- lav_data_cluster_patterns(Y = NULL, clus = NULL,
                                                  cluster = cluster,
                                                  multilevel = TRUE,
-                                                 ov.names = ov.names[[g]],
+                                                 ov.names = OV.NAMES,
                                                  ov.names.l = ov.names.l[[g]])
             }
         } # g
@@ -648,7 +671,7 @@ lav_data_full <- function(data          = NULL,          # data.frame
     }
     # check for zero-cases
     idx <- which(ov$nobs == 0L | ov$var == 0)
-    if(length(idx) > 0L) {
+    if(!allow.single.case && length(idx) > 0L) {
         OV <- as.data.frame(ov)
         rn <- rownames(OV)
         rn[idx] <- paste(rn[idx], "***", sep="")
@@ -668,7 +691,7 @@ lav_data_full <- function(data          = NULL,          # data.frame
     }
     # check for ordered variables with only 1 level
     idx <- which(ov$type == "ordered" & ov$nlev == 1L)
-    if(length(idx) > 0L) {
+    if(!allow.single.case && length(idx) > 0L) {
         OV <- as.data.frame(ov)
         rn <- rownames(OV)
         rn[idx] <- paste(rn[idx], "***", sep="")
@@ -720,7 +743,13 @@ lav_data_full <- function(data          = NULL,          # data.frame
     for(g in 1:ngroups) {
 
         # extract variables in correct order
-        ov.idx  <- ov$idx[match(ov.names[[g]],   ov$name)]
+        if(!is.null(cluster) && length(cluster) > 0L) {
+            # keep 'joint' (Y,X) matrix in @X if multilevel (or always?)
+            OV.NAMES <- unique(c(ov.names[[g]], ov.names.x[[g]]))
+            ov.idx  <- ov$idx[match(OV.NAMES,   ov$name)]
+        } else {
+            ov.idx  <- ov$idx[match(ov.names[[g]],   ov$name)]
+        }
         exo.idx <- ov$idx[match(ov.names.x[[g]], ov$name)]
         all.idx <- unique(c(ov.idx, exo.idx))
 
@@ -875,10 +904,12 @@ lav_data_full <- function(data          = NULL,          # data.frame
             } else {
                 multilevel <- FALSE
             }
+            # ALWAYS add ov.names.x at the end, even if conditional.x (0.6-7)
+            OV.NAMES <- unique(c(ov.names[[g]], ov.names.x[[g]]))
             Lp[[g]] <- lav_data_cluster_patterns(Y = X[[g]], clus = clus,
                                                  cluster = cluster,
                                                  multilevel = multilevel,
-                                                 ov.names = ov.names[[g]],
+                                                 ov.names = OV.NAMES,
                                                  ov.names.l = ov.names.l[[g]])
 
             # new in 0.6-4

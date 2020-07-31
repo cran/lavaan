@@ -59,6 +59,8 @@ lav_options_default <- function(mimic = "lavaan") {
                 effect.coding      = FALSE,     # TRUE implies
                                                 # c("loadings", "intercepts")
                 parameterization   = "default",
+                #ov.order           = "model",   # how to 'order' ov's in the
+                #                                # partable
 
                 auto.fix.first     = FALSE,
                 auto.fix.single    = FALSE,
@@ -179,6 +181,7 @@ lav_options_default <- function(mimic = "lavaan") {
                 check.post             = TRUE,
                 check.gradient         = TRUE,
                 check.vcov             = TRUE,
+                check.lv.names         = TRUE,
 
                 # more models/info
                 h1                     = TRUE,
@@ -320,6 +323,9 @@ lav_options_set <- function(opt = NULL) {
     if(opt$clustered && !opt$multilevel) {
         opt$meanstructure <- TRUE
         #opt$missing <- "listwise"
+        if(opt$missing == "ml") {
+            optim.gradient = "numerical"
+        }
 
         if(opt$estimator == "mlr") {
             opt$estimator <- "ml"
@@ -1091,6 +1097,12 @@ lav_options_set <- function(opt = NULL) {
         stop("lavaan ERROR: information must be either \"expected\", \"observed\", or \"first.order\"\n")
     }
 
+    # first.order information can not be used with robust
+    if(opt$information[1] == "first.order" &&
+       opt$se %in% c("robust.huber.white", "robust.sem")) {
+        stop("lavaan ERROR: information must be either \"expected\" or \"observed\" if robust standard errors are requested.")
+    }
+
     # test information
     if(length(opt$information) == 1L) {
         opt$information <- rep(opt$information, 2L)
@@ -1109,6 +1121,16 @@ lav_options_set <- function(opt = NULL) {
         # nothing to do
     } else {
         stop("lavaan ERROR: information[2] must be either \"expected\", \"observed\", or \"first.order\"\n")
+    }
+
+    # first.order information can not be used with robust
+    if(opt$information[2] == "first.order" &&
+       opt$test %in% c("satorra.bentler",
+                       "yuan.bentler",
+                       "yuan.bentler.mplus",
+                       "mean.var.adjusted",
+                       "scaled.shifted")) {
+        stop("lavaan ERROR: information must be either \"expected\" or \"observed\" if robust test statistics are requested.")
     }
 
     # information meat

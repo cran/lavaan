@@ -13,13 +13,13 @@
 # overload standard R function `predict'
 setMethod("predict", "lavaan",
 function(object, newdata = NULL) {
-    lavPredict(object = object, newdata = newdata, type="lv", method="EBM",
-               fsm = FALSE,
-               optim.method = "bfgs")
+    lavPredict(object = object, newdata = newdata, type = "lv", method = "EBM",
+               fsm = FALSE, optim.method = "bfgs")
 })
 
 # main function
-lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
+lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
+                       type = "lv", method = "EBM",
                        se = "none", acov = "none", label = TRUE, fsm = FALSE,
                        append.data = FALSE, assemble = FALSE, # or TRUE?
                        level = 1L, optim.method = "bfgs", ETA = NULL) {
@@ -93,6 +93,19 @@ lavPredict <- function(object, type = "lv", newdata = NULL, method = "EBM",
                                               missing = lavdata@missing,
                                               warn = TRUE), # was FALSE before?
                            allow.single.case = TRUE)
+        # if ordered, check if number of levels is till the same (new in 0.6-7)
+        if(lavmodel@categorical) {
+            orig.ordered.idx <- which(lavdata@ov$type == "ordered")
+            orig.ordered.lev <- lavdata@ov$nlev[orig.ordered.idx]
+            match.new.idx <- match(newData@ov$name,
+                                   lavdata@ov$name[orig.ordered.idx])
+            new.ordered.lev <- newData@ov$nlev[match.new.idx]
+            if(any(orig.ordered.lev - new.ordered.lev != 0)) {
+                stop("lavaan ERROR: ",
+                     "mismatch number of categories for some ordered variables",
+                     "\n\t\tin newdata compared to original data.")
+            }
+        }
         data.obs <- newData@X
         eXo <- newData@eXo
         ov.names <- newData@ov.names
@@ -569,6 +582,14 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
         # center data
         Yc <- t( t(data.obs.g) - EY.g )
 
+        # global factor score coefficient matrix 'C'
+        FSC <- VETA.g %*% t(LAMBDA.g) %*% Sigma.inv.g
+
+        # store fsm?
+        if(fsm) {
+            FSM.g <- FSC
+        }
+
         # compute factor scores
         if(lavdata@missing %in% c("ml", "ml.x")) {
 
@@ -578,9 +599,9 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
             # factor scores container
             FS.g <- matrix(as.numeric(NA), nrow(Yc), ncol = length(EETA.g))
 
-            if(fsm) {
-                FSM.g <- vector("list", length = Mp$npatterns)
-            }
+            #if(fsm) {
+            #    FSM.g <- vector("list", length = Mp$npatterns)
+            #}
 
             if(se == "standard") {
                 SE.g <- matrix(as.numeric(NA), nrow(Yc), ncol = length(EETA.g))
@@ -610,12 +631,12 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
                 FSC <- VETA.g %*% t(lambda) %*% Sigma_22.inv
 
                 # FSM?
-                if(fsm) {
-                    tmp <- matrix(as.numeric(NA), nrow = ncol(lambda),
-                                  ncol = ncol(Yc))
-                    tmp[,var.idx] <- FSC
-                    FSM.g[[p]] <- tmp
-                }
+                #if(fsm) {
+                #    tmp <- matrix(as.numeric(NA), nrow = ncol(lambda),
+                #                  ncol = ncol(Yc))
+                #    tmp[,var.idx] <- FSC
+                #    FSM.g[[p]] <- tmp
+                #}
 
                 # factor score for this pattern
                 FS.g[Mp$case.idx[[p]], ] <- t(FSC %*% t(Oc) + EETA.g)
@@ -641,14 +662,6 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
             } # p
 
         } else {
-            # factor score coefficient matrix 'C'
-            FSC <- VETA.g %*% t(LAMBDA.g) %*% Sigma.inv.g
-
-            # store fsm?
-            if(fsm) {
-                FSM.g <- FSC
-            }
-
             # compute factor scores
             FS.g <- t(FSC %*% t(Yc) + EETA.g)
         }
@@ -847,6 +860,16 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
         # center data
         Yc <- t( t(data.obs.g) - EY.g )
 
+        # global factor score coefficient matrix 'C'
+        FSC <- ( MASS::ginv(t(LAMBDA.g) %*% Sigma.inv.g %*% LAMBDA.g)
+                 %*% t(LAMBDA.g) %*% Sigma.inv.g )
+
+        # store fsm?
+        if(fsm) {
+            # store fsm?
+            FSM.g <- FSC
+        }
+
         # compute factor scores
         if(lavdata@missing %in% c("ml", "ml.x")) {
 
@@ -856,9 +879,9 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
             # factor scores container
             FS.g <- matrix(as.numeric(NA), nrow(Yc), ncol = length(EETA.g))
 
-            if(fsm) {
-                FSM.g <- vector("list", length = Mp$npatterns)
-            }
+            #if(fsm) {
+            #    FSM.g <- vector("list", length = Mp$npatterns)
+            #}
 
             if(se == "standard") {
                 SE.g <- matrix(as.numeric(NA), nrow(Yc), ncol = length(EETA.g))
@@ -889,12 +912,12 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
                            %*% t(lambda) %*% Sigma_22.inv )
 
                 # FSM?
-                if(fsm) {
-                    tmp <- matrix(as.numeric(NA), nrow = ncol(lambda),
-                                  ncol = ncol(Yc))
-                    tmp[,var.idx] <- FSC
-                    FSM.g[[p]] <- tmp
-                }
+                #if(fsm) {
+                #    tmp <- matrix(as.numeric(NA), nrow = ncol(lambda),
+                #                  ncol = ncol(Yc))
+                #    tmp[,var.idx] <- FSC
+                #    FSM.g[[p]] <- tmp
+                #}
 
                 # factor scores for this pattern
                 FS.g[Mp$case.idx[[p]], ] <- t(FSC %*% t(Oc) + EETA.g)
@@ -919,21 +942,13 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
             }
 
             # what about FSM? There is no single one, but as many as patterns
-            if(fsm) {
-                # use 'global' version (just like in complete case)
-                FSM[[g]] <- ( MASS::ginv(t(LAMBDA.g) %*% Sigma.inv.g %*%
-                                LAMBDA.g) %*% t(LAMBDA.g) %*% Sigma.inv.g )
-            }
+            #if(fsm) {
+            #    # use 'global' version (just like in complete case)
+            #    FSM[[g]] <- ( MASS::ginv(t(LAMBDA.g) %*% Sigma.inv.g %*%
+            #                    LAMBDA.g) %*% t(LAMBDA.g) %*% Sigma.inv.g )
+            #}
 
         } else {
-            # factor score coefficient matrix 'C'
-            FSC <- ( MASS::ginv(t(LAMBDA.g) %*% Sigma.inv.g %*% LAMBDA.g)
-                     %*% t(LAMBDA.g) %*% Sigma.inv.g )
-            # store fsm?
-            if(fsm) {
-                FSM[[g]] <- FSC
-            }
-
             # compute factor scores
             FS.g <- t(FSC %*% t(Yc) + EETA.g)
         }
@@ -1052,7 +1067,7 @@ lav_predict_eta_ebm_ml <- function(lavobject = NULL,  # for convenience
         }
     }
     EETAx <- computeEETAx(lavmodel = lavmodel, lavsamplestats = lavsamplestats,
-                          eXo = eXo, nobs = lavdata@norig,
+                          eXo = eXo, nobs = lapply(data.obs, NROW),
                           remove.dummy.lv = TRUE) ## FIXME?
     TH    <- computeTH(   lavmodel = lavmodel)
     THETA <- computeTHETA(lavmodel = lavmodel)
@@ -1153,6 +1168,9 @@ lav_predict_eta_ebm_ml <- function(lavobject = NULL,  # for convenience
             }
             mu.i <- EETAx[[g]][i,,drop=FALSE]
             y.i <- data.obs[[g]][i,,drop=FALSE]
+
+            ### DEBUG ONLY:
+            #cat("i = ", i, "mu.i = ", mu.i, "\n")
 
             START <- numeric(nfac) # initial values for eta
 
@@ -1267,7 +1285,7 @@ lav_predict_yhat <- function(lavobject = NULL, # for convience
 
     YHAT <- computeYHAT(lavmodel = lavmodel, GLIST = NULL,
                         lavsamplestats = lavsamplestats, eXo = eXo,
-                        nobs = lavdata@norig,
+                        nobs = lapply(data.obs, NROW),
                         ETA = ETA, duplicate = duplicate)
 
     # if conditional.x, paste eXo

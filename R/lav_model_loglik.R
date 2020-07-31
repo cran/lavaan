@@ -1,4 +1,5 @@
-# compute the loglikelihood of the data, given the model
+# compute the loglikelihood of the data, given the current values of the
+# model parameters
 lav_model_loglik <- function(lavdata        = NULL,
                              lavsamplestats = NULL,
                              lavimplied     = NULL,
@@ -45,6 +46,11 @@ lav_model_loglik <- function(lavdata        = NULL,
                 Sigma.B <- lavimplied$cov[[  (g-1)*2 + 2]]
                 Mu.B    <- lavimplied$mean[[ (g-1)*2 + 2]]
 
+                # DEBUG ONLY
+                if(lavmodel@conditional.x) {
+                    logl.group[g] <- -1000
+                } else {
+
                 logl.group[g] <- lav_mvnorm_cluster_loglik_samplestats_2l(
                     YLp          = lavsamplestats@YLp[[g]],
                     Lp           = lavdata@Lp[[g]],
@@ -55,6 +61,8 @@ lav_model_loglik <- function(lavdata        = NULL,
                     Sinv.method  = "eigen",
                     log2pi       = TRUE,
                     minus.two    = FALSE)
+
+                }
 
             } else if(lavsamplestats@missing.flag) {
                 logl.group[g] <-

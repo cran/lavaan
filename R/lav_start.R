@@ -12,6 +12,8 @@ lav_start <- function(start.method    = "default",
                       lavsamplestats  = NULL,
                       model.type      = "sem",
                       mimic           = "lavaan",
+                      reflect         = FALSE,    # rotation only
+                      order.lv.by     = "none",   # rotation only
                       debug           = FALSE) {
 
     # check arguments
@@ -27,6 +29,14 @@ lav_start <- function(start.method    = "default",
 
     # nlevels?
     nlevels <- lav_partable_nlevels(lavpartable)
+
+    # reflect/order.lv.by
+    if(is.null(reflect)) {
+        reflect <- FALSE
+    }
+    if(is.null(order.lv.by)) {
+        order.lv.by <- "index"
+    }
 
 
     # check start.method
@@ -133,7 +143,7 @@ lav_start <- function(start.method    = "default",
         group.values <- lav_partable_group_values(lavpartable)
 
         # info from user model for this group
-        if(conditional.x) {
+        if(conditional.x && nlevels == 1L) {
             ov.names     <- vnames(lavpartable, "ov.nox", group = group.values[g])
         } else {
             ov.names     <- vnames(lavpartable, "ov", group = group.values[g])
@@ -166,7 +176,7 @@ lav_start <- function(start.method    = "default",
             start[ov.var.idx] <- diag(lavsamplestats@cov[[g]])[sample.var.idx]
         } else {
             if(start.initial == "mplus") {
-                if(conditional.x) {
+                if(conditional.x && nlevels == 1L) {
                     start[ov.var.idx] <-
                        (1.0 - 0.50)*lavsamplestats@res.var[[1L]][sample.var.idx]
                 } else {
@@ -174,7 +184,7 @@ lav_start <- function(start.method    = "default",
                        (1.0 - 0.50)*lavsamplestats@var[[1L]][sample.var.idx]
                 }
             } else {
-                if(conditional.x) {
+                if(conditional.x && nlevels == 1L) {
                     start[ov.var.idx] <-
                   (1.0 - 0.50)*diag(lavsamplestats@res.cov[[g]])[sample.var.idx]
                 } else {
@@ -218,7 +228,7 @@ lav_start <- function(start.method    = "default",
                         COV <- lavsamplestats@missing.h1[[g]]$sigma[ov.idx,
                                                       ov.idx, drop = FALSE]
                     } else {
-                        if(conditional.x) {
+                        if(conditional.x && nlevels == 1L) {
                             COV <- lavsamplestats@res.cov[[g]][ov.idx,
                                                       ov.idx, drop = FALSE]
                         } else {
@@ -307,7 +317,7 @@ lav_start <- function(start.method    = "default",
                             COV <- lavsamplestats@missing.h1[[g]]$sigma[ov.idx,
                                                       ov.idx, drop = FALSE]
                         } else {
-                            if(conditional.x) {
+                            if(conditional.x && nlevels == 1L) {
                                 COV <- lavsamplestats@res.cov[[g]][ov.idx,
                                                           ov.idx, drop = FALSE]
                             } else {
@@ -317,8 +327,14 @@ lav_start <- function(start.method    = "default",
                          }
 
                         # EFA solution with zero upper-right corner
-                        EFA <- lav_efa_extraction_uls_corner(S = COV,
-                                              nfactors = length(lv.efa))
+                        EFA <- lav_efa_extraction(S = COV,
+                                              nfactors = length(lv.efa),
+                                              method = "ML",
+                                              order.lv.by = order.lv.by,
+                                              #order.lv.by = "none",
+                                              #reflect = reflect,
+                                              reflect = FALSE,
+                                              corner = TRUE)
 
                         # factor loadings
                         tmp <- as.numeric(EFA$LAMBDA)
@@ -361,7 +377,7 @@ lav_start <- function(start.method    = "default",
         if(lavsamplestats@missing.flag && nlevels == 1L) {
             start[ov.int.idx] <- lavsamplestats@missing.h1[[g]]$mu[sample.int.idx]
         } else {
-            if(conditional.x) {
+            if(conditional.x && nlevels == 1L) {
                 start[ov.int.idx] <- lavsamplestats@res.int[[g]][sample.int.idx]
             } else {
                 start[ov.int.idx] <- lavsamplestats@mean[[g]][sample.int.idx]
@@ -377,7 +393,7 @@ lav_start <- function(start.method    = "default",
                 lavsamplestats@th.names[[g]][ lavsamplestats@th.idx[[g]] > 0L ]
             # th.names.sample should identical to
             # vnames(lavpartable, "th", group = group.values[g])
-            if(conditional.x) {
+            if(conditional.x && nlevels == 1L) {
                 th.values <-
                  lavsamplestats@res.th[[g]][lavsamplestats@th.idx[[g]] > 0L]
             } else {
@@ -451,7 +467,7 @@ lav_start <- function(start.method    = "default",
                          single.var <- 1
                     }
                     ov.idx <- match(single.ind, ov.names)
-                    if(conditional.x) {
+                    if(conditional.x && nlevels == 1L) {
                         ov.var <- diag(lavsamplestats@res.cov[[g]])[ov.idx]
                     } else {
                         ov.var <- diag(lavsamplestats@cov[[g]])[ov.idx]
@@ -658,7 +674,9 @@ lav_start <- function(start.method    = "default",
     }
 
     # override if the model syntax contains explicit starting values
-    user.idx <- which(!is.na(lavpartable$ustart))
+    user.idx <- which(!is.na(lavpartable$ustart) &
+                      lavpartable$user != 7L) # new in 0.6-7, if rotation and
+                                              # and we change the order of lv's
     start[user.idx] <- lavpartable$ustart[user.idx]
 
     # final check: no NaN or other non-finite values

@@ -121,7 +121,9 @@ lav_bvreg_cor_twostep_fit <- function(Y1, Y2, eXo = NULL, wt = NULL,
                                       fit.y1 = NULL, fit.y2 = NULL,
                                       Y1.name = NULL, Y2.name = NULL,
                                       optim.method = "nlminb1",
+                                      #optim.method = "none",
                                       optim.scale = 1,
+                                      init.theta = NULL,
                                       control = list(),
                                       verbose = FALSE) {
 
@@ -140,7 +142,7 @@ lav_bvreg_cor_twostep_fit <- function(Y1, Y2, eXo = NULL, wt = NULL,
         return(cache$theta[1L])
     }
 
-       # optim.method
+    # optim.method
     minObjective <- lav_bvreg_min_objective
     minGradient  <- lav_bvreg_min_gradient
     minHessian   <- lav_bvreg_min_hessian
@@ -150,6 +152,8 @@ lav_bvreg_cor_twostep_fit <- function(Y1, Y2, eXo = NULL, wt = NULL,
         minGradient <- minHessian <- NULL
     } else if(optim.method == "nlminb1") {
         minHessian <- NULL
+    } else if(optim.method == "none") {
+        return(cache$theta[1L])
     }
 
     # optimize
@@ -157,14 +161,44 @@ lav_bvreg_cor_twostep_fit <- function(Y1, Y2, eXo = NULL, wt = NULL,
         control$trace <- ifelse(verbose, 1, 0)
     }
 
-    optim <- nlminb(start = cache$theta, objective = minObjective,
+    # init theta?
+    if(!is.null(init.theta)) {
+        start.x <- init.theta
+    } else {
+        start.x <- cache$theta
+    }
+
+    # try 1
+    optim <- nlminb(start = start.x, objective = minObjective,
                     gradient = minGradient, hessian = minHessian,
                     control = control,
-                    scale = optim.scale, lower = -1.0, upper = +1.0,
+                    scale = optim.scale, lower = -0.999, upper = +0.999,
                     cache = cache)
+
+    # try 2 (scale = 10)
+    if(optim$convergence != 0L) {
+        optim <- nlminb(start = start.x, objective = minObjective,
+                    gradient = minGradient, hessian = minHessian,
+                    control = control,
+                    scale = 10, lower = -0.999, upper = +0.999,
+                    cache = cache)
+    }
+
+    # try 3 (start = 0, step.min = 0.1)
+    if(optim$convergence != 0L) {
+        control$step.min <- 0.1
+        minGradient  <- lav_bvreg_min_gradient
+        # try again, with different starting value
+        optim <- nlminb(start = 0, objective = minObjective,
+                    gradient = minGradient, hessian = NULL,
+                    control = control,
+                    scale = optim.scale, lower = -0.999, upper = +0.999,
+                    cache = cache)
+    }
 
     # check convergence
     if(optim$convergence != 0L) {
+
         if(!is.null(Y1.name) && !is.null(Y2.name)) {
             warning("lavaan WARNING: ",
                     "estimation pearson correlation did not converge for
@@ -173,10 +207,13 @@ lav_bvreg_cor_twostep_fit <- function(Y1, Y2, eXo = NULL, wt = NULL,
              warning("lavaan WARNING: estimation pearson correlation(s)",
                      " did not always converge")
          }
-    }
 
-    # store result
-    rho <- optim$par
+       # use init (as we always did in < 0.6-6; this is also what Mplus does)
+       rho <- start.x
+    } else {
+        # store result
+        rho <- optim$par
+    }
 
     rho
 }
@@ -194,12 +231,12 @@ lav_bvreg_init_cache <- function(fit.y1 = NULL,
     # Y1
     Y1c <- Y1 - fit.y1$yhat
     evar.y1 <- fit.y1$theta[fit.y1$var.idx]; sd.y1 <- sqrt(evar.y1)
-    eta.y1 <- fit.y1$yhat
+     eta.y1 <- fit.y1$yhat
 
     # Y2
     Y2c <- Y2 - fit.y2$yhat
     evar.y2 <- fit.y2$theta[fit.y1$var.idx]; sd.y2 <- sqrt(evar.y2)
-    eta.y2 <- fit.y2$yhat
+     eta.y2 <- fit.y2$yhat
 
 
     # exo?
@@ -273,7 +310,8 @@ lav_bvreg_lik_cache <- function(cache = NULL) {
                                           Mu = c(0,0), Sigma = sigma,
                                           casewise = TRUE))
         # catch very small values
-        lik[lik < sqrt(.Machine$double.eps)] <- sqrt(.Machine$double.eps)
+        lik.toosmall.idx <- which(lik < sqrt(.Machine$double.eps))
+        lik[lik.toosmall.idx] <- as.numeric(NA)
 
         return( lik )
     })
@@ -303,6 +341,11 @@ lav_bvreg_gradient_cache <- function(cache = NULL) {
         t2 <- (Y1c*Y1c)/evar.y1 - (2*rho*t1) + (Y2c*Y2c)/evar.y2
         dx <- (rho + t1 - t2*rho/R)/R
 
+        # to be consistent with (log)lik_cache
+        if(length(lik.toosmall.idx) > 0L) {
+            dx[lik.toosmall.idx] <- as.numeric(NA)
+        }
+
         if(is.null(wt)) {
             dx.rho <- sum(dx, na.rm = TRUE)
         } else {
@@ -322,6 +365,11 @@ lav_bvreg_hessian_cache <- function(cache = NULL) {
         R3 <- R*R*R
 
         h <- 1/R - (2*rho2*t2)/R3 + 2*rho2*(1 - t2/R)/R2 + 4*rho*t1/R2 - t2/R2
+
+        # to be consistent with (log)lik_cache
+        if(length(lik.toosmall.idx) > 0L) {
+            h[lik.toosmall.idx] <- as.numeric(NA)
+        }
 
         if(is.null(wt)) {
             H <- sum(h, na.rm = TRUE)
@@ -361,6 +409,7 @@ lav_bvreg_min_hessian <- function(x, cache = NULL) {
 }
 
 # casewise scores - cache
+# FIXME: should we also set 'lik.toosmall.idx' cases to NA?
 lav_bvreg_cor_scores_cache <- function(cache = NULL) {
     with(cache, {
         rho <- theta[1L]

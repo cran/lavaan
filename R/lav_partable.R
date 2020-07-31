@@ -13,6 +13,7 @@
 #                move syntax-based code to lav_syntax.R
 # - 26 April 2016: handle multiple 'blocks' (levels, classes, groups, ...)
 # - 24 March 2019: handle efa sets
+# - 23 May   2020: support for random slopes
 
 lavaanify <- lavParTable <- function(
 
@@ -132,7 +133,9 @@ lavaanify <- lavParTable <- function(
     }
 
     # check for meanstructure
-    if(any(FLAT$op == "~1")) meanstructure <- TRUE
+    if(any(FLAT$op == "~1")) {
+        meanstructure <- TRUE
+    }
 
     # check for block identifiers in the syntax (op = ":")
     n.block.flat <- length(which(FLAT$op == ":"))
@@ -198,6 +201,28 @@ lavaanify <- lavParTable <- function(
             FLAT.block <- FLAT[(BLOCK.op.idx[block]+1L):(BLOCK.op.idx[block+1]-1L),]
             # rm 'block' column (if any) in FLAT.block
             FLAT.block$block <- NULL
+
+            # new in 0.6-7: check for random slopes, add them here
+            if(block.lhs == "level" &&
+               block > 1L && # FIXME: multigroup,multilevel
+               !is.null(FLAT$rv) &&
+               any(nchar(FLAT$rv) > 0L)) {
+                lv.names.rv <- unique(FLAT$rv[nchar(FLAT$rv) > 0L])
+                for(i in 1:length(lv.names.rv)) {
+                    # add phantom latent variable
+                    TMP <- FLAT.block[1,]
+                    TMP$lhs <- lv.names.rv[i]; TMP$op <- "=~"
+                    TMP$rhs     <- lv.names.rv[i]
+                    TMP$mod.idx <- max(FLAT$mod.idx) + i
+                    TMP$fixed   <- "0"
+                    TMP$start   <- ""; TMP$lower   <- ""; TMP$upper   <- ""
+                    TMP$label   <- ""; TMP$prior   <- ""; TMP$efa     <- ""
+                    TMP$rv      <- lv.names.rv[i]
+                    FLAT.block <- rbind(FLAT.block, TMP, deparse.level = 0L)
+                    MOD <- c(MOD, list(list(fixed = 0)))
+                }
+            }
+
             LIST.block <- lav_partable_flat(FLAT.block, blocks = BLOCK.lhs,
                 block.id = block.id,
                 meanstructure = meanstructure,
@@ -304,8 +329,8 @@ lavaanify <- lavParTable <- function(
        LIST$ustart[scale.idx] <- 1
     }
 
-
     # apply user-specified modifiers
+    warn.about.single.label <- FALSE
     if(length(MOD)) {
         for(el in 1:length(MOD)) {
             idx <- which(LIST$mod.idx == el) # for each group
@@ -323,6 +348,7 @@ lavaanify <- lavParTable <- function(
             MOD.label <- MOD[[el]]$label
             MOD.prior <- MOD[[el]]$prior
             MOD.efa   <- MOD[[el]]$efa
+            MOD.rv    <- MOD[[el]]$rv
 
             # check for single argument if multiple groups
             if(ngroups > 1L && length(idx) > 1L) {
@@ -334,17 +360,31 @@ lavaanify <- lavParTable <- function(
                 if(length(MOD.upper) == 1L) MOD.upper <- rep(MOD.upper, ngroups)
                 if(length(MOD.prior) == 1L) MOD.prior <- rep(MOD.prior, ngroups)
                 if(length(MOD.efa)   == 1L) MOD.efa   <- rep(MOD.efa,   ngroups)
+                if(length(MOD.rv)    == 1L) MOD.rv    <- rep(MOD.rv,    ngroups)
+
+                # new in 0.6-7 (proposal):
+                # - always recycle modifiers, including labels
+                # - if ngroups > 1 AND group.label= is empty, produce a warning
+                #   (as this is a break from < 0.6-6)
+                if(length(MOD.label) == 1L) {
+                    MOD.label <- rep(MOD.label, ngroups)
+                    if(is.null(group.equal) || length(group.equal) == 0L) {
+                        warn.about.single.label <- TRUE
+                    }
+                }
+
+                # < 0.6-7 code:
                 # B) here we do NOT! otherwise, it would imply an equality
                 #                    constraint...
                 #    except if group.equal="loadings"!
-                if(length(MOD.label) == 1L) {
-                    if("loadings" %in% group.equal ||
-                       "composite.loadings" %in% group.equal) {
-                        MOD.label <- rep(MOD.label, ngroups)
-                    } else {
-                        MOD.label <- c(MOD.label, rep("", (ngroups-1L)) )
-                    }
-                }
+                #if(length(MOD.label) == 1L) {
+                #    if("loadings" %in% group.equal ||
+                #       "composite.loadings" %in% group.equal) {
+                #        MOD.label <- rep(MOD.label, ngroups)
+                #    } else {
+                #        MOD.label <- c(MOD.label, rep("", (ngroups-1L)) )
+                #    }
+                #}
             }
 
             # check for wrong number of arguments if multiple groups
@@ -355,6 +395,7 @@ lavaanify <- lavParTable <- function(
                 (!is.null(MOD.upper) && nidx != length(MOD.upper)) ||
                 (!is.null(MOD.prior) && nidx != length(MOD.prior)) ||
                 (!is.null(MOD.efa)   && nidx != length(MOD.efa))   ||
+                (!is.null(MOD.rv)    && nidx != length(MOD.rv))    ||
                 (!is.null(MOD.label) && nidx != length(MOD.label)) ) {
                 el.idx <- which(LIST$mod.idx == el)[1L]
                 stop("lavaan ERROR: wrong number of arguments in modifier (",
@@ -393,6 +434,16 @@ lavaanify <- lavParTable <- function(
                 }
                 LIST$efa[idx] <- MOD.efa
             }
+            if(!is.null(MOD.rv)) {
+                # do we already have a `rv' column? if not, create one
+                if(is.null(LIST$rv)) {
+                    LIST$rv <- character( length(LIST$lhs) )
+                }
+                LIST$rv[idx] <- MOD.rv
+
+                LIST$free[  idx] <- 0L
+                LIST$ustart[idx] <- as.numeric(NA) #
+            }
             if(!is.null(MOD.lower)) {
                 # do we already have a `lower' column? if not, create one
                 if(is.null(LIST$lower)) {
@@ -415,6 +466,12 @@ lavaanify <- lavParTable <- function(
     # remove mod.idx column
     LIST$mod.idx <- NULL
 
+    # warning about single label in multiple group setting?
+    if(warn.about.single.label) {
+        warning("lavaan WARNING: using a single label per parameter in a multiple group\n",  "\t setting implies imposing equality constraints across all the groups;\n",    "\t If this is not intended, either remove the label(s), or use a vector\n",    "\t of labels (one for each group);\n",
+             "\t See the Multiple groups section in the man page of model.syntax.")
+    }
+
     # if lower/upper values were added, fix non-free values to ustart values
     # new in 0.6-6
     if(!is.null(LIST$lower)) {
@@ -427,6 +484,16 @@ lavaanify <- lavParTable <- function(
         fixed.idx <- which(LIST$free == 0L)
         if(length(fixed.idx) > 0L) {
             LIST$upper[fixed.idx] <- LIST$ustart[fixed.idx]
+        }
+    }
+
+    # if rv column is present, add RV.names to ALL rows where they are used
+    if(!is.null(LIST$rv)) {
+        RV.names <- unique(LIST$rv[ nchar(LIST$rv) > 0L ])
+        for(i in seq_len(length(RV.names))) {
+            lhs.idx <- which(LIST$lhs == RV.names[i] &
+                             LIST$op == "=~")
+            LIST$rv[lhs.idx] <- RV.names[i]
         }
     }
 

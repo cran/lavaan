@@ -6,6 +6,7 @@ lav_model_estimate <- function(lavmodel       = NULL,
                                lavdata        = NULL,
                                lavoptions     = NULL,
                                lavcache       = list(),
+                               start          = "model",
                                do.fit         = TRUE) {
 
     estimator     <- lavoptions$estimator
@@ -28,6 +29,26 @@ lav_model_estimate <- function(lavmodel       = NULL,
 
     # starting values (ignoring equality constraints)
     x.unpack <- lav_model_get_parameters(lavmodel)
+
+    # override? use simple instead? (new in 0.6-7)
+    if(start == "simple") {
+        START <- numeric(length(lavpartable$lhs))
+        # set loadings to 0.7
+        loadings.idx <- which(lavpartable$free > 0L &
+                              lavpartable$op == "=~")
+        if(length(loadings.idx) > 0L) {
+            START[loadings.idx] <- 0.7
+        }
+        # set (only) variances to 1
+        var.idx <- which(lavpartable$free > 0L &
+                         lavpartable$op == "~~" &
+                         lavpartable$lhs == lavpartable$rhs)
+        if(length(var.idx) > 0L) {
+            START[var.idx] <- 1
+        }
+        x.unpack <- START[ lavpartable$free > 0L ]
+    }
+
 
     # 1. parameter scaling (to handle data scaling, not parameter scaling)
     parscale <- rep(1.0, length(x.unpack))
@@ -376,6 +397,7 @@ lav_model_estimate <- function(lavmodel       = NULL,
                 group.txt <- ifelse(ngroups > 1,
                                     paste(" in group ",g,".",sep=""), ".")
                 if(debug) print(Sigma.hat[[g]])
+                print(Sigma.hat[[g]][,])
                 stop("lavaan ERROR: initial model-implied matrix (Sigma) is not positive definite;\n  check your model and/or starting parameters", group.txt)
                 x <- start.x
                 fx <- as.numeric(NA)
@@ -404,6 +426,15 @@ lav_model_estimate <- function(lavmodel       = NULL,
     if(debug) {
         cat("SCALE = ", SCALE, "\n")
     }
+
+
+    # first try: check if starting values return a finite value
+    fx <- objective_function(start.x)
+    if(!is.finite(fx)) {
+        # emergency change of start.x
+        start.x <- start.x / 10
+    }
+
 
 
     # first some nelder mead steps? (default = FALSE)
@@ -509,6 +540,18 @@ lav_model_estimate <- function(lavmodel       = NULL,
             cat("number of iterations: ", optim.out$iterations, "\n")
             cat("number of function evaluations [objective, gradient]: ",
                 optim.out$evaluations, "\n")
+        }
+
+        # try again
+        if(optim.out$convergence != 0L) {
+             optim.out <- nlminb(start=start.x,
+                            objective=objective_function,
+                            gradient=NULL,
+                            lower=lower,
+                            upper=upper,
+                            control=control,
+                            scale=SCALE,
+                            verbose=verbose)
         }
 
         iterations <- optim.out$iterations

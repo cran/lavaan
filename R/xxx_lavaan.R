@@ -180,13 +180,19 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         # here, we only need to figure out:
         # - ngroups
         # - ov's per group
+        #
         # - FIXME: we need a more efficient way, avoiding lavaanify/vnames
+        #
         group.idx <- which(FLAT$op == ":" & tolower(FLAT$lhs) == "group")
         # replace by 'group' (in case we got 'Group'):
         FLAT$lhs[group.idx] <- "group"
         tmp.group.values <- unique(FLAT$rhs[group.idx])
         tmp.ngroups <- length(tmp.group.values)
-        tmp.lav <- lavaanify(FLAT, ngroups = tmp.ngroups, warn = FALSE)
+
+        FLAT2 <- FLAT
+        attr(FLAT2, "modifiers") <- NULL
+        attr(FLAT2, "constraints") <- NULL
+        tmp.lav <- lavaanify(FLAT2, ngroups = tmp.ngroups, warn = FALSE)
         ov.names <- ov.names.y <- ov.names.x <- lv.names <- vector("list",
                                                        length = tmp.ngroups)
         for(g in seq_len(tmp.ngroups)) {
@@ -246,9 +252,14 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
         # if found, hard stop
         if(length(bad.idx) > 0L) {
-            stop("lavaan ERROR: some latent variable names collapse ",
-                 "with observed\n\t\tvariable names: ",
-                 paste(LV.names[bad.idx], collapse = " "))
+            if(!is.null(dotdotdot$check.lv.names) &&
+               !dotdotdot$check.lv.names) {
+                # ignore it, user switched this check off -- new in 0.6-7
+            } else {
+                stop("lavaan ERROR: some latent variable names collide ",
+                     "with observed\n\t\tvariable names: ",
+                     paste(LV.names[bad.idx], collapse = " "))
+            }
 
             # rename latent variables (by adding 'lat')
             #flat.idx <- which(FLAT$op == "=~" &
@@ -289,7 +300,10 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             stop("lavaan ERROR: when data is clustered, you must specify a model\n", "  for each level in the model syntax (for now); see example(Demo.twolevel)")
         }
 
-        tmp.lav <- lavaanify(FLAT, ngroups = tmp.ngroups, warn = FALSE)
+        FLAT2 <- FLAT
+        attr(FLAT2, "modifiers") <- NULL
+        attr(FLAT2, "constraints") <- NULL
+        tmp.lav <- lavaanify(FLAT2, ngroups = tmp.ngroups, warn = FALSE)
         # check for empty levels
         if(max(tmp.lav$level) < 2L) {
             stop("lavaan ERROR: at least one level has no model syntax; you must specify a model for each level in the model syntax (for now); see example(Demo.twolevel)")
@@ -368,7 +382,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     # add the variable names that were treated as ordinal
     # in the model syntax
     ordered <- unique(c(ordered, lavNames(FLAT, "ov.ord")))
-
 
 
     #######################
@@ -491,12 +504,16 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     timing$Options <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
-
     # fixed.x = FALSE? set ov.names.x = character(0L)
     # new in 0.6-1
     if(!lavoptions$fixed.x) {
         ov.names.x <- character(0L)
     }
+
+
+    # re-order ov.names.* if requested (new in 0.6-7)
+
+
 
 
     #####################
@@ -505,8 +522,13 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if(!is.null(slotData)) {
         lavdata <- slotData
     } else {
+
         # FIXME: ov.names should always contain both y and x!
-        OV.NAMES <- if(lavoptions$conditional.x) { ov.names.y } else {ov.names}
+        OV.NAMES <- if(lavoptions$conditional.x) {
+                        ov.names.y
+                    } else {
+                        ov.names
+                    }
         lavdata <- lavData(data             = data,
                            group            = group,
                            cluster          = cluster,
@@ -746,6 +768,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     }
 
 
+
     ##################
     #### 7. lavh1 ####
     ##################
@@ -814,6 +837,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                        lavpartable     = lavpartable,
                                        lavsamplestats  = lavsamplestats,
                                        model.type   = lavoptions$model.type,
+                                       reflect      = FALSE,
+                                       order.lv.by  = lavoptions$rotation.args$order.lv.by,
+                                       #order.lv.by  = "none",
                                        mimic        = lavoptions$mimic,
                                        debug        = lavoptions$debug)
             } else {
@@ -824,6 +850,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                lavpartable    = lavpartable,
                                lavsamplestats = lavsamplestats,
                                model.type     = lavoptions$model.type,
+                               reflect      = FALSE,
+                               order.lv.by  = lavoptions$rotation.args$order.lv.by,
+                               #order.lv.by  = "none",
                                mimic          = lavoptions$mimic,
                                debug          = lavoptions$debug)
 
@@ -839,6 +868,41 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
 
         timing$start <- (proc.time()[3] - start.time)
         start.time <- proc.time()[3]
+
+
+        # 8b. bounds for EFA -- change user==7 element if columns
+        #     have been reordered
+        if( !is.null(lavpartable$efa) && any(lavpartable$user == 7L) &&
+            lavoptions$rotation != "none" ) {
+
+            # 7 to free
+            idx <- which(lavpartable$user == 7 &
+                         lavpartable$op == "=~" &
+                         abs(lavpartable$start) > sqrt(.Machine$double.eps))
+            if(length(idx) > 0L) {
+                lavpartable$user[idx] <- 0L
+                lavpartable$free[idx] <- 1L
+                lavpartable$ustart[idx] <- as.numeric(NA)
+            }
+
+            # free to 7
+            idx <- which(lavpartable$user != 7  &
+                         lavpartable$op == "=~" &
+                         lavpartable$free > 0L &
+                         nchar(lavpartable$efa) > 0L &
+                         abs(lavpartable$start) < sqrt(.Machine$double.eps))
+            if(length(idx) > 0L) {
+                lavpartable$user[idx] <- 7L
+                lavpartable$free[idx] <- 0L
+                lavpartable$ustart[idx] <- as.numeric(0)
+            }
+
+            # recount free parameters
+            idx <- which(lavpartable$free > 0L)
+            if(length(idx) > 0L) {
+                lavpartable$free[idx] <- seq_len(length(idx))
+            }
+        }
 
 
 
@@ -892,6 +956,34 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     } # slotModel
 
 
+    # 9b. bounds for EFA -- to force diag(LAMBDA) to be positive (new in 0.6-7)
+    if( (.hasSlot(lavmodel, "nefa")) && (lavmodel@nefa > 0L) &&
+        (lavoptions$rotation != "none") ) {
+
+        # add lower column
+        if(is.null(lavpartable$lower)) {
+            lavpartable$lower <- rep(-Inf, length(lavpartable$lhs))
+        }
+        efa.values <- lav_partable_efa_values(lavpartable)
+        group.values <- lav_partable_group_values(lavpartable)
+        for(g in seq_len(lavdata@ngroups)) {
+            for(set in seq_len(lavmodel@nefa)) {
+                lv.efa <-
+                    unique(lavpartable$lhs[ lavpartable$op == "=~" &
+                                            lavpartable$block == g &
+                                            lavpartable$efa == efa.values[set]])
+                for(f in seq_len(length(lv.efa))) {
+                    lambda.idx <- which( lavpartable$lhs == lv.efa[f] &
+                                         lavpartable$op == "=~" &
+                                         lavpartable$group == group.values[g] )
+                    # get largest factor loading
+                    #midx <- lambda.idx[which.max(lavpartable$start[lambda.idx])]
+                    midx <- lambda.idx[f] # diagonal element of LAMBDA
+                    lavpartable$lower[midx] <- 0
+                 } # factors
+            } # sets
+        } # groups
+    }
 
 
 
@@ -1107,12 +1199,51 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                dx.tol         = lavoptions$em.dx.tol,
                                max.iter       = lavoptions$em.iter.max)
         } else {
+            # try 1
             x <- lav_model_estimate(lavmodel        = lavmodel,
                                     lavpartable     = lavpartable,
                                     lavsamplestats  = lavsamplestats,
                                     lavdata         = lavdata,
                                     lavoptions      = lavoptions,
                                     lavcache        = lavcache)
+
+            # try 2: optim.parscale = "standardize" (new in 0.6-7)
+            if(!attr(x, "converged")) {
+                lavoptions2 <- lavoptions
+                lavoptions2$optim.parscale = "standardized"
+                x <- lav_model_estimate(lavmodel        = lavmodel,
+                                        lavpartable     = lavpartable,
+                                        lavsamplestats  = lavsamplestats,
+                                        lavdata         = lavdata,
+                                        lavoptions      = lavoptions2,
+                                        lavcache        = lavcache)
+            }
+
+            # try 3: start = "simple"
+            if(!attr(x, "converged")) {
+                x <- lav_model_estimate(lavmodel        = lavmodel,
+                                        lavpartable     = lavpartable,
+                                        lavsamplestats  = lavsamplestats,
+                                        lavdata         = lavdata,
+                                        lavoptions      = lavoptions,
+                                        start           = "simple",
+                                        lavcache        = lavcache)
+            }
+
+            # try 4: start = "simple" + optim.parscale = "standardize"
+            if(!attr(x, "converged")) {
+                lavoptions2 <- lavoptions
+                lavoptions2$optim.parscale = "standardized"
+                x <- lav_model_estimate(lavmodel        = lavmodel,
+                                        lavpartable     = lavpartable,
+                                        lavsamplestats  = lavsamplestats,
+                                        lavdata         = lavdata,
+                                        lavoptions      = lavoptions2,
+                                        start           = "simple",
+                                        lavcache        = lavcache)
+            }
+
+
         }
 
         # in case of non-linear constraints: store final con.jac and con.lambda
@@ -1239,6 +1370,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             VCOV1 <- NULL
         }
         if(is.character(lavoptions$store.vcov) &&
+           lavoptions$rotation == "none" &&
            lavoptions$store.vcov == "default" &&
            ncol(VCOV1) > 200L) {
             VCOV1 <- NULL
@@ -1326,6 +1458,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                             x           = x,
                             VCOV        = VCOV,
                             TEST        = TEST)
+    #lavfit <- new("Fit")
     timing$Fit <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
 
@@ -1377,9 +1510,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
     if( (.hasSlot(lavmodel, "nefa")) && (lavmodel@nefa > 0L) &&
         (lavoptions$rotation != "none") ) {
 
-        # unrotated parameters
-        x.unrotated <- as.numeric(x)
-
         # store unrotated solution in partable
         lavpartable$est.unrotated <- lavpartable$est
 
@@ -1388,6 +1518,16 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             cat("Rotating EFA factors using rotation method =",
                 toupper(lavoptions$rotation), "... ")
         }
+
+        # pre-rotate: fix 'sign' and 'order', according to the options
+        # in lavoptions; this is important for the 'order' of the parameters
+        # in vcov, once we use the delta rule
+        #lavmodel <- lav_model_efa_rotate_pre(lavmodel = lavmodel,
+        #                                     lavoptions = lavoptions)
+        #x.unrotated <- as.numeric(lav_model_get_parameters(lavmodel))
+        x.unrotated <- as.numeric(x)
+
+
         lavmodel.unrot <- lavmodel
         lavmodel <- lav_model_efa_rotate(lavmodel = lavmodel,
                                          lavoptions = lavoptions)
@@ -1412,14 +1552,34 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                                       # Note: lavmodel MUST be UNROTATED
                                       lavmodel = lavmodel.unrot,
                                       init.rot = lavmodel@H,
+                                      #jacobian = TRUE,
                                       lavoptions = lavoptions,
                                       type = "user",
                                       extra = FALSE,
-                                      method.args = list(eps = 1e-3),
+                                      method.args = list(eps = 1e-03),
                                       method = "simple") # to save time
 
-            # Delta method
-            VCOV.user <- JAC %*% lavvcov$vcov %*% t(JAC)
+            # compute unrotated VCOV (possibly after re-ordering the factors!)
+            #VCOV <- lav_model_vcov(lavmodel        = lavmodel.unrot,
+            #                       lavsamplestats  = lavsamplestats,
+            #                       lavoptions      = lavoptions,
+            #                       lavdata         = lavdata,
+            #                       lavpartable     = lavpartable,
+            #                       lavcache        = lavcache,
+            #                       lavimplied      = lavimplied,
+            #                       lavh1           = lavh1)
+
+            # force VCOV to be pd, before we transform
+            #VCOV.in <- lav_matrix_symmetric_force_pd(VCOV)
+            #lavvcov <- list(se = lavoptions$se,
+            #                information = lavoptions$information,
+            #                vcov = VCOV.in)
+
+            VCOV.in <- lav_matrix_symmetric_force_pd(lavvcov$vcov, tol = 1e-06)
+            #VCOV.in <- lavvcov$vcov
+
+            # apply Delta rule
+            VCOV.user <- JAC %*% VCOV.in %*% t(JAC)
 
             # re-compute SE and store them in lavpartable
             if(lavoptions$se != "external" && lavoptions$se != "twostep") {

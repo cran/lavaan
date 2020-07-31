@@ -307,7 +307,7 @@ lav_partable_flat <- function(FLAT = NULL,
                          user == 0L)
         ustart[var.idx] <- 0.0
           free[var.idx] <- 0L
-    } else {
+    } else if(length(lv.names.f) > 0L) {
         # 'formative' (residual) variances are set to zero by default
         var.idx <- which(op == "~~" &
                          lhs == rhs &
@@ -326,7 +326,7 @@ lav_partable_flat <- function(FLAT = NULL,
         ustart[lv.var.idx] <- 1.0
           free[lv.var.idx] <- 0L
     }
-    if(auto.efa) {
+    if(auto.efa && length(lv.names.efa) > 0L) {
         # fix lv variances of efa blocks to unity
         lv.var.idx <- which(op == "~~" &
                             lhs %in% lv.names.efa & lhs == rhs)
@@ -352,10 +352,11 @@ lav_partable_flat <- function(FLAT = NULL,
             # get corresponding indicator if unique
             lhs.mm <- lhs[mm.idx]; rhs.mm <- rhs[mm.idx]
             single.ind <- rhs.mm[which(lhs.mm %in% lv.names.single &
+                                       lhs.mm != rhs.mm & # exclude phantom
                                        !(duplicated(rhs.mm) |
                                          duplicated(rhs.mm, fromLast=TRUE)))]
             # is the indicator unique?
-            if(length(single.ind)) {
+            if(length(single.ind) > 0L) {
                 var.idx <- which(op == "~~" & lhs %in% single.ind
                                             & rhs %in% single.ind
                                             & lhs == rhs
@@ -407,7 +408,6 @@ lav_partable_flat <- function(FLAT = NULL,
           free[lv.cov.idx] <- 0L
     }
 
-
     # 4. intercepts
     if(meanstructure) {
         if(categorical) {
@@ -434,7 +434,20 @@ lav_partable_flat <- function(FLAT = NULL,
             ustart[lv.int.idx] <- 0.0
               free[lv.int.idx] <- 0L
         }
+        # 4b. fixed effect (only if we have random slopes)
+        if(!is.null(FLAT$rv) && any(nchar(FLAT$rv) > 0L)) {
+            lv.names.rv <- lav_partable_vnames(FLAT, "lv.rv")
+            lv.rv.idx <- which(op == "~1" &
+                               lhs %in% lv.names.rv &
+                               user == 0L)
+            ustart[lv.rv.idx] <- as.numeric(NA)
+              free[lv.rv.idx] <- 1L
+        }
     }
+
+    # 4b. fixed effect (only if we have random slopes)
+    #if(!is.null(FLAT$rv)) {
+    #    }
 
     # 5. handle exogenous `x' covariates
     if(length(ov.names.x) > 0) {

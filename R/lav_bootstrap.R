@@ -38,7 +38,13 @@ bootstrapLavaan <- function(object,
     stopifnot(inherits(object, "lavaan"),
               type. %in% c("nonparametric", "ordinary",
                           "bollen.stine", "parametric", "yuan"))
-    if(type. == "nonparametric") type. <- "ordinary"
+    if(type. == "nonparametric") {
+        type. <- "ordinary"
+    }
+    if(missing(parallel)) {
+        parallel <- "no"
+    }
+    parallel <- match.arg(parallel)
 
     # check if options$se is not bootstrap, otherwise, we get an infinite loop
     if(object@Options$se == "bootstrap")
@@ -102,6 +108,12 @@ bootstrap.internal <- function(object          = NULL,
         lavmodel       <- object@Model
         lavsamplestats <- object@SampleStats
         lavoptions     <- object@Options
+        if(!is.null(lavoptions.)) {
+            lavoptions$parallel <- lavoptions.$parallel
+            lavoptions$ncpus    <- lavoptions.$ncpus
+            lavoptions$cl       <- lavoptions.$cl
+            lavoptions$iseed    <- lavoptions.$iseed
+        }
         lavpartable    <- object@ParTable
         FUN <- match.fun(FUN)
         t0 <- FUN(object, ...)
@@ -129,10 +141,10 @@ bootstrap.internal <- function(object          = NULL,
         }
     }
 
-    parallel <- lavoptions$parallel
+    parallel <- lavoptions$parallel[1]
     ncpus    <- lavoptions$ncpus
-    cl       <- lavoptions$cl
-    iseed    <- lavoptions$iseed
+    cl       <- lavoptions[["cl"]]    # often NULL
+    iseed    <- lavoptions[["iseed"]] # often NULL
 
     # prepare
     old_options <- options(); options(warn = warn)
@@ -142,6 +154,7 @@ bootstrap.internal <- function(object          = NULL,
         if (parallel == "multicore") have_mc <- .Platform$OS.type != "windows"
         else if (parallel == "snow") have_snow <- TRUE
         if (!have_mc && !have_snow) ncpus <- 1L
+        loadNamespace("parallel")
     }
 
     # only if we return the seed
