@@ -9,6 +9,7 @@
 \alias{lav_partable_complete}
 \alias{lav_partable_attributes}
 \alias{lav_partable_merge}
+\alias{lav_partable_add}
 \title{lavaan partable functions}
 \description{Utility functions related to the parameter table (partable)}
 \usage{
@@ -25,12 +26,14 @@ lav_partable_labels(partable, blocks = c("group", "level"),
 # generate parameter table for specific models
 lav_partable_independence(lavobject = NULL, lavdata = NULL,
     lavpta = NULL, lavoptions = NULL, lavsamplestats = NULL,
+    lavh1 = NULL,
     sample.cov = NULL, sample.mean = NULL, sample.slopes = NULL,
     sample.th = NULL, sample.th.idx = NULL,
     sample.cov.x = NULL, sample.mean.x = NULL)
 
 lav_partable_unrestricted(lavobject = NULL, lavdata = NULL, 
     lavpta = NULL, lavoptions = NULL, lavsamplestats = NULL, 
+    lavh1 = NULL,
     sample.cov = NULL, sample.mean = NULL, sample.slopes = NULL, 
     sample.th = NULL, sample.th.idx = NULL,
     sample.cov.x = NULL, sample.mean.x = NULL) 
@@ -44,6 +47,9 @@ lav_partable_complete(partable = NULL, start = TRUE)
 # merge two parameter tables
 lav_partable_merge(pt1 = NULL, pt2 = NULL, remove.duplicated = FALSE, 
     fromLast = FALSE, warn = TRUE)
+
+# add a single parameter to an existing parameter table
+lav_partable_add(partable = NULL, add = list())
 }
 \arguments{
 \item{partable}{A parameter table. see \code{\link{lavParTable}} 
@@ -67,9 +73,10 @@ entries or only the free parameters from the parameter table respectively.}
 it should be the only argument. All the values for the other arguments 
 are extracted from this object.}
 \item{lavdata}{An object of class `lavData'. The Data slot from a lavaan object.}
-\item{lavoptions}{A names list. The Options lsot from a lavaan object.}
+\item{lavoptions}{A named list. The Options lsot from a lavaan object.}
 \item{lavsamplestats}{An object of class `lavSampleStats'. The SampleStats
-slot from a  lavaan object.}
+slot from a lavaan object.}
+\item{lavh1}{A named list. The h1 slot from a lavaan object.}
 \item{lavpta}{The pta (parameter table attributes) slot from a lavaan object.}
 \item{sample.cov}{Optional list of numeric matrices. 
 Each list element contains a sample variance-covariance matrix for this group.
@@ -110,6 +117,7 @@ when merging two parameter tables.}
 from the bottom of the merged parameter table.}
 \item{warn}{Logical. If code{TRUE}, a warning is produced when duplicated
 elements are found, when merging two parameter tables.}
+\item{add}{A named list.}{A single row of a parameter table as a named list.}
 }
 \examples{
 # generate syntax for an independence model

@@ -77,10 +77,10 @@ lav_options_default <- function(mimic = "lavaan") {
 
                 # rotation
                 rotation           = "geomin",
-                rotation.se        = "delta", # "bordered" or "delta"
+                rotation.se        = "bordered", # "bordered" or "delta"
                 rotation.args      = list(orthogonal     = FALSE,
-                                          row.weights    = "none",
-                                          std.ov         = FALSE,
+                                          row.weights    = "default",
+                                          std.ov         = TRUE,
                                           geomin.epsilon = 0.01,
                                           orthomax.gamma = 1,
                                           cf.gamma       = 0,
@@ -97,6 +97,7 @@ lav_options_default <- function(mimic = "lavaan") {
                                           verbose        = FALSE,
                                           jac.init.rot   = TRUE,
                                           max.iter       = 10000L),
+                                          
 
                 # full data
                 std.ov             = FALSE,
@@ -121,6 +122,7 @@ lav_options_default <- function(mimic = "lavaan") {
 
                 # estimation
                 estimator              = "default",
+                estimator.args         = list(),
                 likelihood             = "default",
                 link                   = "default",
                 representation         = "default",
@@ -140,13 +142,21 @@ lav_options_default <- function(mimic = "lavaan") {
                 information.meat       = "default",
                 h1.information.meat    = "default",
 
+                # information for 'Omega' (yuan-benter test only)
+                omega.information         = "default",
+                omega.h1.information      = "default",
+                omega.information.meat    = "default",
+                omega.h1.information.meat = "default",
+
+
                 bootstrap              = 1000L,
                 gamma.n.minus.one      = FALSE,
                 #gamma.unbiased         = FALSE,
 
                 # optimization
                 control                = list(),
-                optim.method           = "nlminb",
+                optim.method           = "default", # gn for DLS, nlminb rest
+                optim.attempts         = 4L,
                 optim.force.converged  = FALSE,
                 optim.gradient         = "analytic",
                 optim.init_nelder_mead = FALSE,
@@ -158,6 +168,8 @@ lav_options_default <- function(mimic = "lavaan") {
                 em.fx.tol              = 1e-08,
                 em.dx.tol              = 1e-04,
                 em.zerovar.offset      = 0.0001,
+                optim.gn.iter.max      = 200L,
+                optim.gn.tol.x         = 1e-05,
 
                 # numerical integration
                 integration.ngh        = 21L,
@@ -383,7 +395,9 @@ lav_options_set <- function(opt = NULL) {
     # brute-force override (for now)
     if(opt$multilevel) {
         opt$meanstructure <- TRUE
-        opt$missing <- "listwise"
+        opt$missing <- "listwise" # still needed for 0.6-8 (otherwise, we
+                                  # we break tidySEM tests where they set
+                                  # missing = "fiml" + multilevel
 
         # test
         if(length(opt$test) == 1L && opt$test == "default") {
@@ -459,7 +473,7 @@ lav_options_set <- function(opt = NULL) {
         }
         if(opt$estimator %in% c("mlm", "mlmv", "gls", "wls", "wlsm", "wlsmv",
                                 "uls", "ulsm", "ulsmv", "pml", "mml")) {
-            stop("lavaan ERROR: missing=\"two.stage\" is not allowed for estimator MLM, MLMV, GLS, ULS, ULSM, ULSMV, DWLS, WLS, WLSM, WLSMV, PML, MML")
+            stop("lavaan ERROR: missing=\"two.stage\" is not allowed for estimator MLM, MLMV, GLS, ULS, ULSM, ULSMV, DWLS, WLS, WLSM, WLSMV, DLS, PML, MML")
         }
     } else if(opt$missing %in% c("robust.two.stage", "robust.twostage",
                                  "robust.two-stage", "robust-two-stage",
@@ -471,7 +485,7 @@ lav_options_set <- function(opt = NULL) {
         }
         if(opt$estimator %in% c("mlm", "mlmv", "gls", "wls", "wlsm", "wlsmv",
                                 "uls", "ulsm", "ulsmv", "pml", "mml")) {
-            stop("lavaan ERROR: missing=\"robust.two.stage\" is not allowed for estimator MLM, MLMV, GLS, ULS, ULSM, ULSMV, DWLS, WLS, WLSM, WLSMV, PML, MML")
+            stop("lavaan ERROR: missing=\"robust.two.stage\" is not allowed for estimator MLM, MLMV, GLS, ULS, ULSM, ULSMV, DWLS, WLS, WLSM, WLSMV, DLS, PML, MML")
         }
     } else if(opt$missing == "listwise") {
         # nothing to do
@@ -498,6 +512,8 @@ lav_options_set <- function(opt = NULL) {
     if(length(opt$test) == 1L && opt$test == "default") {
         if(opt$missing == "two.stage" ||
            opt$missing == "robust.two.stage") {
+            opt$test <- "satorra.bentler"
+        } else if(opt$estimator == "dls") {
             opt$test <- "satorra.bentler"
         } else {
             opt$test <- "standard"
@@ -764,6 +780,16 @@ lav_options_set <- function(opt = NULL) {
         #opt$meanstructure <- TRUE
     } else if(opt$estimator == "gls") {
         opt$estimator <- "GLS"
+        # check estimator.args
+        #if(is.null(opt$estimator.args)) {
+        #    opt$estimator.args <- list(gls.FtimesNminus1 = TRUE)
+        #} else {
+        #    if(is.null(opt$estimator.args$gls.FtimesNminus1)) {
+        #        opt$estimator.args$gls.FtimesNminus1 <- TRUE
+        #    } else {
+        #        stopifnot(is.logical(opt$estimator.args$gls.FtimesNminus1))
+        #    }
+        #}
         if(opt$se == "default" || opt$se == "standard") {
             opt$se <- "standard"
         } else if(opt$se == "none" ||
@@ -817,6 +843,86 @@ lav_options_set <- function(opt = NULL) {
                  opt$test, "\n")
         }
         #opt$missing <- "listwise"
+    } else if(opt$estimator == "dls") {
+        opt$sample.cov.rescale <- TRUE # should we make this an option??
+        opt$estimator <- "DLS"
+        if(opt$se == "default") {
+            opt$se <- "robust.sem"
+        } else if(opt$se == "none" ||
+                  opt$se == "bootstrap" ||
+                  opt$se == "external") {
+            # nothing to do
+        } else if(opt$se == "robust.sem" || opt$se == "standard") {
+            # nothing to do
+        } else if(opt$se == "robust") {
+            opt$se <- "robust.sem"
+        } else {
+            stop("lavaan ERROR: invalid value for `se' argument when estimator is DLS: ",
+                 opt$se, "\n")
+        }
+
+        if(opt$test == "default") {
+            opt$test <- "satorra.bentler"
+        } else if(!all(opt$test %in% c("standard","none","satorra.bentler",
+                            "mean.adjusted",
+                            "mean.var.adjusted","scaled.shifted"))) {
+            stop("lavaan ERROR: invalid value for `test' argument when estimator is DLS: ",
+                 opt$test, "\n")
+        }
+        if(opt$missing %in% c("fiml", "ml", "direct")) {
+            stop("lavaan ERROR: missing data is not supported if estimator is DLS; use missing = \"listwise\"")
+        }
+        opt$missing <- "listwise"
+
+        # check estimator.args
+        if(is.null(opt$estimator.args)) {
+            opt$estimator.args <- list(dls.a = 1.0, dls.GammaNT = "sample",
+                                       dls.FtimesNmin1 = FALSE)
+        } else {
+            if(is.null(opt$estimator.args$dls.a)) {
+                opt$estimator.args$dls.a <- 1.0
+            } else {
+                stopifnot(is.numeric(opt$estimator.args$dls.a))
+                if(opt$estimator.args$dls.a < 0.0 ||
+                   opt$estimator.args$dls.a > 1.0) {
+                    stop("lavaan ERROR: dls.a value in estimator.args must be between 0 and 1.")
+                }
+            }
+            if(is.null(opt$estimator.args$dls.GammaNT)) {
+                opt$estimator.args$dls.GammaNT <- "sample"
+            } else {
+                stopifnot(is.character(opt$estimator.args$dls.GammaNT))
+                opt$estimator.args$dls.GammaNT <-
+                    tolower(opt$estimator.args$dls.GammaNT)
+                if(!opt$estimator.args$dls.GammaNT %in% c("sample", "model")) {
+                    stop("lavaan ERROR: dls.GammaNT value in estimator.args must be either \"sample\" or \"model\".")
+                }
+            }
+            if(is.null(opt$estimator.args$dls.FtimesNminus1)) {
+                opt$estimator.args$dls.FtimesNminus1 <- FALSE
+            } else {
+                stopifnot(is.logical(opt$estimator.args$dls.FtimesNminus1))
+            }
+        }
+        # is 'sample' version, we allow both nlminb and gn
+        # if 'model' version, we only allow for gn
+        if(opt$estimator.args$dls.GammaNT == "sample") {
+            if(opt$optim.method %in% c("nlminb", "gn")) {
+                # nothing to do
+            } else if(opt$optim.method == "default") {
+                opt$optim.method <- "gn"
+            } else {
+                stop("lavaan ERROR: optim.method must be either nlminb or gn if estimator is sample based DLS.")
+            }
+        } else {
+            if(opt$optim.method %in% c("gn")) {
+                # nothing to do
+            } else if(opt$optim.method == "default") {
+                opt$optim.method <- "gn"
+            } else {
+                stop("lavaan ERROR: optim.method must be gn if estimator is model based DLS.")
+            }
+        }
     } else if(opt$estimator == "dwls") {
         opt$estimator <- "DWLS"
         if(opt$se == "default" || opt$se == "standard") {
@@ -1023,6 +1129,11 @@ lav_options_set <- function(opt = NULL) {
         stop("lavaan ERROR: unknown value for `estimator' argument: ", opt$estimator, "\n")
     }
 
+    # optim.method - if still "default" at this point -> set to "nlminb"
+    if(opt$optim.method == "default") {
+        opt$optim.method <- "nlminb"
+    }
+
 
     # special stuff for categorical
     if(opt$categorical) {
@@ -1048,9 +1159,9 @@ lav_options_set <- function(opt = NULL) {
         }
         if(opt$sample.cov.rescale == "default") {
             opt$sample.cov.rescale <- FALSE
-        } else {
-            warning("sample.cov.rescale argument is only relevant if estimator = ML")
-        }
+        }# else {
+        #    warning("sample.cov.rescale argument is only relevant if estimator = ML")
+        #}
     } else { # ml and friends
         if(opt$estimator %in% c("PML", "FML")) {
             opt$likelihood <- "normal"
@@ -1140,7 +1251,7 @@ lav_options_set <- function(opt = NULL) {
     }
     if(opt$information.meat == "default") {
         opt$information.meat <- "first.order"
-    } else if(opt$information %in% c("first.order")) {
+    } else if(opt$information.meat %in% c("first.order")) {
         # nothing to do
     } else {
         stop("lavaan ERROR: information.meat must be \"first.order\" (for now) \n")
@@ -1219,6 +1330,46 @@ lav_options_set <- function(opt = NULL) {
         opt$h1.information[1] <- "unstructured" # FIXME: allow option?
         opt$h1.information[2] <- "unstructured" # FIXME: allow option?
     }
+
+
+    # omega information
+    if(opt$omega.information == "default") {
+        opt$omega.information <- opt$information[2] # test version!
+    } else if(opt$omega.information %in% c("expected", "observed")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: omega.information must be either \"expected\" or \"observed\"")
+    }
+
+    if(opt$omega.h1.information == "default") {
+        #opt$omega.h1.information <- opt$h1.information[2] # test version!
+        opt$omega.h1.information <- "unstructured"
+    } else if(opt$omega.h1.information %in% c("structured", "unstructured")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: omega.h1.information must be either \"structured\" or \"unstructured\"")
+    }
+
+    # omega information.meat
+    if(opt$omega.information.meat == "default") {
+        opt$omega.information.meat <- "first.order"
+    } else if(opt$omega.information %in% c("first.order")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: omega.information.meat must be \"first.order\"")
+    }
+
+    if(opt$omega.h1.information.meat == "default") {
+        opt$omega.h1.information.meat <- opt$omega.h1.information
+    } else if(opt$omega.h1.information.meat %in%
+              c("structured", "unstructured")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: omega.h1.information.meat must be either \"structured\" or \"unstructured\"")
+    }
+
+
+
 
     # conditional.x
     if(is.logical(opt$conditional.x)) {
@@ -1422,7 +1573,6 @@ lav_options_set <- function(opt = NULL) {
                                  lower.factor = c(1.2, 1.0, 1.1),
                                  upper.factor = c(1.2, 1.3, 1.1),
                                  min.reliability.marker = 0.1,
-                                 min.var.lv.exo = 0.0,
                                  min.var.lv.endo = 0.0)
     } else if(opt$bounds == "pos.var") {
         opt$optim.bounds <- list(lower = c("ov.var", "lv.var"),
@@ -1442,6 +1592,106 @@ lav_options_set <- function(opt = NULL) {
     } else {
         stop("lavaan ERROR: unknown `bounds' option: ", opt$bounds)
     }
+
+
+    # rotation
+    opt$rotation <- tolower(opt$rotation)
+    if(opt$rotation %in% c("crawfer", "crawford.ferguson", "crawford-ferguson",
+                           "crawfordferguson")) {
+        opt$rotation <- "cf"
+    }
+    if(opt$rotation %in% c("varimax", "quartimax", "orthomax", "cf", "oblimin",
+                     "quartimin", "geomin", "entropy", "mccammon", "infomax",
+                     "tandem1", "tandem2", "none",
+                     "oblimax", "bentler", "simplimax", "target", "pst")) {
+        # nothing to do
+    } else if(opt$rotation %in% c("cf-quartimax", "cf-varimax", "cf-equamax",
+                            "cf-parsimax", "cf-facparsim")) {
+        # nothing to do here; we need M/P to set cf.gamma
+    } else {
+        txt <- c("Rotation method ", dQuote(opt$rotation), " not supported. ",
+        "Supported rotation methods are: varimax, quartimax, orthomax, cf, ",
+        "oblimin, quartimin, geomin, entropy, mccammon, infomax,",
+        "tandem1, tandem2, oblimax, bentler, simplimax, target, pst, ",
+        "crawford-ferguson,  cf-quartimax,  cf-varimax, cf-equamax, ",
+        "cf-parsimax, cf-facparsim")
+        stop(lav_txt2message(txt, header = "lavaan ERROR:"))
+    }
+
+    # rotation.se
+    if(!opt$rotation.se %in% c("delta", "bordered")) {
+        stop("lavaan ERROR: rotation.se option must be either \"delta\" or \"bordered\".")
+    }
+
+    # rotations.args
+    if(!is.list(opt$rotation.args)) {
+        stop("lavaan ERROR: rotation.args should be be list.")
+    }
+
+    # if target, check target matrix
+    if(opt$rotation == "target" || opt$rotation == "pst") {
+        target <- opt$rotation.args$target
+        if(is.null(target) || !is.matrix(target)) {
+            stop("lavaan ERROR: ",
+                 "rotation target matrix is NULL, or not a matrix")
+        }
+    }
+    if(opt$rotation == "pst") {
+        target.mask <- opt$rotation.args$target.mask
+        if(is.null(target.mask) || !is.matrix(target.mask)) {
+            stop("lavaan ERROR: ",
+                 "rotation target.mask matrix is NULL, or not a matrix")
+        }
+    }
+    # if NAs, force opt$rotation to be 'pst' and create target.mask
+    if(opt$rotation == "target" && anyNA(target)) {
+        opt$rotation <- "pst"
+        target.mask <- matrix(1, nrow = nrow(target), ncol = ncol(target))
+        target.mask[ is.na(target) ] <- 0
+        opt$rotation.args$target.mask <- target.mask
+    }
+
+    # set row.weights
+    opt$rotation.args$row.weights <- tolower(opt$rotation.args$row.weights)
+    if(opt$rotation.args$row.weights == "default") {
+        # the default is "none", except for varimax
+        if(opt$rotation == "varimax") {
+            opt$rotation.args$row.weights <- "kaiser"
+        } else {
+            opt$rotation.args$row.weights <- "none"
+        }
+    } else if(opt$rotation.args$row.weights %in% c("cureton-mulaik",
+              "cureton.mulaik", "cm")) {
+    } else if(opt$rotation.args$row.weights %in% c("kaiser", "none")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: rotation.args$row.weights should be \"none\",",
+             " \"kaiser\" or \"cureton-mulaik\".")
+    }
+
+    # check opt$rotation.args$algorithm
+    opt$rotation.args$algorithm <- tolower(opt$rotation.args$algorithm)
+    if(opt$rotation.args$algorithm %in% c("gpa", "pairwise")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: opt$rotation.args$algorithm must be gpa or pairwise")
+    }
+
+    # order.lv.by
+    opt$rotation.args$order.lv.by <- tolower(opt$rotation.args$order.lv.by)
+    if(opt$rotation.args$order.lv.by %in% c("sumofsquares", "index", "none")) {
+        # nothing to do
+    } else {
+        stop("lavaan ERROR: rotation.args$order.lv.by should be \"none\",",
+             " \"index\" or \"sumofsquares\".")
+    }
+
+
+
+    # group.w.free
+    #if(opt$group.w.free && opt$categorical) {
+    #    stop("lavaan ERROR: group.w.free = TRUE is not supported (yet) in the categorical setting.")
+    #}
 
     if(opt$debug) { cat("lavaan DEBUG: lavaanOptions OUT\n"); str(opt) }
 

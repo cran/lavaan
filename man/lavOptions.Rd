@@ -214,12 +214,14 @@ Estimation options:
 \describe{
     \item{\code{estimator}:}{The estimator to be used. Can be one of the 
       following: \code{"ML"} for maximum likelihood, \code{"GLS"} for 
-      generalized least squares, \code{"WLS"} for weighted least squares 
+      (normal theory) generalized least squares, 
+      \code{"WLS"} for weighted least squares 
       (sometimes called ADF estimation), \code{"ULS"} for unweighted least 
-      squares and \code{"DWLS"} for diagonally weighted least squares. These 
-      are the main options that affect the estimation. For convenience, the 
-      \code{"ML"} option can be extended as \code{"MLM"}, \code{"MLMV"}, 
-      \code{"MLMVS"}, \code{"MLF"}, and \code{"MLR"}. 
+      squares, \code{"DWLS"} for diagonally weighted least squares,
+      and \code{"DLS"} for distributionally-weighted least squares. These
+      are the main options that affect the estimation. For convenience, the
+      \code{"ML"} option can be extended as \code{"MLM"}, \code{"MLMV"},
+      \code{"MLMVS"}, \code{"MLF"}, and \code{"MLR"}.
       The estimation will still be plain \code{"ML"}, but now
       with robust standard errors and a robust (scaled) test statistic. For
       \code{"MLM"}, \code{"MLMV"}, \code{"MLMVS"}, classic robust standard
@@ -330,16 +332,30 @@ Optimization options:
       parameters. If another (external) optimizer is selected, see the
       manpage for that optimizer to see the possible control parameters.}
     \item{\code{optim.method}:}{Character. The optimizer that should be
-      used. For unconstrained optimization (the model syntax
+      used. For unconstrained optimization or models with only linear
+      equality constraints (i.e., the model syntax
       does not include any "==", ">" or "<" operators),
-      the available options are \code{"nlminb"} (the default), \code{"BFGS"} and
-      \code{"L-BFGS-B"}. For constrained
-      optimization, the only available option is \code{"nlminb.constr"}.}
+      the available options are \code{"nlminb"} (the default), \code{"BFGS"},
+      \code{"L-BFGS-B"}. These are all quasi-newton methods. A basic 
+      implementation of Gauss-Newton is also available
+      (\code{optim.method = "GN"}). The latter is the default when 
+      \code{estimator = "DLS"}.
+      For constrained
+      optimization, the only available option is \code{"nlminb.constr"},
+      which uses an augmented Lagrangian minimization algorithm.}
     \item{\code{optim.force.converged}:}{Logical. If \code{TRUE}, pretend
       the model has converged, no matter what.}
     \item{\code{optim.dx.tol}}{Numeric. Tolerance used for checking if
       the elements of the (unscaled) gradient are all zero (in absolute 
       value). The default value is 0.001.}
+    \item{\code{optim.gn.tol.x}:}{Numeric. Only used when 
+      \code{optim.method = "GN"}. Optimization stops when
+      the root mean square of the difference between the old and new
+      parameter values are smaller than this tolerance value. Default is
+      \code{1e-05} for DLS estimation and \code{1e-07} otherwise.}
+    \item{\code{optim.gn.iter.max}:}{Integer. Only used when 
+      \code{optim.method = "GN"}. The maximum number of GN iterations. 
+      The default is 200.}
 }
 
 Categorical estimation options:
@@ -368,16 +384,19 @@ Starting values options:
 \describe{
     \item{\code{start}:}{If it is a character string, the two options are 
       currently \code{"simple"} and \code{"Mplus"}. In the first case, all 
-      parameter values are set to zero, except the factor loadings (set to 
-      one), the variances of latent variables (set to 0.05), and the residual 
-      variances of observed variables (set to half the observed variance).
-      If \code{"Mplus"}, we use a similar scheme, but the factor loadings are
-      estimated using the fabin3 estimator (tsls) per factor. 
-      If \code{start} is a fitted object of class \code{\linkS4class{lavaan}}, 
-      the estimated values of the corresponding parameters will be extracted. 
-      If it is a parameter table, for example the output of the 
-      \code{paramaterEstimates()} function, the values of the \code{est} or 
-      \code{start} or \code{ustart} column (whichever is found first) will be 
+      parameter values are set to zero, except the factor loadings and
+      (residual) variances, which are set to one.
+      When \code{start} is \code{"Mplus"}, the factor loadings are
+      estimated using the fabin3 estimator (tsls) per factor. The
+      residual variances of observed variables are set tot half the 
+      observed variance, and all other (residual) variances are set to 0.05.
+      The remaining parameters (regression coefficients, covariances) are
+      set to zero.
+      If \code{start} is a fitted object of class \code{\linkS4class{lavaan}},
+      the estimated values of the corresponding parameters will be extracted.
+      If it is a parameter table, for example the output of the
+      \code{paramaterEstimates()} function, the values of the \code{est} or
+      \code{start} or \code{ustart} column (whichever is found first) will be
       extracted.}
 }
 

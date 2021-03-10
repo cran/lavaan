@@ -218,7 +218,14 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
 
         # store lv
         if("lv" %in% type) {
-            OUT$lv[[b]] <- lv.names
+            # check if FLAT for random slopes
+            #if( !is.null(partable$rv) && any(nchar(partable$rv) > 0L) &&
+            #    !is.null(partable$block) ) {
+            #    OUT$lv[[b]] <- lv.names2
+            #} else {
+                # here, they will be 'defined' at level 2 as regular =~ lvs
+                OUT$lv[[b]] <- lv.names
+            #}
         }
 
         # regular latent variables ONLY (ie defined by =~ only)
@@ -315,7 +322,14 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
             # 2. dependent ov's
             ov.y <- eqs.y[ !eqs.y %in% c(lv.names2, ov.ind) ]
             # 3. independent ov's
-            ov.x <- eqs.x[ !eqs.x %in% c(lv.names2, ov.ind, ov.y) ]
+            if(lav_partable_nlevels(partable) > 1L && b > 1L) {
+                # NEW in 0.6-8: if an 'x' was an 'y' in a previous level,
+                #               treat it as 'y'
+                EQS.Y <- unique(partable$lhs[partable$op == "~"]) # all blocks
+                ov.x <- eqs.x[ !eqs.x %in% c(lv.names2, ov.ind, EQS.Y) ]
+            } else {
+                ov.x <- eqs.x[ !eqs.x %in% c(lv.names2, ov.ind, ov.y) ]
+            }
         }
 
         # observed variables
@@ -416,9 +430,17 @@ lav_partable_vnames <- function(partable, type = NULL, ...,
                             "];\n  Please remove them and try again.")
                 }
                 if(warn) {
-                    warning("lavaan WARNING: model syntax contains variance/covariance/intercept formulas\n  involving (an) exogenous variable(s): [",
-                            paste(ov.x[idx.no.x], collapse=" "),
-                            "];\n  Please use fixed.x=FALSE or leave them alone")
+                    txt <- c("model syntax contains ",
+                    "variance/covariance/intercept formulas involving",
+                    " (an) exogenous variable(s): [",
+                    paste(ov.x[idx.no.x], collapse=" "), "]; ",
+                    "These variables will now be treated as random ",
+                    "introducing additional free parameters. ",
+                    "If you wish to treat ",
+                    "those variables as fixed, remove these ",
+                    "formulas from the model syntax. Otherwise, consider ",
+                    "adding the fixed.x = FALSE option.")
+                    warning(lav_txt2message(txt))
                 }
                 ov.x <- ov.x[-idx.no.x]
             }

@@ -21,18 +21,18 @@ lav_model_nvcov_bootstrap <- function(lavmodel       = NULL,
     }
 
     TEST <- NULL
-    COEF <- bootstrap.internal(object          = NULL,
-                               lavmodel.       = lavmodel,
-                               lavsamplestats. = lavsamplestats,
-                               lavpartable.    = lavpartable,
-                               lavoptions.     = lavoptions,
-                               lavdata.        = lavdata,
-                               R               = R,
-                               verbose         = lavoptions$verbose,
-                               type            = boot.type,
-                               FUN  = ifelse(boot.type == "bollen.stine",
-                                          "coeftest", "coef"),
-                               warn            = -1L)
+    COEF <- lav_bootstrap_internal(object          = NULL,
+                                   lavmodel.       = lavmodel,
+                                   lavsamplestats. = lavsamplestats,
+                                   lavpartable.    = lavpartable,
+                                   lavoptions.     = lavoptions,
+                                   lavdata.        = lavdata,
+                                   R               = R,
+                                   verbose         = lavoptions$verbose,
+                                   type            = boot.type,
+                                   FUN  = ifelse(boot.type == "bollen.stine",
+                                              "coeftest", "coef"),
+                                   warn            = -1L)
     if(boot.type == "bollen.stine") {
         nc <- ncol(COEF)
         TEST <- COEF[,nc]
@@ -401,29 +401,6 @@ lav_model_vcov <- function(lavmodel       = NULL,
     # special cases
     if(se == "none" || se == "external" || se == "twostep") {
         return( matrix(0, 0, 0) )
-    }
-
-    # bordered efa rotation?
-    if( (.hasSlot(lavmodel, "nefa")) && (lavmodel@nefa > 0L) &&
-        (lavoptions$rotation != "none") &&
-        (lavoptions$rotation.se == "bordered") ) {
-
-        con.idx <- which(lavpartable$op %in% c("==", "<", ">"))
-        efa.idx <- which(lavpartable$user[con.idx] == 7L)
-        con.jac <- lavmodel@con.jac
-        inactive.idx <- attr(con.jac, "inactive.idx")
-        ceq.idx <- attr(con.jac, "ceq.idx")
-        if(length(efa.idx) > 0L) {
-             con.jac <- con.jac[-efa.idx, , drop = FALSE]
-        }
-        ceq.efa.JAC <- lavmodel@ceq.efa.JAC
-        # only take first efa.idx rows
-        ceq.efa.JAC <- ceq.efa.JAC[ seq_len(length(efa.idx)), ,
-                                    drop = FALSE ]
-        lavmodel@con.jac <- rbind(con.jac, ceq.efa.JAC)
-        attr(lavmodel@con.jac, "inactive.idx") <- inactive.idx
-        attr(lavmodel@con.jac, "ceq.idx") <- ceq.idx
-        attr(lavmodel@con.jac, "efa.idx") <- efa.idx
     }
 
     if(se == "standard") {

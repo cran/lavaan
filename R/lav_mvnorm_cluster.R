@@ -5,14 +5,15 @@
 
 # take model-implied mean+variance matrices, and reorder/augment them
 # to facilitate computing of (log)likelihood in the two-level case
-#
+
+# when conditional.x = FALSE:
 # - sigma.w and sigma.b: same dimensions, level-1 variables only
 # - sigma.zz: level-2 variables only
 # - sigma.yz: cov(level-1, level-2)
 # - mu.y: level-1 variables only (mu.w + mu.b)
 # - mu.w: y within  part
 # - mu.b: y between part
-# - my.z: level-2 variables only
+# - mu.z: level-2 variables only
 lav_mvnorm_cluster_implied22l <- function(Lp           = NULL,
                                           implied      = NULL,
                                           Mu.W         = NULL,
@@ -169,7 +170,6 @@ lav_mvnorm_cluster_loglik_samplestats_2l <- function(YLp          = NULL,
                                                      Mu.B         = NULL,
                                                      Sigma.B      = NULL,
                                                      Sinv.method  = "eigen",
-                                                     x.idx        = integer(0L),
                                                      log2pi       = FALSE,
                                                      minus.two    = TRUE) {
 
@@ -180,18 +180,6 @@ lav_mvnorm_cluster_loglik_samplestats_2l <- function(YLp          = NULL,
     sigma.w <- out$sigma.w; sigma.b <- out$sigma.b
     sigma.zz <- out$sigma.zz; sigma.yz <- out$sigma.yz
 
-    #if(length(x.idx) > 0L) {
-    #    x1.idx <- Lp$ov.idx[[1]][ which( Lp$ov.idx[[1]] %in% x.idx )]
-    #    x2.idx <- Lp$ov.idx[[2]][ which( Lp$ov.idx[[2]] %in% x.idx )]
-    #    if(length(x1.idx) > 0L) {
-    #        mu.y.x <- mu.y[x1.idx]
-    #        sigma.w.x <- sigma.w[x1.idx, x1.idx, drop = FALSE]
-    #        sigma.b.x <- sigma.b[x1.idx, x1.idx, drop = FALSE]
-    #    }
-    #    if(length(x2.idx) > 0L) {
-    #    }
-    #}
-
     # Lp
     nclusters       <- Lp$nclusters[[2]]
     cluster.size    <- Lp$cluster.size[[2]]
@@ -200,22 +188,14 @@ lav_mvnorm_cluster_loglik_samplestats_2l <- function(YLp          = NULL,
     ncluster.sizes  <- Lp$ncluster.sizes[[2]]
     cluster.size.ns <- Lp$cluster.size.ns[[2]]
 
-    # Y1
+    # Y1 samplestats
     if(length(between.idx) > 0L) {
         S.PW <- YLp[[2]]$Sigma.W[-between.idx, -between.idx, drop = FALSE]
-        #if(length(x.idx) > 0L) {
-        #    S.PW.x <- S.PW[x.idx, x.idx, drop = FALSE]
-        #}
     } else {
         S.PW <- YLp[[2]]$Sigma.W
-        #if(length(x.idx) > 0L) {
-        #    S.PW.x <- S.PW[x.idx, x.idx, drop = FALSE]
-        #}
     }
 
-    # Y2
-    #Y2 <- YLp[[2]]$Y2
-    #Y2.cm <- t( t(Y2) - mu.b )
+    # Y2 samplestats
     cov.d <- YLp[[2]]$cov.d
     mean.d <- YLp[[2]]$mean.d
 
@@ -249,7 +229,7 @@ lav_mvnorm_cluster_loglik_samplestats_2l <- function(YLp          = NULL,
         # data between
         Y2Yc <- (cov.d[[clz]] + tcrossprod(mean.d[[clz]] - c(mu.z, mu.y)))
 
-        # FIXME: avoid reorder/b.idx, so can use between.idx
+        # FIXME: avoid reorder/b.idx, so we can use between.idx
         if(length(between.idx) > 0L) {
             b.idx <- seq_len(length(Lp$between.idx[[2]]))
             Y2Yc.zz <- Y2Yc[ b.idx, b.idx, drop = FALSE]
@@ -266,7 +246,7 @@ lav_mvnorm_cluster_loglik_samplestats_2l <- function(YLp          = NULL,
         sigma.j.logdet <- attr(sigma.j.inv, "logdet")
         attr(sigma.j.inv, "logdet") <- NULL
 
-        # check: what if sigma.j is non-pd?
+        # check: what if sigma.j is non-pd? should not happen
         if(is.na(sigma.j.logdet)) {
             # stop, and return NA right away
             #return(as.numeric(NA))
@@ -300,7 +280,7 @@ lav_mvnorm_cluster_loglik_samplestats_2l <- function(YLp          = NULL,
         B[clz] <- q.zz + 2*q.yz - q.yyc
     }
     # q.yya + q.yyb
-    # there reason why we multiply the trace by 'N - nclusters' is
+    # the reason why we multiply the trace by 'N - nclusters' is
     # S.PW has been divided by 'N - nclusters'
     q.W <- sum(cluster.size - 1) * sum(sigma.w.inv * S.PW)
     # logdet within part
@@ -323,6 +303,11 @@ lav_mvnorm_cluster_loglik_samplestats_2l <- function(YLp          = NULL,
         P <- Lp$nclusters[[1]]*nWithin + Lp$nclusters[[2]]*nBetween
         constant <- -(P * LOG.2PI)/2
         loglik <- loglik + constant
+    }
+
+    # loglik.x (only if loglik is requested)
+    if(length(unlist(Lp$ov.x.idx)) > 0L && log2pi && !minus.two) {
+        loglik <- loglik - YLp[[2]]$loglik.x
     }
 
     loglik
@@ -1244,7 +1229,8 @@ lav_mvnorm_cluster_em_sat <- function(YLp            = NULL,
     if(length(between.idx) > 0L) {
         Z <- Y2[, between.idx, drop = FALSE]
         mu.z <- colMeans(Y2)[between.idx]
-        sigma.zz <- 1/Lp$nclusters[[2]] * crossprod(Z) - tcrossprod(mu.z)
+        sigma.zz <- cov(Z) * (Lp$nclusters[[2]] - 1L)/Lp$nclusters[[2]]
+        #sigma.zz <- 1/Lp$nclusters[[2]] * crossprod(Z) - tcrossprod(mu.z)
         #Y1Y1 <- Y1Y1[-between.idx, -between.idx, drop=FALSE]
     }
 
@@ -1378,7 +1364,8 @@ lav_mvnorm_cluster_em_h0 <- function(lavsamplestats = NULL,
     if(length(between.idx) > 0L) {
         Z <- Y2[, between.idx, drop = FALSE]
         mu.z <- colMeans(Y2)[between.idx]
-        sigma.zz <- 1/Lp$nclusters[[2]] * crossprod(Z) - tcrossprod(mu.z)
+        sigma.zz <- cov(Z) * (Lp$nclusters[[2]] - 1L)/Lp$nclusters[[2]]
+        #sigma.zz <- 1/Lp$nclusters[[2]] * crossprod(Z) - tcrossprod(mu.z)
         #Y1Y1 <- Y1Y1[-between.idx, -between.idx, drop=FALSE]
     }
 
@@ -1508,8 +1495,13 @@ lav_mvnorm_cluster_em_h0 <- function(lavsamplestats = NULL,
     # add attributes
     if(i < max.iter) {
         attr(x, "converged") <- TRUE
+        attr(x, "warn.txt")  <- ""
     } else {
         attr(x, "converged") <- FALSE
+        attr(x, "warn.txt")  <- paste("maxmimum number of iterations (",
+                                      max.iter, ") ",
+                                      "was reached without convergence.\n",
+                                      sep = "")
     }
     attr(x, "iterations") <- i
     attr(x, "control") <- list(em.iter.max = max.iter,

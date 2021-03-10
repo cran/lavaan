@@ -17,7 +17,6 @@ lavCor <- function(object,
                    test       = "none",
                    estimator  = "two.step",
                    baseline   = FALSE,
-                   h1         = FALSE,
                    # other options (for lavaan)
                    ...,
                    cor.smooth = FALSE,
@@ -81,7 +80,7 @@ lavCor <- function(object,
     if(!is.null(dots$meanstructure)) {
         meanstructure <- dots$meanstructure
     }
-    if(categorical) {
+    if(categorical || tolower(missing) %in% c("ml", "fiml", "direct")) {
         meanstructure <- TRUE
     }
     if(!is.null(dots$fixed.x)) {
@@ -107,6 +106,8 @@ lavCor <- function(object,
                                   lavoptions    = list(meanstructure = meanstructure,
                                                        fixed.x = fixed.x,
                                                        conditional.x = conditional.x,
+                                                       group.w.free = FALSE,
+                                                       missing = missing,
                                                        mimic = mimic),
                                   sample.cov    = NULL,
                                   sample.mean   = NULL,
@@ -116,7 +117,7 @@ lavCor <- function(object,
     FIT <- lavaan(slotParTable = PT.un, slotData = lav.data,
                   model.type = "unrestricted",
                   missing = missing,
-                  baseline = baseline, h1 = h1,
+                  baseline = baseline, h1 = TRUE, # must be TRUE!
                   se = se, test = test, estimator = estimator, ...)
 
     out <- lav_cor_output(FIT, output = output)
@@ -136,7 +137,7 @@ lav_cor_output <- function(object, output = "cor") {
 
     # check output
     if(output %in% c("cor","cov")) {
-        out <- inspect(object, "sampstat")
+        out <- lavInspect(object, "sampstat")
         if(object@Data@ngroups == 1L) {
             if(object@Model@conditional.x) {
                 out <- out$res.cov

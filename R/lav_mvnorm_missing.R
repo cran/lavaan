@@ -134,30 +134,12 @@ lav_mvnorm_missing_loglik_samplestats <- function(Yp          = NULL,
 
     # x.idx
     if(length(x.idx) > 0L) {
-        stopifnot(!is.null(x.cov), !is.null(x.mean))
-        P.x <- length(x.idx); N <- sum(sapply(Yp, "[[", "freq"))
-        Sigma.x <- Sigma[x.idx, x.idx, drop = FALSE]
-        Sigma.inv.x <- lav_matrix_symmetric_inverse(S = Sigma.x, logdet = TRUE,
-                                              Sinv.method = Sinv.method)
-        logdet.x <- attr(Sigma.inv.x, "logdet")
-
-        # tr(Sigma^{-1} %*% S)
-        DIST1 <- sum(Sigma.inv.x * x.cov)
-
-        # (ybar - mu)^T %*% Sigma.inv %*% (ybar - mu)
-        Diff <- as.numeric(x.mean - Mu[x.idx])
-
-        DIST2 <- sum(as.numeric(crossprod(Diff, Sigma.inv.x)) * Diff)
-
-        if(log2pi) {
-            loglik.x <- -N/2 * (P.x * LOG.2PI + logdet.x + DIST1 + DIST2)
-        } else {
-            loglik.x <- -N/2 * (logdet.x + DIST1 + DIST2)
-        }
-
-        if(minus.two) {
-            loglik.x <- -2 * loglik.x
-        }
+        stopifnot(!is.null(x.cov))
+        # Note: x.cov should be identical to Sigma[x.idx, x.idx]
+        #       so we don't really need x.cov
+        N <- sum(sapply(Yp, "[[", "freq"))
+        loglik.x <- lav_mvnorm_h1_loglik_samplestats(sample.cov  = x.cov,
+                                                     sample.nobs = N)
 
         loglik <- loglik - loglik.x
     }
@@ -1554,9 +1536,6 @@ lav_mvnorm_missing_estep <- function(Y           = NULL,
         # observed values for this pattern
         var.idx <- Mp$pat[p,]
 
-        # missing values for this pattern
-        na.idx <- which(!var.idx)
-
         # extract observed data
         O <- Y[Mp$case.idx[[p]], Mp$pat[p, ], drop = FALSE]
 
@@ -1579,9 +1558,9 @@ lav_mvnorm_missing_estep <- function(Y           = NULL,
         na.idx <- which(!var.idx)
 
         # partition Sigma (1=missing, 2=complete)
-        Sigma_11 <- Sigma[!var.idx, !var.idx, drop=FALSE]
-        Sigma_12 <- Sigma[!var.idx,  var.idx, drop=FALSE]
-        Sigma_21 <- Sigma[ var.idx, !var.idx, drop=FALSE]
+        Sigma_11 <- Sigma[!var.idx, !var.idx, drop = FALSE]
+        Sigma_12 <- Sigma[!var.idx,  var.idx, drop = FALSE]
+        Sigma_21 <- Sigma[ var.idx, !var.idx, drop = FALSE]
 
         # invert Sigma (Sigma_22, observed part only) for this pattern
         Sigma_22.inv <- try(lav_matrix_symmetric_inverse_update(S.inv =

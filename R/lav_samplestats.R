@@ -4,30 +4,46 @@
 # major revision: YR 5/11/2011: separate data.obs and sample statistics
 # YR 5/01/2016: add rescov, resvar, ... if conditional.x = TRUE
 
+# YR 18 Jan 2021: use lavoptions
+
 lav_samplestats_from_data <- function(lavdata           = NULL,
-                                      missing           = "listwise",
-                                      rescale           = FALSE,
-                                      missing.h1        = TRUE,
-                                      estimator         = "ML",
-                                      mimic             = "lavaan",
-                                      meanstructure     = FALSE,
-                                      conditional.x     = FALSE,
-                                      fixed.x           = FALSE,
-                                      group.w.free      = FALSE,
+                                      lavoptions        = NULL,
                                       WLS.V             = NULL,
-                                      NACOV             = NULL,
-                                      gamma.n.minus.one = FALSE,
-                                      se                = "standard",
-                                      test              = "standard",
-                                      ridge             = 1e-5,
-                                      zero.add          = c(0.5, 0.0),
-                                      zero.keep.margins = TRUE,
-                                      zero.cell.warn    = TRUE,
-                                      debug             = FALSE,
-                                      verbose           = FALSE) {
+                                      NACOV             = NULL) {
+
+    # extra info from lavoptions
+    stopifnot(!is.null(lavoptions))
+    missing           <- lavoptions$missing
+    rescale           <- lavoptions$sample.cov.rescale
+    estimator         <- lavoptions$estimator
+    mimic             <- lavoptions$mimic
+    meanstructure     <- lavoptions$meanstructure
+    conditional.x     <- lavoptions$conditional.x
+    fixed.x           <- lavoptions$fixed.x
+    group.w.free      <- lavoptions$group.w.free
+    gamma.n.minus.one <- lavoptions$gamma.n.minus.one
+    se                <- lavoptions$se
+    test              <- lavoptions$test
+    ridge             <- lavoptions$ridge
+    zero.add          <- lavoptions$zero.add
+    zero.keep.margins <- lavoptions$zero.keep.margins
+    zero.cell.warn    <- lavoptions$zero.cell.warn
+    dls.a             <- lavoptions$estimator.args$dls.a
+    dls.GammaNT       <- lavoptions$estimator.args$dls.GammaNT
+    debug             <- lavoptions$debug
+    verbose           <- lavoptions$verbose
+
 
     # ridge default
-    ridge.eps <- 0.0
+    if(ridge) {
+        if(is.numeric(lavoptions$ridge.constant)) {
+            ridge.eps <- lavoptions$ridge.constant
+        } else {
+            ridge.eps <- 1e-5
+        }
+    } else {
+        ridge.eps <- 0.0
+    }
 
     # check lavdata
     stopifnot(!is.null(lavdata))
@@ -324,6 +340,16 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             mean[[g]] <- unname( colMeans(X[[g]], na.rm=TRUE) )
             var[[g]] <- diag(cov[[g]])
 
+            # missing patterns
+            if(missing %in% c("ml", "ml.x")) {
+                missing.flag. <- TRUE
+                missing.[[g]] <-
+                    lav_samplestats_missing_patterns(Y  = X[[g]],
+                                                     Mp = Mp[[g]],
+                                                     wt = WT[[g]],
+                                                     Lp = lavdata@Lp[[g]])
+            }
+
         } else { # continuous, single-level case
 
             if(conditional.x) {
@@ -393,7 +419,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                                      Mp = Mp[[g]],
                                                      wt = WT[[g]])
 
-                if(missing.h1 && nlevels == 1L) {
+                if(nlevels == 1L) {
                     # estimate moments unrestricted model
                     out <- lav_mvnorm_missing_h1_estimate_moments(Y = X[[g]],
                               wt = WT[[g]],
@@ -444,7 +470,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
             # icov and cov.log.det (but not if missing)
             if(!missing %in% c("ml", "ml.x")) {
-                out <- lav_samplestats_icov(COV = cov[[g]], ridge = ridge,
+                out <- lav_samplestats_icov(COV = cov[[g]], ridge = ridge.eps,
                            x.idx = x.idx[[g]],
                            ngroups = ngroups, g = g, warn = TRUE)
                 icov[[g]] <- out$icov
@@ -452,7 +478,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
                 # the same for res.cov if conditional.x = TRUE
                 if(conditional.x) {
-                    out <- lav_samplestats_icov(COV = res.cov[[g]], ridge=ridge,
+                    out <- lav_samplestats_icov(COV = res.cov[[g]],
+                               ridge = ridge.eps,
                                x.idx = x.idx[[g]],
                                ngroups = ngroups, g = g, warn = TRUE)
                     res.icov[[g]] <- out$icov
@@ -469,7 +496,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 th.idx.g = th.idx[[g]], res.int.g = res.int[[g]],
                 res.cov.g = res.cov[[g]], res.var.g = res.var[[g]],
                 res.th.g = res.th[[g]],  res.slopes.g = res.slopes[[g]],
-                group.w.g = group.w[[g]],
+                group.w.g = log(nobs[[g]]),
                 categorical = categorical, conditional.x = conditional.x,
                 meanstructure = meanstructure, slopestructure = conditional.x,
                 group.w.free = group.w.free)
@@ -526,7 +553,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                           slopestructure = conditional.x,
                                           gamma.n.minus.one = gamma.n.minus.one,
                                           Mplus.WLS      = FALSE)
-            } else if(estimator %in% c("WLS","DWLS","ULS")) {
+            } else if(estimator %in% c("WLS","DWLS","ULS","DLS")) {
                 if(!categorical) {
                     # sample size large enough?
                     nvar <- ncol(X[[g]])
@@ -578,11 +605,35 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             } else if(estimator == "PML") {
                 # no NACOV ... for now
             }
+
+            # group.w.free
+            if(!is.null(NACOV[[g]]) && group.w.free) {
+                # unweight!!
+                a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
+                # always 1!!!
+                NACOV[[g]] <- lav_matrix_bdiag( matrix(a, 1, 1), NACOV[[g]] )
+            }
         }
 
         # WLS.V
         if(!WLS.V.user && nlevels == 1L) {
-            if(estimator == "GLS") {
+
+            if(estimator == "DLS" && dls.GammaNT == "sample" && dls.a < 1.0) {
+                # compute GammaNT here
+                GammaNT <- lav_samplestats_Gamma_NT(
+                    COV            = cov[[g]],
+                    MEAN           = mean[[g]],
+                    rescale        = FALSE,
+                    x.idx          = x.idx[[g]],
+                    fixed.x        = fixed.x,
+                    conditional.x  = conditional.x,
+                    meanstructure  = meanstructure,
+                    slopestructure = conditional.x)
+            }
+
+            if(estimator == "GLS" ||
+               (estimator == "DLS" && dls.GammaNT == "sample" &&
+                dls.a == 1.0)) {
                 # Note: we need the 'original' COV/MEAN/ICOV
                 #        sample statistics; not the 'residual' version
                 WLS.V[[g]] <- lav_samplestats_Gamma_inverse_NT(
@@ -607,9 +658,9 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 # no WLS.V here, since function of model-implied moments
 
 
-            } else if(estimator %in% c("WLS","DWLS","ULS")) {
+            } else if(estimator %in% c("WLS","DWLS","ULS","DLS")) {
                 if(!categorical) {
-                    if(estimator == "WLS") {
+                    if(estimator == "WLS" || estimator == "DLS") {
                         if(!fixed.x) {
                             # Gamma should be po before we invert
                             ev <- eigen(NACOV[[g]], # symmetric=FALSE,
@@ -620,14 +671,33 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                             if(any(Re(ev) < 0)) {
                                 stop("lavaan ERROR: Gamma (NACOV) matrix is not positive-definite")
                             }
-                            WLS.V[[g]] <- lav_matrix_symmetric_inverse(NACOV[[g]])
+                            if(estimator == "DLS" && dls.GammaNT == "sample") {
+                                if(dls.a == 1.0) {
+                                    # nothing to do, use GLS version
+                                } else {
+                                    W.DLS <-
+                                       (1 - dls.a)*NACOV[[g]] + dls.a*GammaNT
+                                    WLS.V[[g]] <-
+                                        lav_matrix_symmetric_inverse(W.DLS)
+                                }
+                            } else { # WLS
+                                WLS.V[[g]] <-
+                                    lav_matrix_symmetric_inverse(NACOV[[g]])
+                            }
                         } else {
                             # fixed.x: we have zero cols/rows
                             # ginv does the trick, but perhaps this is overkill
                             # just removing the zero rows/cols, invert, and
                             # fill back in the zero rows/cols would do it
                             #WLS.V[[g]] <- MASS::ginv(NACOV[[g]])
-                            WLS.V[[g]] <- lav_matrix_symmetric_inverse(NACOV[[g]])
+                            if(estimator == "DLS" && dls.GammaNT == "sample") {
+                                W.DLS <- (1 - dls.a)*NACOV[[g]] + dls.a*GammaNT
+                                WLS.V[[g]] <-
+                                    lav_matrix_symmetric_inverse(W.DLS)
+                            } else { # WLS
+                                WLS.V[[g]] <-
+                                    lav_matrix_symmetric_inverse(NACOV[[g]])
+                            }
                         }
                     } else if(estimator == "DWLS") {
                         dacov <- diag(NACOV[[g]])
@@ -669,15 +739,19 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
             # group.w.free
             if(!is.null(WLS.V[[g]]) && group.w.free) {
                 # unweight!!
-                #a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
+                a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
                 # always 1!!!
-                ### FIXME: this is consistent with expected information
-                ###        but why not group.w[[g]] * (1 - group.w[[g]])?
-                #a <- 1
-                a <- group.w[[g]] * (1 - group.w[[g]]) * sum(unlist(nobs)) / nobs[[g]]
                 # invert
                 a <- 1/a
                 WLS.V[[g]] <- lav_matrix_bdiag( matrix(a, 1, 1), WLS.V[[g]] )
+            }
+            if(!is.null(WLS.VD[[g]]) && group.w.free) {
+                # unweight!!
+                a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
+                # always 1!!!
+                # invert
+                a <- 1/a
+                WLS.VD[[g]] <- c(a, WLS.VD[[g]])
             }
 
         }
@@ -1177,7 +1251,7 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
             th.idx.g = th.idx[[g]], res.int.g = res.int[[g]],
             res.cov.g = res.cov[[g]], res.var.g = res.var[[g]],
             res.th.g = res.th[[g]], res.slopes.g = res.slopes[[g]],
-            group.w.g = group.w[[g]],
+            group.w.g = log(nobs[[g]]),
             categorical = categorical, conditional.x = conditional.x,
             meanstructure = meanstructure, slopestructure = conditional.x,
             group.w.free = group.w.free)
@@ -1275,13 +1349,26 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
 }
 
 # compute sample statistics, per missing pattern
-lav_samplestats_missing_patterns <- function(Y = NULL, Mp = NULL, wt = NULL) {
+lav_samplestats_missing_patterns <- function(Y = NULL, Mp = NULL, wt = NULL,
+                                             Lp = NULL) {
 
     # coerce Y to matrix
     Y <- as.matrix(Y)
 
+    # handle two-level data
+    if(!is.null(Lp)) {
+        Y.orig <- Y
+        Z <- NULL
+        if(length(Lp$between.idx[[2]]) > 0L) {
+            Y <- Y[, -Lp$between.idx[[2]], drop = FALSE]
+            z.idx <- which(!duplicated(Lp$cluster.idx[[2]]))
+            Z <- Y.orig[z.idx, Lp$between.idx[[2]], drop = FALSE]
+        }
+    }
+
     if(is.null(Mp)) {
-        Mp <- lav_data_missing_patterns(Y, sort.freq = FALSE, coverage = FALSE)
+        Mp <- lav_data_missing_patterns(Y, sort.freq = FALSE, coverage = FALSE,
+                                        Lp = Lp)
     }
 
     Yp <- vector("list", length = Mp$npatterns)
@@ -1321,7 +1408,24 @@ lav_samplestats_missing_patterns <- function(Y = NULL, Mp = NULL, wt = NULL) {
         # store sample statistics, var.idx and freq
         Yp[[p]] <- list(SY = SY, MY = MY, var.idx = Mp$pat[p,],
                         freq = FREQ)
+
+        # if clustered data, add rowsum over all cases per cluster
+        if(!is.null(Lp)) {
+            tmp <- rowsum.default(RAW, group = Mp$j.idx[[p]], reorder = FALSE)
+            Yp[[p]]$ROWSUM <- tmp
+        }
     }
+
+    # add Zp as an attribute
+    #if(!is.null(Lp)) {
+    #    Zp <- lav_samplestats_missing_patterns(Y = Z, Mp = Mp$Zp)
+    #    for(p in Mp$Zp$npatterns) {
+    #        this.z <- Z[Mp$Zp$case.idx[[p]], drop = FALSE]
+    #        Zp[[p]]$ROWSUM <- t(this.z)
+    #
+    #    }
+    #    attr(Yp, "Zp") <- Zp
+    #}
 
     Yp
 }
@@ -1370,14 +1474,16 @@ lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL) {
 
         # cluster-means
         # WARNING: aggregate() converts to FACTOR (changing the ORDER!)
-        Y2 <- unname(as.matrix(aggregate(Y1, by = list(cluster.idx),
-                               FUN = function(x) {
-                                   if( all(is.na(x)) ) { # all elements are NA
-                                       as.numeric(NA)    # in this cluster
-                                   } else {
-                                       mean(x, na.rm = TRUE)
-                                   }
-                               })[,-1]))
+        #Y2 <- unname(as.matrix(aggregate(Y1, by = list(cluster.idx),
+        #                       FUN = function(x) {
+        #                           if( all(is.na(x)) ) { # all elements are NA
+        #                               as.numeric(NA)    # in this cluster
+        #                           } else {
+        #                               mean(x, na.rm = TRUE)
+        #                           }
+        #                       })[,-1]))
+        Y2 <- rowsum(Y1, group = cluster.idx, reorder = FALSE,
+                     na.rm = FALSE) / cluster.size
         Y2c <- t( t(Y2) - Y1.means )
 
         # compute S.w
@@ -1411,6 +1517,31 @@ lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL) {
 
 
         S <- cov(Y1, use = "pairwise.complete.obs") * (N - 1L)/N
+
+
+        # loglik.x
+        # extract 'fixed' level-1 loglik from here
+        wx.idx <- Lp$ov.x.idx[[1]]
+        if(length(wx.idx) > 0L) {
+            loglik.x.w <- lav_mvnorm_h1_loglik_samplestats(
+                              sample.nobs = Lp$nclusters[[1]],
+                              sample.cov  = S[wx.idx, wx.idx, drop = FALSE])
+        } else {
+            loglik.x.w <- 0
+        }
+        # extract 'fixed' level-2 loglik
+        bx.idx <-  Lp$ov.x.idx[[2]]
+        if(length(bx.idx) > 0L) {
+            COVB <- cov(Y2[,bx.idx, drop = FALSE]) * (nclusters - 1)/nclusters
+            loglik.x.b <- lav_mvnorm_h1_loglik_samplestats(
+                              sample.nobs = Lp$nclusters[[2]],
+                              sample.cov  = COVB)
+        } else {
+            loglik.x.b <- 0
+        }
+        loglik.x <- loglik.x.w + loglik.x.b
+
+
         S.PW.start <- S.w
         if(length(within.idx) > 0L) {
              S.PW.start[within.idx, within.idx] <-
@@ -1490,7 +1621,7 @@ lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL) {
                          Y2 = Y2, s = s, S.b = S.b, S.PW.start = S.PW.start,
                          Sigma.W = S.w, Mu.W = Mu.W,
                          Sigma.B = Sigma.B, Mu.B = Mu.B,
-                         Mu.B.start = Mu.B.start,
+                         Mu.B.start = Mu.B.start, loglik.x = loglik.x,
                          mean.d = mean.d, cov.d = cov.d)
     } # l
 

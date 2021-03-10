@@ -1,6 +1,6 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.6-7
+Version: 0.6-8
 Authors@R: c(person(given   = "Yves", family = "Rosseel",
                     role    = c("aut", "cre"),
                     email   = "Yves.Rosseel@UGent.be",
@@ -42,7 +42,10 @@ Authors@R: c(person(given   = "Yves", family = "Rosseel",
                     email = "m.t.barendse@rug.nl"),
              person(given = "Florian", family = "Scharf",
                     role = "ctb",
-                    email = "florian.scharf@uni-leipzig.de")
+                    email = "florian.scharf@uni-leipzig.de"),
+             person(given = "Han", family = "Du",
+                    role = "ctb",
+                    email = "hdu@psych.ucla.edu")
             )
 Description: Fit a variety of latent variable models, including confirmatory
    factor analysis, structural equation modeling and latent growth curve models.
@@ -52,9 +55,9 @@ Imports: methods, stats4, stats, utils, graphics, MASS, mnormt,
 License: GPL (>= 2)
 LazyData: yes
 ByteCompile: true
-URL: http://lavaan.org
+URL: https://lavaan.ugent.be
 NeedsCompilation: no
-Packaged: 2020-07-27 08:00:11 UTC; yves
+Packaged: 2021-03-10 10:27:51 UTC; yves
 Author: Yves Rosseel [aut, cre] (<https://orcid.org/0000-0002-4129-4477>),
   Terrence D. Jorgensen [aut] (<https://orcid.org/0000-0001-5111-6773>),
   Nicholas Rockwood [aut] (<https://orcid.org/0000-0001-5931-183X>),
@@ -67,7 +70,8 @@ Author: Yves Rosseel [aut, cre] (<https://orcid.org/0000-0002-4129-4477>),
   Mijke Rhemtulla [ctb],
   Myrsini Katsikatsou [ctb],
   Mariska Barendse [ctb],
-  Florian Scharf [ctb]
+  Florian Scharf [ctb],
+  Han Du [ctb]
 Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
 Repository: CRAN
-Date/Publication: 2020-07-31 06:10:07 UTC
+Date/Publication: 2021-03-10 15:40:06 UTC

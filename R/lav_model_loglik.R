@@ -49,30 +49,48 @@ lav_model_loglik <- function(lavdata        = NULL,
                 # DEBUG ONLY
                 if(lavmodel@conditional.x) {
                     logl.group[g] <- -1000
+                }
+
+                if(lavsamplestats@missing.flag) {
+                    logl.group[g] <-
+                        lav_mvnorm_cluster_missing_loglik_samplestats_2l(
+                            Yp = lavsamplestats@missing[[g]],
+                            Y2 = lavsamplestats@YLp[[g]][[2]]$Y2,
+                            Lp = lavdata@Lp[[g]],
+                            Mp = lavdata@Mp[[g]],
+                            Mu.W = Mu.W, Sigma.W = Sigma.W,
+                            Mu.B = Mu.B, Sigma.B = Sigma.B,
+                            log2pi = TRUE, minus.two = FALSE)
                 } else {
-
-                logl.group[g] <- lav_mvnorm_cluster_loglik_samplestats_2l(
-                    YLp          = lavsamplestats@YLp[[g]],
-                    Lp           = lavdata@Lp[[g]],
-                    Mu.W         = Mu.W,
-                    Sigma.W      = Sigma.W,
-                    Mu.B         = Mu.B,
-                    Sigma.B      = Sigma.B,
-                    Sinv.method  = "eigen",
-                    log2pi       = TRUE,
-                    minus.two    = FALSE)
-
+                    logl.group[g] <- lav_mvnorm_cluster_loglik_samplestats_2l(
+                        YLp          = lavsamplestats@YLp[[g]],
+                        Lp           = lavdata@Lp[[g]],
+                        Mu.W         = Mu.W,
+                        Sigma.W      = Sigma.W,
+                        Mu.B         = Mu.B,
+                        Sigma.B      = Sigma.B,
+                        Sinv.method  = "eigen",
+                        log2pi       = TRUE,
+                        minus.two    = FALSE)
                 }
 
             } else if(lavsamplestats@missing.flag) {
-                logl.group[g] <-
-                    lav_mvnorm_missing_loglik_samplestats(
+                x.idx <- lavsamplestats@x.idx[[g]]
+                X.MEAN <- X.COV <- NULL
+                if(length(x.idx) > 0L) {
+                    X.MEAN <- lavsamplestats@missing.h1[[g]]$mu[x.idx]
+                    X.COV  <- lavsamplestats@missing.h1[[g]]$sigma[x.idx,
+                                 x.idx, drop = FALSE]
+                }
+                logl.group[g] <- lav_mvnorm_missing_loglik_samplestats(
                         Yp     = lavsamplestats@missing[[g]],
                         Mu     = lavimplied$mean[[g]],
                         Sigma  = lavimplied$cov[[g]],
                         x.idx  = lavsamplestats@x.idx[[g]],
-                        x.mean = lavsamplestats@mean.x[[g]],
-                        x.cov  = lavsamplestats@cov.x[[g]])
+                        x.mean = X.MEAN, # not needed? should be part of Sigma
+                        x.cov  = X.COV)  # not needed at all!
+                        #x.mean = lavsamplestats@mean.x[[g]],
+                        #x.cov  = lavsamplestats@cov.x[[g]])
 
             } else { # single-level, complete data
                 if(lavoptions$conditional.x) {

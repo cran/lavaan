@@ -1,4 +1,4 @@
-# constructor for the ltavParTable model description
+# lavaan parameter table
 #
 # initial version: YR 22/05/2009
 #  major revision: YR 02/11/2010: - FLATTEN the model syntax and turn it into a
@@ -28,7 +28,7 @@ lavaanify <- lavParTable <- function(
                       std.lv           = FALSE,
                       effect.coding    = "",
                       conditional.x    = FALSE,
-                      fixed.x          = TRUE,
+                      fixed.x          = FALSE,
                       parameterization = "delta",
                       constraints      = NULL,
 
@@ -204,7 +204,7 @@ lavaanify <- lavParTable <- function(
 
             # new in 0.6-7: check for random slopes, add them here
             if(block.lhs == "level" &&
-               block > 1L && # FIXME: multigroup,multilevel
+               block > 1L && # FIXME: multigroup, multilevel
                !is.null(FLAT$rv) &&
                any(nchar(FLAT$rv) > 0L)) {
                 lv.names.rv <- unique(FLAT$rv[nchar(FLAT$rv) > 0L])
@@ -223,6 +223,29 @@ lavaanify <- lavParTable <- function(
                 }
             }
 
+            # new in 0.6-8: if multilevel, use 'global' ov.names.x
+            if(fixed.x && block.lhs == "level") {
+                OV.NAMES.X <- lav_partable_vnames(FLAT, "ov.x") # global
+                ov.names.x.block <- lav_partable_vnames(FLAT.block, "ov.x")
+                if(length(ov.names.x.block) > 0L) {
+                    idx <- which(!ov.names.x.block %in% OV.NAMES.X)
+                    if(length(idx) > 0L) {
+                        # warn!
+                        txt <- c("the variable(s) [",
+                         paste0(ov.names.x.block[idx], collapse = " "), "] ",
+						 "are exogenous at one level, but endogenous at ",
+                         "another level. These variables will be treated as ",
+                         "endogenous, and their variances/intercepts will be ",
+                         "freely estimated. To remove this warning, use ",
+                         "fixed.x = FALSE.")
+                        warning(lav_txt2message(txt))
+                        ov.names.x.block <- ov.names.x.block[-idx]
+                    }
+                }
+            } else {
+                ov.names.x.block <- NULL
+            }
+
             LIST.block <- lav_partable_flat(FLAT.block, blocks = BLOCK.lhs,
                 block.id = block.id,
                 meanstructure = meanstructure,
@@ -238,7 +261,8 @@ lavaanify <- lavParTable <- function(
                 auto.cov.y = auto.cov.y, auto.th = auto.th,
                 auto.delta = auto.delta, auto.efa = auto.efa,
                 varTable = varTable, group.equal = NULL,
-                group.w.free = group.w.free, ngroups = 1L)
+                group.w.free = group.w.free, ngroups = 1L,
+                ov.names.x.block = ov.names.x.block)
             LIST.block <- as.data.frame(LIST.block, stringsAsFactors = FALSE)
 
             # add block columns with current values in BLOCK.rhs
@@ -544,25 +568,61 @@ lavaanify <- lavParTable <- function(
                 }
 
                 # equality constraints on ALL factor loadings in this set?
+                # two scenario's:
+                # 1. eq constraints within the same block, perhaps time1/time2/
+                # 2. eq constraints across groups (group.equal = "loadings")
                 # --> no constraints are needed
-                #if(b > 1L || s > 1L) {
-                #    # collect plabels for this set, if any
-                #    set.idx <- which(LIST$op == "=~" &
-                #                     LIST$block == b &
-                #                     LIST$lhs %in% lv.nam.efa)
-                #    plabels.set <- LIST$plabel[ set.idx ]
-                #
-                #    # check simple == equalities
-                #    # TODO: what about more complex equality constraints?
-                #    eq.idx <- which(LIST$op == "==")
-                #    con.labels <- c(LIST$lhs[eq.idx],
-                #                    LIST$rhs[eq.idx])
-                #
-                #    # TODO: what about exceptions?
-                #    if(all(plabels.set %in% con.labels)) {
-                #        next
-                #    }
-                #}
+
+                # store labels (if any)
+                fix.to.zero <- TRUE
+
+                # 1. within block/group
+                if(s == 1L) {
+                    set.idx <- which(LIST$op == "=~" &
+                                     LIST$block == b &
+                                     LIST$lhs %in% lv.nam.efa)
+                    LABEL.set1 <- LIST$label[set.idx]
+                } else {
+                    # collect plabels for this set, if any
+                    set.idx <- which(LIST$op == "=~" &
+                                     LIST$block == b &
+                                     LIST$lhs %in% lv.nam.efa)
+
+                    # user-provided labels (if any)
+                    this.label.set <- LIST$label[set.idx]
+
+                    # same as in reference set?
+                    if(all(nchar(this.label.set) > 0L) &&
+                       all(this.label.set %in% LABEL.set1)) {
+                        fix.to.zero <- FALSE
+                    }
+                }
+
+                # 2. across groups
+                if(b == 1L) {
+                    set.idx <- which(LIST$op == "=~" &
+                                     LIST$block == b &
+                                     LIST$lhs %in% lv.nam.efa)
+                    LABEL.group1 <- LIST$label[set.idx]
+                } else {
+                    if("loadings" %in% group.equal) {
+                       fix.to.zero <- FALSE
+                    } else {
+                        # collect labels for this set, if any
+                        set.idx <- which(LIST$op == "=~" &
+                                         LIST$block == b &
+                                         LIST$lhs %in% lv.nam.efa)
+
+                        # user-provided labels (if any)
+                        this.label.set <- LIST$label[set.idx]
+
+                        # same as in reference set?
+                        if(all(nchar(this.label.set) > 0L) &&
+                           all(this.label.set %in% LABEL.group1)) {
+                            fix.to.zero <- FALSE
+                        }
+                    }
+                }
 
                 # 1. echelon pattern
                 nfac <- length(lv.nam.efa)
@@ -580,10 +640,13 @@ lavaanify <- lavParTable <- function(
                     }
 
                     # fix to zero
-                    LIST$free[  ind.idx[seq_len(nzero)]] <- 0L
-                    LIST$ustart[ind.idx[seq_len(nzero)]] <- 0
-                    LIST$user[  ind.idx[seq_len(nzero)]] <- 7L
-
+                    if(fix.to.zero) {
+                        LIST$free[  ind.idx[seq_len(nzero)]] <- 0L
+                        LIST$ustart[ind.idx[seq_len(nzero)]] <- 0
+                        LIST$user[  ind.idx[seq_len(nzero)]] <- 7L
+                    } else {
+                        LIST$user[  ind.idx[seq_len(nzero)]] <- 77L
+                    }
                 }
 
                 # 2. covariances constrained to zero (only if oblique rotation)
@@ -597,9 +660,13 @@ lavaanify <- lavParTable <- function(
                                      LIST$lhs != LIST$rhs)
 
                     # fix to zero
-                    LIST$free[  cov.idx] <- 0L
-                    LIST$ustart[cov.idx] <- 0
-                    LIST$user[  cov.idx] <- 7L
+                    if(fix.to.zero) {
+                        LIST$free[  cov.idx] <- 0L
+                        LIST$ustart[cov.idx] <- 0
+                        LIST$user[  cov.idx] <- 7L
+                    } else {
+                        LIST$user[  cov.idx] <- 77L
+                    }
                 }
 
             } # sets
@@ -671,6 +738,18 @@ lavaanify <- lavParTable <- function(
                 # fix this one too
                 LIST$ustart[ref.idx] <- LIST$ustart[fixed.idx]
                 LIST$free[ref.idx] <- 0L
+
+                # new in 0.6-8 (for efa + user-specified eq constraints)
+                if(LIST$user[idx] %in% c(7L, 77L)) {
+                    # if involved in an efa block, store in CON anyway
+                    # we may need it for the rotated solution
+                    CON.idx <- CON.idx + 1L
+                    CON[[CON.idx]] <- list(op   = "==",
+                                           lhs  = LIST$plabel[ref.idx],
+                                           rhs  = LIST$plabel[idx],
+                                           user = 2L)
+                }
+
             } else {
             # 2. ref.idx is a free parameter
                 # user-label?

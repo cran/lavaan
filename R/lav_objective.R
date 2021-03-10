@@ -733,6 +733,7 @@ estimator.MML <- function(lavmodel      = NULL,
 estimator.2L <- function(lavmodel       = NULL,
                          GLIST          = NULL,
                          Lp             = NULL,
+                         Mp             = NULL,
                          lavsamplestats = NULL,
                          group          = 1L) {
 
@@ -740,9 +741,6 @@ estimator.2L <- function(lavmodel       = NULL,
     if(lavmodel@conditional.x) {
         return(-1000)
     }
-
-
-    YLp <- lavsamplestats@YLp[[group]]
 
     # compute model-implied statistics for all blocks
     implied <- lav_model_implied(lavmodel, GLIST = GLIST)
@@ -753,10 +751,21 @@ estimator.2L <- function(lavmodel       = NULL,
     Sigma.B <- implied$cov[[  (group-1)*2 + 2]]
     Mu.B    <- implied$mean[[ (group-1)*2 + 2]]
 
-    loglik <- lav_mvnorm_cluster_loglik_samplestats_2l(YLp = YLp, Lp = Lp,
+    if(lavsamplestats@missing.flag) {
+        Y2 <- lavsamplestats@YLp[[group]][[2]]$Y2
+        Yp <- lavsamplestats@missing[[group]]
+        loglik <- lav_mvnorm_cluster_missing_loglik_samplestats_2l(Yp = Yp,
+                  Y2 = Y2, Lp = Lp, Mp = Mp,
                   Mu.W = Mu.W, Sigma.W = Sigma.W,
                   Mu.B = Mu.B, Sigma.B = Sigma.B,
                   log2pi = FALSE, minus.two = TRUE)
+    } else {
+        YLp <- lavsamplestats@YLp[[group]]
+        loglik <- lav_mvnorm_cluster_loglik_samplestats_2l(YLp = YLp, Lp = Lp,
+                  Mu.W = Mu.W, Sigma.W = Sigma.W,
+                  Mu.B = Mu.B, Sigma.B = Sigma.B,
+                  log2pi = FALSE, minus.two = TRUE)
+    }
 
     # minimize
     objective <- 1 * loglik

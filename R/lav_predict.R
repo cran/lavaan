@@ -97,8 +97,8 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
         if(lavmodel@categorical) {
             orig.ordered.idx <- which(lavdata@ov$type == "ordered")
             orig.ordered.lev <- lavdata@ov$nlev[orig.ordered.idx]
-            match.new.idx <- match(newData@ov$name,
-                                   lavdata@ov$name[orig.ordered.idx])
+            match.new.idx <- match(lavdata@ov$name[orig.ordered.idx],
+                                    newData@ov$name)
             new.ordered.lev <- newData@ov$nlev[match.new.idx]
             if(any(orig.ordered.lev - new.ordered.lev != 0)) {
                 stop("lavaan ERROR: ",
@@ -910,6 +910,23 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
                 lambda <- LAMBDA.g[var.idx, , drop = FALSE]
                 FSC <- ( MASS::ginv(t(lambda) %*% Sigma_22.inv %*% lambda)
                            %*% t(lambda) %*% Sigma_22.inv )
+
+                # if FSC contains rows that are all-zero, replace by NA
+                #
+                # this happens eg if all the indicators of a single factor
+                # are missing; then this column in lambda only contains zeroes
+                # and therefore the corresponding row in FSC contains only
+                # zeroes, leading to factor score 0
+                #
+                # showing 'NA' is better than getting 0
+                #
+                # (Note that this is not needed for the 'regression' method,
+                #  only for Bartlett)
+                #
+                zero.idx <- which(apply(FSC, 1L, function(x) all(x == 0)))
+                if(length(zero.idx) > 0L) {
+                    FSC[zero.idx, ] <- NA
+                }
 
                 # FSM?
                 #if(fsm) {
