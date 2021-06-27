@@ -33,6 +33,7 @@ function(object, header       = TRUE,
                  fmi          = FALSE,
                  std          = FALSE,
                  standardized = FALSE,
+                 remove.step1 = TRUE,
                  cov.std      = TRUE,
                  rsquare      = FALSE,
                  std.nox      = FALSE,
@@ -74,6 +75,7 @@ function(object, header       = TRUE,
                                  remove.eq = FALSE, remove.system.eq = TRUE,
                                  remove.ineq = FALSE, remove.def = FALSE,
                                  remove.nonfree = FALSE,
+                                 remove.step1 = remove.step1,
                                  #remove.nonfree.scales = TRUE,
                                  output = "text",
                                  header = TRUE)
@@ -163,6 +165,9 @@ standardizedSolution <-
     if(!is.null(PARTABLE$block)) {
         LIST$block <- PARTABLE$block
     }
+    if(sum(nchar(PARTABLE$label)) != 0L) {
+      LIST$label <- PARTABLE$label
+    }
 
     # add std and std.all columns
     if(type == "std.lv") {
@@ -201,7 +206,8 @@ standardizedSolution <-
             tmp <- sqrt(tmp)
 
             # catch near-zero SEs
-            zero.idx <- which(tmp < .Machine$double.eps^(1/3)) # was 1/2 < 0.6
+            zero.idx <- which(tmp < .Machine$double.eps^(1/4)) # was 1/2 < 0.6
+                                                               # was 1/3 < 0.6-9
             if(length(zero.idx) > 0L) {
                 tmp[zero.idx] <- 0.0
             }
@@ -300,6 +306,7 @@ parameterestimates <- function(object,
                                remove.ineq           = TRUE,
                                remove.def            = FALSE,
                                remove.nonfree        = FALSE,
+                               remove.step1          = TRUE,
                                #remove.nonfree.scales = FALSE,
 
                                # output
@@ -387,6 +394,9 @@ parameterestimates <- function(object,
         LIST$group <- PARTABLE$group
     } else {
         LIST$group <- rep(1L, length(LIST$lhs))
+    }
+    if(!is.null(PARTABLE$step)) {
+        LIST$step <- PARTABLE$step
     }
     if(!is.null(PARTABLE$efa)) {
         LIST$efa <- PARTABLE$efa
@@ -703,7 +713,9 @@ parameterestimates <- function(object,
     }
 
     # if no user-defined labels, remove label column
-    if(sum(nchar(object@ParTable$label)) == 0L) LIST$label <- NULL
+    if(sum(nchar(object@ParTable$label)) == 0L) {
+        LIST$label <- NULL
+    }
 
     # remove non-free parameters? (but keep ==, >, < and :=)
     if(remove.nonfree) {
@@ -755,6 +767,16 @@ parameterestimates <- function(object,
         if(length(def.idx) > 0L) {
             LIST <- LIST[-def.idx,]
         }
+    }
+
+    # remove step 1 rows?
+    if(remove.step1 && !is.null(LIST$step)) {
+        step1.idx <- which(LIST$step == 1L)
+        if(length(step1.idx) > 0L) {
+            LIST <- LIST[-step1.idx,]
+        }
+        # remove step column
+        LIST$step <- NULL
     }
 
     # remove LIST$user
@@ -997,9 +1019,10 @@ function(object, model, add, ..., evaluate = TRUE) {
 })
 
 
+
+
 setMethod("anova", signature(object = "lavaan"),
 function(object, ...) {
-
     # NOTE: if we add additional arguments, it is not the same generic
     # anova() function anymore, and match.call will be screwed up
 
@@ -1010,29 +1033,30 @@ function(object, ...) {
     dots <- list(...)
 
     # catch SB.classic and SB.H0
-    SB.classic <- TRUE; SB.H0 <- FALSE
+    #SB.classic <- TRUE; SB.H0 <- FALSE
 
-    arg.names <- names(dots)
-    arg.idx <- which(nchar(arg.names) > 0L)
-    if(length(arg.idx) > 0L) {
-        if(!is.null(dots$SB.classic))
-            SB.classic <- dots$SB.classic
-        if(!is.null(dots$SB.H0))
-            SB.H0 <- dots$SB.H0
-        dots <- dots[-arg.idx]
-    }
+    #arg.names <- names(dots)
+    #arg.idx <- which(nchar(arg.names) > 0L)
+    #if(length(arg.idx) > 0L) {
+    #    if(!is.null(dots$SB.classic))
+    #        SB.classic <- dots$SB.classic
+    #    if(!is.null(dots$SB.H0))
+    #        SB.H0 <- dots$SB.H0
+    #    dots <- dots[-arg.idx]
+    #}
 
     modp <- if(length(dots))
-        sapply(dots, is, "lavaan") else logical(0)
+        sapply(dots, inherits, "lavaan") else logical(0)
     mods <- c(list(object), dots[modp])
     NAMES <- sapply(as.list(mcall)[c(FALSE, TRUE, modp)], deparse)
 
     # use do.call to handle changed dots
-    ans <- do.call("lavTestLRT", c(list(object = object,
-                   SB.classic = SB.classic, SB.H0 = SB.H0,
-                   model.names = NAMES), dots))
+    #ans <- do.call("lavTestLRT", c(list(object = object,
+    #               SB.classic = SB.classic, SB.H0 = SB.H0,
+    #               model.names = NAMES), dots))
 
-    ans
+    #ans
+    lavTestLRT(object = object, ..., model.names = NAMES)
 })
 
 

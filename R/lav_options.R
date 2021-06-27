@@ -97,7 +97,7 @@ lav_options_default <- function(mimic = "lavaan") {
                                           verbose        = FALSE,
                                           jac.init.rot   = TRUE,
                                           max.iter       = 10000L),
-                                          
+
 
                 # full data
                 std.ov             = FALSE,
@@ -106,6 +106,7 @@ lav_options_default <- function(mimic = "lavaan") {
 
                 # summary data
                 sample.cov.rescale = "default",
+                sample.icov        = TRUE,
                 ridge              = FALSE,
                 ridge.x            = FALSE,
                 ridge.constant     = "default",
@@ -168,6 +169,9 @@ lav_options_default <- function(mimic = "lavaan") {
                 em.fx.tol              = 1e-08,
                 em.dx.tol              = 1e-04,
                 em.zerovar.offset      = 0.0001,
+                em.h1.iter.max         = 500L,
+                em.h1.tol              = 1e-05, # was 1e-06 < 0.6-9
+                em.h1.warn             = TRUE,
                 optim.gn.iter.max      = 200L,
                 optim.gn.tol.x         = 1e-05,
 
@@ -256,6 +260,8 @@ lav_options_set <- function(opt = NULL) {
     } else if(opt$mimic == "lisrel") {
         cat("Warning: mimic=\"LISREL\" is not ready yet. Using EQS instead.\n")
         opt$mimic <- "EQS"
+    } else if(opt$mimic %in% c("lm", "LM", "regression")) {
+        opt$mimic <- "lm"
     } else {
         stop("lavaan ERROR: mimic must be \"lavaan\", \"Mplus\" or \"EQS\" \n")
     }
@@ -335,9 +341,9 @@ lav_options_set <- function(opt = NULL) {
     if(opt$clustered && !opt$multilevel) {
         opt$meanstructure <- TRUE
         #opt$missing <- "listwise"
-        if(opt$missing == "ml") {
-            optim.gradient = "numerical"
-        }
+        #if(opt$missing == "ml") {
+        #    opt$optim.gradient = "numerical"
+        #}
 
         if(opt$estimator == "mlr") {
             opt$estimator <- "ml"
@@ -395,9 +401,13 @@ lav_options_set <- function(opt = NULL) {
     # brute-force override (for now)
     if(opt$multilevel) {
         opt$meanstructure <- TRUE
-        opt$missing <- "listwise" # still needed for 0.6-8 (otherwise, we
-                                  # we break tidySEM tests where they set
-                                  # missing = "fiml" + multilevel
+        #opt$missing <- "listwise" # still needed for 0.6-8 (otherwise, we
+        #                          # we break tidySEM tests where they set
+        #                          # missing = "fiml" + multilevel
+        #if(opt$missing %in% c("ml", "fiml", "direct")) {
+            #opt$optim.gradient = "numerical"
+            #opt$optim.gradient = "complex"
+        #}
 
         # test
         if(length(opt$test) == 1L && opt$test == "default") {
@@ -601,6 +611,9 @@ lav_options_set <- function(opt = NULL) {
         # observed.information (ALWAYS "h1" for now)
         opt$observed.information[1] <- "h1"
 
+        # new in 0.6-9: ALWAS h1.information = "unstructured"
+        opt$h1.information <- c("unstructured", "unstructured")
+
         if(length(opt$information) > 1L && opt$information[2] == "default") {
             # for both two.stage and robust.two.stage
             opt$information[2] <- "observed"
@@ -741,7 +754,7 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use ML estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") {
+        if(opt$se == "default" || opt$se == "robust") {
             opt$se <- "robust.sem"
         }
         #opt$information[1] <- "expected"
@@ -753,20 +766,23 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use ML estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") {
+        if(opt$se == "default") {
             opt$se <- "standard"
+        }
+        if(opt$information[1] == "default") {
             opt$information[1] <- "first.order"
-            if(length(opt$information) > 1L &&
-               opt$information[2] == "default") {
-                opt$information[2] <- "first.order"
-            }
+        }
+        if(length(opt$information) > 1L && opt$information[2] == "default") {
+            opt$information[2] <- "first.order"
         }
     } else if(opt$estimator == "mlr") {
         opt$estimator <- "ML"
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use ML estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.huber.white"
+        if(opt$se == "default" || opt$se == "robust") {
+            opt$se <- "robust.huber.white"
+        }
         if( !(length(opt$test) == 1L && opt$test == "none") &&
             opt$se != "external" ) {
             if(opt$mimic == "Mplus") {
@@ -951,7 +967,9 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use (D)WLS estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
+        if(opt$se == "default") {
+            opt$se <- "robust.sem"
+        }
         if(all(opt$test %in% c("mean.var.adjusted", "satorra.bentler",
                            "scaled.shifted"))) {
             # nothing to do
@@ -964,7 +982,9 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use (D)WLS estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
+        if(opt$se == "default") {
+            opt$se <- "robust.sem"
+        }
         if(all(opt$test %in% c("mean.var.adjusted", "satorra.bentler",
                            "scaled.shifted"))) {
             # nothing to do
@@ -977,7 +997,9 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use (D)WLS estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
+        if(opt$se == "default") {
+            opt$se <- "robust.sem"
+        }
         if(all(opt$test %in% c("mean.var.adjusted", "satorra.bentler",
                            "scaled.shifted"))) {
             # nothing to do
@@ -1013,7 +1035,9 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use ULS estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
+        if(opt$se == "default") {
+            opt$se <- "robust.sem"
+        }
         if(all(opt$test %in% c("mean.var.adjusted", "satorra.bentler",
                            "scaled.shifted"))) {
             # nothing to do
@@ -1026,7 +1050,9 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use ULS estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
+        if(opt$se == "default") {
+            opt$se <- "robust.sem"
+        }
         if(all(opt$test %in% c("mean.var.adjusted", "satorra.bentler",
                            "scaled.shifted"))) {
             # nothing to do
@@ -1039,7 +1065,9 @@ lav_options_set <- function(opt = NULL) {
         if(opt$se == "bootstrap") {
             stop("lavaan ERROR: use ULS estimator for bootstrap")
         }
-        if(opt$se != "none" && opt$se != "external") opt$se <- "robust.sem"
+        if(opt$se == "default") {
+            opt$se <- "robust.sem"
+        }
         if(all(opt$test %in% c("mean.var.adjusted", "satorra.bentler",
                            "scaled.shifted"))) {
             # nothing to do
@@ -1567,11 +1595,19 @@ lav_options_set <- function(opt = NULL) {
                                  upper = character(0L))
     } else if(opt$bounds == "user") {
         # nothing to do
-    } else if(opt$bounds == "default") {
+    } else if(opt$bounds == "default" ||
+              opt$bounds == "wide") {
         opt$optim.bounds <- list(lower = c("ov.var", "lv.var", "loadings"),
                                  upper = c("ov.var", "lv.var", "loadings"),
                                  lower.factor = c(1.2, 1.0, 1.1),
                                  upper.factor = c(1.2, 1.3, 1.1),
+                                 min.reliability.marker = 0.1,
+                                 min.var.lv.endo = 0.0)
+    } else if(opt$bounds == "standard") {
+        opt$optim.bounds <- list(lower = c("ov.var", "lv.var", "loadings"),
+                                 upper = c("ov.var", "lv.var", "loadings"),
+                                 lower.factor = c(1.0, 1.0, 1.0),
+                                 upper.factor = c(1.0, 1.0, 1.0),
                                  min.reliability.marker = 0.1,
                                  min.var.lv.endo = 0.0)
     } else if(opt$bounds == "pos.var") {

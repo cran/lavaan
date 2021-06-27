@@ -732,6 +732,7 @@ estimator.MML <- function(lavmodel      = NULL,
 
 estimator.2L <- function(lavmodel       = NULL,
                          GLIST          = NULL,
+                         Y1             = NULL, # only for missing
                          Lp             = NULL,
                          Mp             = NULL,
                          lavsamplestats = NULL,
@@ -752,9 +753,19 @@ estimator.2L <- function(lavmodel       = NULL,
     Mu.B    <- implied$mean[[ (group-1)*2 + 2]]
 
     if(lavsamplestats@missing.flag) {
+
+        #SIGMA.B <- Sigma.B[Lp$both.idx[[2]], Lp$both.idx[[2]], drop = FALSE]
+        #if(any(diag(SIGMA.B) < 0)) {
+        #    return(+Inf)
+        #}
+        #COR.B <- cov2cor(SIGMA.B)
+        #if(any(abs(lav_matrix_vech(COR.B, diagonal = FALSE)) > 1)) {
+        #   return(+Inf)
+        #}
+
         Y2 <- lavsamplestats@YLp[[group]][[2]]$Y2
         Yp <- lavsamplestats@missing[[group]]
-        loglik <- lav_mvnorm_cluster_missing_loglik_samplestats_2l(Yp = Yp,
+        loglik <- lav_mvnorm_cluster_missing_loglik_samplestats_2l(Y1 = Y1,
                   Y2 = Y2, Lp = Lp, Mp = Mp,
                   Mu.W = Mu.W, Sigma.W = Sigma.W,
                   Mu.B = Mu.B, Sigma.B = Sigma.B,
@@ -772,6 +783,11 @@ estimator.2L <- function(lavmodel       = NULL,
 
     # divide by (N*2)
     objective <- objective / (lavsamplestats@ntotal * 2)
+
+    # should be strictly positive
+    #if(objective < 0) {
+    #   objective <- +Inf
+    #}
 
     objective
 }

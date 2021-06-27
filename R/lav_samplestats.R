@@ -33,6 +33,11 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     debug             <- lavoptions$debug
     verbose           <- lavoptions$verbose
 
+    # sample.icov (new in 0.6-9; ensure it exists, for older objects)
+    sample.icov <- TRUE
+    if(!is.null(lavoptions$sample.icov)) {
+        sample.icov <- lavoptions$sample.icov
+    }
 
     # ridge default
     if(ridge) {
@@ -403,7 +408,10 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                                      wt = WT[[g]])
                 out <- lav_mvnorm_missing_h1_estimate_moments(Y = X[[g]],
                           wt = WT[[g]],
-                          Mp = Mp[[g]], Yp = missing.[[g]], verbose = verbose)
+                          Mp = Mp[[g]], Yp = missing.[[g]], verbose = verbose,
+                          max.iter = lavoptions$em.h1.iter.max,
+                          tol      = lavoptions$em.h1.tol,
+                          warn     = lavoptions$em.h1.warn)
                 missing.h1.[[g]]$sigma <- out$Sigma
                 missing.h1.[[g]]$mu    <- out$Mu
                 missing.h1.[[g]]$h1    <- out$fx
@@ -422,8 +430,11 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 if(nlevels == 1L) {
                     # estimate moments unrestricted model
                     out <- lav_mvnorm_missing_h1_estimate_moments(Y = X[[g]],
-                              wt = WT[[g]],
-                              Mp = Mp[[g]], Yp = missing.[[g]], verbose = verbose)
+                              wt = WT[[g]], verbose = verbose,
+                              Mp = Mp[[g]], Yp = missing.[[g]],
+                              max.iter = lavoptions$em.h1.iter.max,
+                              tol      = lavoptions$em.h1.tol,
+                              warn     = lavoptions$em.h1.warn)
                     missing.h1.[[g]]$sigma <- out$Sigma
                     missing.h1.[[g]]$mu    <- out$Mu
                     missing.h1.[[g]]$h1    <- out$fx
@@ -469,7 +480,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
 
             # icov and cov.log.det (but not if missing)
-            if(!missing %in% c("ml", "ml.x")) {
+            if(sample.icov && !missing %in% c("ml", "ml.x")) {
                 out <- lav_samplestats_icov(COV = cov[[g]], ridge = ridge.eps,
                            x.idx = x.idx[[g]],
                            ngroups = ngroups, g = g, warn = TRUE)
@@ -487,7 +498,6 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 }
             }
         }
-
 
         # WLS.obs
         if(nlevels == 1L) {
@@ -736,24 +746,25 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 # no WLS.V here
             }
 
-            # group.w.free
-            if(!is.null(WLS.V[[g]]) && group.w.free) {
-                # unweight!!
-                a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
-                # always 1!!!
-                # invert
-                a <- 1/a
-                WLS.V[[g]] <- lav_matrix_bdiag( matrix(a, 1, 1), WLS.V[[g]] )
+            # group.w.free (only if categorical)
+            if(group.w.free && categorical) {
+                if(!is.null(WLS.V[[g]])) {
+                    # unweight!!
+                    a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
+                    # always 1!!!
+                    # invert
+                    a <- 1/a
+                    WLS.V[[g]] <- lav_matrix_bdiag( matrix(a,1,1), WLS.V[[g]] )
+                }
+                if(!is.null(WLS.VD[[g]])) {
+                    # unweight!!
+                    a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
+                    # always 1!!!
+                    # invert
+                    a <- 1/a
+                    WLS.VD[[g]] <- c(a, WLS.VD[[g]])
+                }
             }
-            if(!is.null(WLS.VD[[g]]) && group.w.free) {
-                # unweight!!
-                a <- group.w[[g]] * sum(unlist(nobs)) / nobs[[g]]
-                # always 1!!!
-                # invert
-                a <- 1/a
-                WLS.VD[[g]] <- c(a, WLS.VD[[g]])
-            }
-
         }
     } # ngroups
 
@@ -1203,11 +1214,15 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                 # no rescale!
 
                 # icov and cov.log.det
-                out <- lav_samplestats_icov(COV = res.cov[[g]], ridge = ridge,
-                       x.idx = x.idx[[g]],
-                       ngroups = ngroups, g = g, warn = TRUE)
-                res.icov[[g]] <- out$icov
-                res.cov.log.det[[g]] <- out$cov.log.det
+                #if(lavoptions$sample.icov) {
+                    out <- lav_samplestats_icov(COV = res.cov[[g]],
+                                                ridge = ridge,
+                                                x.idx = x.idx[[g]],
+                                                ngroups = ngroups, g = g,
+                                                warn = TRUE)
+                    res.icov[[g]] <- out$icov
+                    res.cov.log.det[[g]] <- out$cov.log.det
+                #}
 
             # continuous + conditional.x = FALSE
             } else {
@@ -1223,10 +1238,12 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                 }
 
                 # icov and cov.log.det
-                out <- lav_samplestats_icov(COV = cov[[g]], ridge = ridge,
-                           x.idx = x.idx[[g]], ngroups = ngroups, g = g,
-                           warn = TRUE)
-                icov[[g]] <- out$icov; cov.log.det[[g]] <- out$cov.log.det
+                #if(lavoptions$sample.icov) {
+                    out <- lav_samplestats_icov(COV = cov[[g]], ridge = ridge,
+                               x.idx = x.idx[[g]], ngroups = ngroups, g = g,
+                               warn = TRUE)
+                    icov[[g]] <- out$icov; cov.log.det[[g]] <- out$cov.log.det
+                #}
 
                 # fixed.x?
                 if(fixed.x) {
@@ -1609,9 +1626,22 @@ lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL) {
                        c(between.idx, sort.int(c(both.idx, within.idx))),
                        drop = FALSE]
             mean.d[[clz]] <- colMeans(tmp2, na.rm = TRUE)
+            bad.idx <- which(!is.finite(mean.d[[clz]])) # if nrow = 1 + NA
+            if(length(bad.idx) > 0L) {
+                mean.d[[clz]][bad.idx] <- 0 # ugly, only for starting values
+            }
             if(length(d.idx) > 1L) {
-                cov.d[[clz]] <- ( cov(tmp2, use = "pairwise.complete.obs") *
+                if(any(is.na(tmp2))) {
+                    # if full column has NA, this will fail...
+                    # not needed anyway
+                    #out <- lav_mvnorm_missing_h1_estimate_moments(Y = tmp2,
+                    #          max.iter = 10L)
+                    #cov.d[[clz]] <- out$Sigma
+                    cov.d[[clz]] <- 0
+                } else {
+                    cov.d[[clz]] <- ( cov(tmp2, use = "complete.obs") *
                                       (ns-1) / ns )
+                }
             } else {
                 cov.d[[clz]] <- 0
             }
