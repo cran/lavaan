@@ -416,7 +416,7 @@ lav_partable_subset_structural_model <- function(PT = NULL,
     } else {
         # redefine ov.x for the structural part only; set exo flag
         for(g in 1:nblocks) {
-            ov.names.x <- lav_partable_vnames(PT, type = "ov.x", 
+            ov.names.x <- lav_partable_vnames(PT, type = "ov.x",
                                               block = block.values[g])
             if(length(ov.names.x) == 0L) {
                 next
@@ -426,7 +426,7 @@ lav_partable_subset_structural_model <- function(PT = NULL,
             exo.var.idx  <- which(PT$op == "~~" & PT$block == block.values[g] &
                                   PT$rhs %in% ov.names.x &
                                   PT$lhs %in% ov.names.x &
-                                  PT$user == 0L)
+                                  PT$user %in% c(0L, 3L))
             if(length(exo.var.idx) > 0L) {
                 PT$ustart[exo.var.idx] <- as.numeric(NA) # to be overriden
                   PT$free[exo.var.idx] <- 0L

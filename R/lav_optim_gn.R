@@ -101,6 +101,8 @@ lav_objective_GN <- function(x, lavsamplestats = NULL, lavmodel = NULL,
     }
 
     # compute step
+    # note, we could use U + k*I for a given scalar 'k' (Levenberg, 1944)
+    #                 or U + k*(diag(U) (Marquardt, 1963)
     U.invQ <- drop(solve(U, Q))
     if(lavmodel@eq.constraints) {
         # merit function
@@ -153,9 +155,13 @@ lav_optim_gn <- function(lavmodel = NULL, lavsamplestats = NULL,
     }
 
     # options
-    verbose <- lavoptions$verbose
-    iter.max <- lavoptions$optim.gn.iter.max
-    tol.x    <- lavoptions$optim.gn.tol.x
+    verbose      <- lavoptions$verbose
+    iter.max     <- lavoptions$optim.gn.iter.max
+    tol.x        <- lavoptions$optim.gn.tol.x
+    stephalf.max <- as.integer(lavoptions$optim.gn.stephalf.max)
+    if(stephalf.max < 0L) {
+        stephalf.max <- 0L
+    }
 
     # initialize
     iter <- 0; alpha <- 1.0; old.x <- x
@@ -176,8 +182,10 @@ lav_optim_gn <- function(lavmodel = NULL, lavsamplestats = NULL,
 
         # update
         alpha <- 1.0
-        step <- U.invQ[seq_len(npar)]
-        for(h in 1:10) {
+        step  <- U.invQ[seq_len(npar)]
+        # TODO: if step-halving fails, we could also
+        # alllow the steps to be negative
+        for(h in 1:max(1L, stephalf.max)) {
             new.x <- old.x + (alpha * step)
 
             # apply simple bounds (if any)
@@ -199,10 +207,13 @@ lav_optim_gn <- function(lavmodel = NULL, lavsamplestats = NULL,
                                lavdata = lavdata, lavoptions = lavoptions,
                                lavmodel = lavmodel, extra = FALSE,
                                lambda = old.out$lambda)$obj
+
             if(is.finite(new.obj) && new.obj < old.obj) {
                 break
+            } else if(stephalf.max == 0L) { # no step-halving!
+                break
             } else {
-                # step-halfing
+                # step-halving
                 alpha <- alpha / 2.0
                 #if(verbose) {
                 #    cat(" -- step halving -- : alpha = ", alpha, "\n")
@@ -211,7 +222,8 @@ lav_optim_gn <- function(lavmodel = NULL, lavsamplestats = NULL,
         }
 
         # TODO - if this fails, we need to recover somehow
-        if(h == 10L) {
+        # negative steps:
+        if(stephalf.max != 0L && h == stephalf.max) {
             if(verbose) {
                 cat(" -- step halving failed; function value may increase.\n")
             }

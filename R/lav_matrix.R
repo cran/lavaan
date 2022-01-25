@@ -1326,7 +1326,11 @@ lav_matrix_symmetric_logdet_update <- function(S.logdet, S.inv,
 
 # compute `lambda': the smallest root of the determinantal equation
 # |M - lambda*P| = 0 (see Fuller 1987, p.125 or p.172
-# allow for zero rows/columns in P
+#
+# the function allows for zero rows/columns in P, by regressing them out
+# this approach was suggested to me by Wayne A. Fuller, personal communication,
+# 12 Nov 2020
+#
 lav_matrix_symmetric_diff_smallest_root <- function(M = NULL, P = NULL,
                                                     warn = FALSE) {
 
@@ -1353,11 +1357,11 @@ lav_matrix_symmetric_diff_smallest_root <- function(M = NULL, P = NULL,
         }
         diag(P)[neg.idx] <- diagP[neg.idx] <- 0
     }
-    
-    # check for (near)zero diagonal elements 
+
+    # check for (near)zero diagonal elements
     zero.idx <- which(abs(diagP) < sqrt(.Machine$double.eps))
 
-    # three cases: 
+    # three cases:
     #    1. all elements are zero (P=0) -> lambda = 0
     #    2. no elements are zero
     #    3. some elements are zero -> regress out
@@ -1389,7 +1393,7 @@ lav_matrix_symmetric_diff_smallest_root <- function(M = NULL, P = NULL,
         M.pn <- M[-zero.idx,  zero.idx, drop = FALSE]
         M.np <- M[ zero.idx, -zero.idx, drop = FALSE]
         M.nn <- M[ zero.idx,  zero.idx, drop = FALSE]
-    
+
         # create Mp.n
         Mp.n <- M.pp - M.pn %*% solve(M.nn) %*% M.np
 
@@ -1405,7 +1409,7 @@ lav_matrix_symmetric_diff_smallest_root <- function(M = NULL, P = NULL,
             L <- solve(lav_matrix_symmetric_sqrt(P.p))
             LML <- L %*% Mp.n %*% t(L)
         }
-        lambda <- eigen(LML, symmetric = TRUE, 
+        lambda <- eigen(LML, symmetric = TRUE,
                         only.values = TRUE)$values[nrow(P.p)]
     }
 
@@ -1586,5 +1590,71 @@ lav_matrix_cov_wt <- function(Y, wt = NULL) {
     out
 }
 
+# compute (I-A)^{-1} where A is square
+# using a (truncated) Neumann series:  (I-A)^{-1} = \sum_k=0^{\infty} A^k
+#
+# as A is typically sparse, we can stop if all elements in A^k are zero for,
+# say, k<=6
+lav_matrix_inverse_iminus <- function(A = NULL) {
 
+    nr <- nrow(A); nc <- ncol(A)
+    stopifnot(nr == nc)
+
+    # create I + A
+    IA <- A
+    diag.idx <- lav_matrix_diag_idx(nr)
+    IA[diag.idx] <- IA[diag.idx] + 1
+
+    # initial approximation
+    IA.inv <- IA
+
+    # first order
+    A2 <- A %*% A
+    if(all(A2 == 0)) {
+        # we are done
+        return(IA.inv)
+    } else {
+        IA.inv <- IA.inv + A2
+    }
+
+    # second order
+    A3 <- A2 %*% A
+	if(all(A3 == 0)) {
+        # we are done
+        return(IA.inv)
+    } else {
+        IA.inv <- IA.inv + A3
+    }
+
+    # third order
+    A4 <- A3 %*% A
+    if(all(A4 == 0)) {
+        # we are done
+        return(IA.inv)
+    } else {
+        IA.inv <- IA.inv + A4
+    }
+
+    # fourth order
+    A5 <- A4 %*% A
+    if(all(A5 == 0)) {
+        # we are done
+        return(IA.inv)
+    } else {
+        IA.inv <- IA.inv + A5
+    }
+
+    # fifth order
+    A6 <- A5 %*% A
+    if(all(A6 == 0)) {
+        # we are done
+        return(IA.inv)
+    } else {
+        # naive version (for now)
+        tmp <- -A
+        tmp[diag.idx] <- tmp[diag.idx] + 1
+        IA.inv <- solve(tmp)
+        return(IA.inv)
+    }
+}
 
