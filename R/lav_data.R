@@ -603,7 +603,7 @@ lav_data_full <- function(data          = NULL,          # data.frame
     for(g in 1:ngroups) {
         # does the data contain all the observed variables
         # needed in the user-specified model for this group
-        ov.all <- unique(ov.names[[g]], ov.names.x[[g]]) # no overlap if categ
+        ov.all <- unique(c(ov.names[[g]], ov.names.x[[g]])) # no overlap if categ
 
         # handle interactions
         ov.int.names <- ov.all[ grepl(":", ov.all) ]
@@ -744,8 +744,9 @@ lav_data_full <- function(data          = NULL,          # data.frame
     for(g in 1:ngroups) {
 
         # extract variables in correct order
-        if(!is.null(cluster) && length(cluster) > 0L) {
+        if(nlevels > 1L) {
             # keep 'joint' (Y,X) matrix in @X if multilevel (or always?)
+            # yes for multilevel (for now); no for clustered only
             OV.NAMES <- unique(c(ov.names[[g]], ov.names.x[[g]]))
             ov.idx  <- ov$idx[match(OV.NAMES,   ov$name)]
         } else {

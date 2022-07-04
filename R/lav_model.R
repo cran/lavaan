@@ -37,12 +37,8 @@ lav_model <- function(lavpartable      = NULL,
         if(nlevels > 1L) {
             multilevel <- TRUE
         }
-    }
-
-    # check mean.x/cov.x
-    if(lavoptions$conditional.x && any(lavpartable$exo > 0L)) {
-        # we should have non-empty mean.x/cov.x
-        # but they will be empty if
+    } else {
+        nlevels <- 1L
     }
 
     nefa <- lav_partable_nefa(lavpartable)
@@ -128,15 +124,39 @@ lav_model <- function(lavpartable      = NULL,
         ov.names <-     lav_partable_vnames(lavpartable, "ov",     block = g)
         ov.names.nox <- lav_partable_vnames(lavpartable, "ov.nox", block = g)
         ov.names.x <-   lav_partable_vnames(lavpartable, "ov.x",   block = g)
-        nexo[g] <- length(ov.names.x)
         ov.num <-       lav_partable_vnames(lavpartable, "ov.num", block = g)
         if(lavoptions$conditional.x) {
+            if(nlevels > 1L) {
+                if(ngroups == 1L) {
+                    OTHER.BLOCK.NAMES <- lav_partable_vnames(lavpartable, "ov",
+                                            block = seq_len(nblocks)[-g])
+                } else {
+                    # TEST ME!
+                    # which group is this?
+                    this.group <- ceiling(g / nlevels)
+                    blocks.within.group <- (this.group - 1L) * nlevels + seq_len(nlevels)
+                    OTHER.BLOCK.NAMES <- lav_partable_vnames(lavpartable, "ov",
+                                                block = blocks.within.group[-g])
+                }
+
+
+                if(length(ov.names.x) > 0L) {
+                    idx <- which(ov.names.x %in% OTHER.BLOCK.NAMES)
+                    if(length(idx) > 0L) {
+                        ov.names.nox <- unique(c(ov.names.nox, ov.names.x[idx]))
+                        ov.names.x <- ov.names.x[-idx]
+                        ov.names <- ov.names.nox
+                    }
+                }
+            }
             nvar[g] <- length(ov.names.nox)
             num.idx[[g]] <- which(ov.names.nox %in% ov.num)
         } else {
             nvar[g] <- length(ov.names)
             num.idx[[g]] <- which(ov.names %in% ov.num)
         }
+        nexo[g] <- length(ov.names.x)
+
         if(nefa > 0L) {
             lv.names <- lav_partable_vnames(lavpartable, "lv",     block = g)
         }

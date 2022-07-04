@@ -923,9 +923,12 @@ lav_object_inspect_sampstat <- function(object, h1 = TRUE,
     lavsamplestats <- object@SampleStats
     lavmodel <- object@Model
 
-    # if nlevels, override h1 to be TRUE
+    # if nlevels, override h1 to be TRUE, and set conditional.x = FALSE
     if(object@Data@nlevels > 1L) {
         h1 <- TRUE
+        conditional.x <- FALSE # for now (0.6-12)
+    } else {
+        conditional.x <- lavmodel@conditional.x
     }
 
     # check if we have a non-empty @h1 slot
@@ -945,7 +948,7 @@ lav_object_inspect_sampstat <- function(object, h1 = TRUE,
     OUT <- vector("list", length = nblocks)
     for(b in seq_len(nblocks)) {
 
-        if(!lavmodel@conditional.x) {
+        if(!conditional.x) {
 
             # covariance matrix
             if(h1) {
@@ -1390,10 +1393,18 @@ lav_object_inspect_implied <- function(object,
     lavimplied <- object@implied
     lavmodel   <- object@Model
 
+    # if nlevels, always set conditional.x = FALSE
+    if(object@Data@nlevels > 1L) {
+        lavimplied <- lav_model_implied_cond2uncond(lavimplied)
+        conditional.x <- FALSE # for now (0.6-12)
+    } else {
+        conditional.x <- lavmodel@conditional.x
+    }
+
     OUT <- vector("list", length = nblocks)
     for(b in seq_len(nblocks)) {
 
-        if(!lavmodel@conditional.x) {
+        if(!conditional.x) {
 
             # covariance matrix
             OUT[[b]]$cov  <- lavimplied$cov[[b]]
@@ -1485,7 +1496,7 @@ lav_object_inspect_implied <- function(object,
 
             # cov.x
             if(lavmodel@nexo[b] > 0L) {
-                OUT[[b]]$cov.x  <- object@SampleStats@cov.x[[b]]
+                OUT[[b]]$cov.x  <- lavimplied$cov.x[[b]]
                 if(add.labels) {
                     rownames(OUT[[b]]$cov.x) <- ov.names.x[[b]]
                     colnames(OUT[[b]]$cov.x) <- ov.names.x[[b]]
@@ -1498,7 +1509,7 @@ lav_object_inspect_implied <- function(object,
 
             # mean.x
             if(lavmodel@nexo[b] > 0L) {
-                OUT[[b]]$mean.x  <- as.numeric(object@SampleStats@mean.x[[b]])
+                OUT[[b]]$mean.x  <- lavimplied$mean.x[[b]]
                 if(add.labels) {
                     names(OUT[[b]]$mean.x) <- ov.names.x[[b]]
                 }
