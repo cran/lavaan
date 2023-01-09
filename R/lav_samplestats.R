@@ -18,10 +18,10 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     estimator         <- lavoptions$estimator
     mimic             <- lavoptions$mimic
     meanstructure     <- lavoptions$meanstructure
+    correlation       <- lavoptions$correlation
     conditional.x     <- lavoptions$conditional.x
     fixed.x           <- lavoptions$fixed.x
     group.w.free      <- lavoptions$group.w.free
-    gamma.n.minus.one <- lavoptions$gamma.n.minus.one
     se                <- lavoptions$se
     test              <- lavoptions$test
     ridge             <- lavoptions$ridge
@@ -153,9 +153,11 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     if(is.null(NACOV)) {
         NACOV      <- vector("list", length = ngroups)
         NACOV.user <- FALSE
-        if(se == "robust.sem" || test %in% c("satorra.bentler",
-                                             "mean.var.adjusted",
-                                             "scaled.shifted")) {
+        if(se == "robust.sem" ||
+           # note: test can be a vector...
+           any(test %in% c("satorra.bentler",
+                           "mean.var.adjusted",
+                           "scaled.shifted"))) {
             NACOV.compute <- TRUE
         }
     } else if(is.logical(NACOV)) {
@@ -182,6 +184,8 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         NACOV.user <- TRUE
         # FIXME: check dimension of NACOV!!
     }
+
+
 
     # compute some sample statistics per group
     for(g in 1:ngroups) {
@@ -237,11 +241,13 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         }
 
         if(categorical) {
+            # compute CAT
+
             if(estimator %in% c("ML","REML","PML","FML","MML","none","ULS")) {
                 WLS.W <- FALSE
                 if(estimator == "ULS" && se == "robust.sem") { #||
-                        #test %in% c("satorra.bentler", "scaled.shifted",
-                        #            "mean.var.adjusted"))) {
+                        #any(test %in% c("satorra.bentler", "scaled.shifted",
+                        #            "mean.var.adjusted")))) {
                     WLS.W <- TRUE
                 }
             } else {
@@ -342,7 +348,33 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
 
             }
 
-        } else if(nlevels > 1L) { # continuous, multilevel setting
+            # only for catML
+            if(estimator == "catML") {
+                COV <- cov2cor(lav_matrix_symmetric_force_pd(cov[[g]],
+                                                             tol = 1e-06))
+                out <- lav_samplestats_icov(COV = COV, ridge = 1e-05,
+                           x.idx = x.idx[[g]],
+                           ngroups = ngroups, g = g, warn = TRUE)
+                icov[[g]] <- out$icov
+                cov.log.det[[g]] <- out$cov.log.det
+
+                # the same for res.cov if conditional.x = TRUE
+                if(conditional.x) {
+                    RES.COV <-
+                        cov2cor(lav_matrix_symmetric_force_pd(res.cov[[g]],
+                                                              tol = 1e-06))
+                    out <- lav_samplestats_icov(COV = RES.COV,
+                               ridge = 1e-05,
+                               x.idx = x.idx[[g]],
+                               ngroups = ngroups, g = g, warn = TRUE)
+                    res.icov[[g]] <- out$icov
+                    res.cov.log.det[[g]] <- out$cov.log.det
+                }
+            }
+        } # categorical
+
+        # continuous -- multilevel
+        else if(nlevels > 1L) {
 
             # level-based sample statistics
             YLp[[g]] <- lav_samplestats_cluster_patterns(Y  = X[[g]],
@@ -368,7 +400,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 if(rescale) {
                     # we 'transform' the sample cov (divided by n-1)
                     # to a sample cov divided by 'n'
-                    COV <- (nobs[[g]]-1)/nobs[[g]] * COV
+                    COV <- ((nobs[[g]]-1)/nobs[[g]]) * COV
                 }
                 cov[[g]] <- COV
                 if(ridge) {
@@ -410,9 +442,18 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 }
             }
 
-        } else { # continuous, single-level case
+        } # multilevel
+
+        # continuous -- single-level
+        else {
 
             if(conditional.x) {
+
+                # FIXME!
+                # no correlation structures yet
+                if(correlation) {
+                    stop("lavaan ERROR: conditional.x = TRUE is not supported (yet) for correlation structures.")
+                }
 
                 # FIXME!
                 # no handling of missing data yet....
@@ -426,15 +467,14 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                    Y <- cbind(X[[g]], eXo[[g]])
                  COV <- unname( stats::cov(Y, use="pairwise"))
                 MEAN <- unname( colMeans(Y, na.rm=TRUE) )
-                var[[g]] <- diag(COV)
-                cov[[g]] <- COV
                 # rescale cov by (N-1)/N? (only COV!)
                 if(rescale) {
                     # we 'transform' the sample cov (divided by n-1)
                     # to a sample cov divided by 'n'
-                    COV <- (nobs[[g]]-1)/nobs[[g]] * COV
+                    COV <- ((nobs[[g]]-1)/nobs[[g]]) * COV
                 }
                 cov[[g]] <- COV
+                var[[g]] <- diag(COV)
                 if(ridge) {
                     diag(cov[[g]]) <- diag(cov[[g]]) + ridge.eps
                     var[[g]] <- diag(cov[[g]])
@@ -517,7 +557,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     if(rescale) {
                         # we 'transform' the sample cov (divided by n-1)
                         # to a sample cov divided by 'n'
-                        cov[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov[[g]]
+                        cov[[g]] <- ((nobs[[g]]-1)/nobs[[g]]) * cov[[g]]
                     }
                     if(ridge) {
                         diag(cov[[g]]) <- diag(cov[[g]]) + ridge.eps
@@ -542,7 +582,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     if(rescale) {
                         # we 'transform' the sample cov (divided by n-1)
                         # to a sample cov divided by 'n'
-                        cov[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov[[g]]
+                        cov[[g]] <- ((nobs[[g]]-1)/nobs[[g]]) * cov[[g]]
                     }
                     if(ridge) {
                         diag(cov[[g]]) <- diag(cov[[g]]) + ridge.eps
@@ -552,6 +592,17 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 }
             }
 
+            # correlation structure?
+            if(correlation) {
+                cov[[g]] <- cov2cor(cov[[g]])
+                var[[g]] <- rep(1, length(var[[g]]))
+                if(conditional.x) {
+                    res.cov[[g]] <- cov2cor(res.cov[[g]])
+                    res.var[[g]] <- rep(1, length(res.var[[g]]))
+                    cov.x[[g]] <- cov2cor(cov.x[[g]])
+                    # FIXME: slopes? more?
+                }
+            }
 
             # icov and cov.log.det (but not if missing)
             if(sample.icov && !missing %in% c("ml", "ml.x")) {
@@ -571,20 +622,29 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     res.cov.log.det[[g]] <- out$cov.log.det
                 }
             }
-        }
+        } # continuous - single level
+
 
         # WLS.obs
         if(nlevels == 1L) {
+            if(estimator == "catML") {
+                # correlations only (for now)
+                tmp.categorical <- FALSE
+                tmp.meanstructure <- FALSE
+            } else {
+                tmp.categorical <- categorical
+                tmp.meanstructure <- meanstructure
+            }
             WLS.obs[[g]] <- lav_samplestats_wls_obs(mean.g = mean[[g]],
                 cov.g = cov[[g]], var.g = var[[g]], th.g = th[[g]],
                 th.idx.g = th.idx[[g]], res.int.g = res.int[[g]],
                 res.cov.g = res.cov[[g]], res.var.g = res.var[[g]],
                 res.th.g = res.th[[g]],  res.slopes.g = res.slopes[[g]],
                 group.w.g = log(nobs[[g]]),
-                categorical = categorical, conditional.x = conditional.x,
-                meanstructure = meanstructure, slopestructure = conditional.x,
+                categorical = tmp.categorical, conditional.x = conditional.x,
+                meanstructure = tmp.meanstructure, correlation = correlation,
+                slopestructure = conditional.x,
                 group.w.free = group.w.free)
-
         }
 
         # fill in the other slots
@@ -606,7 +666,7 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 if(rescale) {
                     # we 'transform' the sample cov (divided by n-1)
                     # to a sample cov divided by 'n'
-                    cov.x[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov.x[[g]]
+                    cov.x[[g]] <- ((nobs[[g]]-1)/nobs[[g]]) * cov.x[[g]]
                 }
                 mean.x[[g]] <- colMeans(eXo[[g]])
             }
@@ -635,9 +695,11 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                           conditional.x  = conditional.x,
                                           meanstructure  = meanstructure,
                                           slopestructure = conditional.x,
-                                          gamma.n.minus.one = gamma.n.minus.one,
+                                          gamma.n.minus.one =
+                                              lavoptions$gamma.n.minus.one,
+                                          unbiased = lavoptions$gamma.unbiased,
                                           Mplus.WLS      = FALSE)
-            } else if(estimator %in% c("WLS","DWLS","ULS","DLS")) {
+            } else if(estimator %in% c("WLS","DWLS","ULS","DLS","catML")) {
                 if(!categorical) {
                     # sample size large enough?
                     nvar <- ncol(X[[g]])
@@ -678,12 +740,25 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                                               conditional.x = conditional.x,
                                               meanstructure = meanstructure,
                                               slopestructure = conditional.x,
-                                              gamma.n.minus.one = gamma.n.minus.one,
+                                              gamma.n.minus.one =
+                                                  lavoptions$gamma.n.minus.one,
+                                              unbiased =
+                                                  lavoptions$gamma.unbiased,
                                               Mplus.WLS = (mimic=="Mplus"))
                 } else { # categorical case
                     NACOV[[g]]  <- CAT$WLS.W  * nobs[[g]]
-                    if(gamma.n.minus.one) {
-                        NACOV[[g]] <- NACOV[[g]] * nobs[[g]] / (nobs[[g]] - 1L)
+                    if(lavoptions$gamma.n.minus.one) {
+                        NACOV[[g]] <- NACOV[[g]] * (nobs[[g]]/(nobs[[g]] - 1L))
+                    }
+                    if(estimator == "catML") {
+                        # remove all but the correlation part
+                        ntotal <- nrow(NACOV[[g]])
+                        pstar <- nrow(CAT$A22)
+                        nocor <- ntotal - pstar
+                        if(length(nocor) > 0L) {
+                            NACOV[[g]] <- NACOV[[g]][-seq_len(nocor),
+                                                     -seq_len(nocor)]
+                        }
                     }
                 }
             } else if(estimator == "PML") {
@@ -733,8 +808,9 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                 if(mimic == "Mplus" && !conditional.x && meanstructure) {
                     # bug in Mplus? V11 rescaled by nobs[[g]]/(nobs[[g]]-1)
                     nvar <- NCOL(cov[[g]])
-                    WLS.V[[g]][1:nvar, 1:nvar] <- WLS.V[[g]][1:nvar, 1:nvar,
-                                        drop = FALSE] * nobs[[g]]/(nobs[[g]]-1)
+                    WLS.V[[g]][1:nvar, 1:nvar] <-
+                          WLS.V[[g]][1:nvar, 1:nvar,
+                                     drop = FALSE] * (nobs[[g]]/(nobs[[g]]-1))
                 }
 
 
@@ -1328,7 +1404,7 @@ lav_samplestats_from_moments <- function(sample.cov    = NULL,
                 if(rescale) {
                     # we 'transform' the sample cov (divided by n-1)
                     # to a sample cov divided by 'n'
-                    cov[[g]] <- (nobs[[g]]-1)/nobs[[g]] * cov[[g]]
+                    cov[[g]] <- ((nobs[[g]]-1)/nobs[[g]]) * cov[[g]]
                 }
                 if(ridge) {
                     diag(cov[[g]]) <- diag(cov[[g]]) + ridge.eps
@@ -1611,7 +1687,8 @@ lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL,
         if(length(both.idx) > 0L) {
             zero.idx <- which(diag(S.b)[both.idx] < 0.0001)
             if(length(zero.idx) > 0L) {
-                warning("lavaan WARNING: (near) zero variance at between level for splitted variable:\n\t\t", Lp$both.names[[l]][zero.idx])
+                warning("lavaan WARNING: (near) zero variance at between level for splitted variable:\n\t\t",
+                    paste(Lp$both.names[[l]][zero.idx], collapse = " "))
             }
         }
 

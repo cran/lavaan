@@ -26,6 +26,7 @@ lavaanify <- lavParTable <- function(
                       orthogonal.x     = FALSE,
                       orthogonal.efa   = FALSE,
                       std.lv           = FALSE,
+                      correlation      = FALSE,
                       effect.coding    = "",
                       conditional.x    = FALSE,
                       fixed.x          = FALSE,
@@ -343,7 +344,7 @@ lavaanify <- lavParTable <- function(
                 int.ov.free = int.ov.free, int.lv.free = int.lv.free,
                 orthogonal = orthogonal, orthogonal.y = orthogonal.y,
                 orthogonal.x = orthogonal.x, orthogonal.efa = orthogonal.efa,
-                std.lv = std.lv,
+                std.lv = std.lv, correlation = correlation,
                 conditional.x = conditional.x, fixed.x = fixed.x,
                 parameterization = parameterization,
                 auto.fix.first = auto.fix.first,
@@ -390,7 +391,7 @@ lavaanify <- lavParTable <- function(
             int.ov.free = int.ov.free, int.lv.free = int.lv.free,
             orthogonal = orthogonal, orthogonal.y = orthogonal.y,
             orthogonal.x = orthogonal.x, orthogonal.efa = orthogonal.efa,
-            std.lv = std.lv,
+            std.lv = std.lv, correlation = correlation,
             conditional.x = conditional.x, fixed.x = fixed.x,
             parameterization = parameterization,
             auto.fix.first = auto.fix.first, auto.fix.single = auto.fix.single,
@@ -643,126 +644,9 @@ lavaanify <- lavParTable <- function(
     #       are constrained to be equal to the factor-loadings of the first
     #       set, no further constraints are needed
     if(auto.efa && !is.null(LIST$efa)) {
-        # for each set, for each block
-        nblocks <- lav_partable_nblocks(LIST)
-        set.names <- lav_partable_efa_values(LIST)
-        nsets <- length(set.names)
-
-        for(b in seq_len(nblocks)) {
-            for(s in seq_len(nsets)) {
-                # lv's for this block/set
-                lv.nam.efa <- unique(LIST$lhs[LIST$op == "=~" &
-                                              LIST$block == b &
-                                              LIST$efa == set.names[s]])
-                if(length(lv.nam.efa) == 1L) {
-                    # nothing to do (warn?)
-                    next
-                }
-
-                # equality constraints on ALL factor loadings in this set?
-                # two scenario's:
-                # 1. eq constraints within the same block, perhaps time1/time2/
-                # 2. eq constraints across groups (group.equal = "loadings")
-                # --> no constraints are needed
-
-                # store labels (if any)
-                fix.to.zero <- TRUE
-
-                # 1. within block/group
-                if(s == 1L) {
-                    set.idx <- which(LIST$op == "=~" &
-                                     LIST$block == b &
-                                     LIST$lhs %in% lv.nam.efa)
-                    LABEL.set1 <- LIST$label[set.idx]
-                } else {
-                    # collect plabels for this set, if any
-                    set.idx <- which(LIST$op == "=~" &
-                                     LIST$block == b &
-                                     LIST$lhs %in% lv.nam.efa)
-
-                    # user-provided labels (if any)
-                    this.label.set <- LIST$label[set.idx]
-
-                    # same as in reference set?
-                    if(all(nchar(this.label.set) > 0L) &&
-                       all(this.label.set %in% LABEL.set1)) {
-                        fix.to.zero <- FALSE
-                    }
-                }
-
-                # 2. across groups
-                if(b == 1L) {
-                    set.idx <- which(LIST$op == "=~" &
-                                     LIST$block == b &
-                                     LIST$lhs %in% lv.nam.efa)
-                    LABEL.group1 <- LIST$label[set.idx]
-                } else {
-                    if("loadings" %in% group.equal) {
-                       fix.to.zero <- FALSE
-                    } else {
-                        # collect labels for this set, if any
-                        set.idx <- which(LIST$op == "=~" &
-                                         LIST$block == b &
-                                         LIST$lhs %in% lv.nam.efa)
-
-                        # user-provided labels (if any)
-                        this.label.set <- LIST$label[set.idx]
-
-                        # same as in reference set?
-                        if(all(nchar(this.label.set) > 0L) &&
-                           all(this.label.set %in% LABEL.group1)) {
-                            fix.to.zero <- FALSE
-                        }
-                    }
-                }
-
-                # 1. echelon pattern
-                nfac <- length(lv.nam.efa)
-                for(f in seq_len(nfac)) {
-                    if(f == 1L) {
-                        next
-                    }
-                    nzero <- (f - 1L)
-                    ind.idx <- which(LIST$op == "=~" &
-                                     LIST$block == b &
-                                     LIST$lhs %in% lv.nam.efa[f])
-                    if(length(ind.idx) < nzero) {
-                        stop("lavaan ERROR: efa factor ", lv.nam.efa[f],
-                             " has not enough indicators for echelon pattern")
-                    }
-
-                    # fix to zero
-                    if(fix.to.zero) {
-                        LIST$free[  ind.idx[seq_len(nzero)]] <- 0L
-                        LIST$ustart[ind.idx[seq_len(nzero)]] <- 0
-                        LIST$user[  ind.idx[seq_len(nzero)]] <- 7L
-                    } else {
-                        LIST$user[  ind.idx[seq_len(nzero)]] <- 77L
-                    }
-                }
-
-                # 2. covariances constrained to zero (only if oblique rotation)
-                if(!orthogonal.efa) {
-                    # skip if user == 1 (user-override!)
-                    cov.idx <- which(LIST$op == "~~" &
-                                     LIST$block == b &
-                                     LIST$user == 0L &
-                                     LIST$lhs %in% lv.nam.efa &
-                                     LIST$rhs %in% lv.nam.efa &
-                                     LIST$lhs != LIST$rhs)
-
-                    # fix to zero
-                    if(fix.to.zero) {
-                        LIST$free[  cov.idx] <- 0L
-                        LIST$ustart[cov.idx] <- 0
-                        LIST$user[  cov.idx] <- 7L
-                    } else {
-                        LIST$user[  cov.idx] <- 77L
-                    }
-                }
-
-            } # sets
-        } # blocks
+        LIST <- lav_partable_efa_constraints(LIST = LIST,
+                                             orthogonal.efa = orthogonal.efa,
+                                             group.equal = group.equal)
     } # auto.efa
 
     # handle user-specified equality constraints

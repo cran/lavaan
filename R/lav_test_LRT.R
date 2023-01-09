@@ -9,6 +9,11 @@
 #     method = "Satorra.Bentler.2001"
 #     method = "Satorra.Bentler.2010"
 #     method = "mean.var.adjusted.PLRT"
+#
+# - 0.6-13: RMSEA.D (also known as 'RDR') is added to the table (unless scaled)
+# - 0.6-13: fix multiple-group UG^2 bug in Satorra.2000 (reported by
+#           Gronneberg, Foldnes and Moss)
+
 
 lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                        scaled.shifted = TRUE,
@@ -16,6 +21,15 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
 
     type <- tolower(type)
     method <- tolower( gsub("[-_\\.]", "", method ) )
+    if(type %in% c("browne", "browne.residual.adf", "browne.residual.nt")) {
+        if(type == "browne") {
+            type <- "browne.residual.adf"
+        }
+        if(!method %in% c("default", "standard")) {
+            stop("lavaan ERROR: method cannot be used if type is browne.residual.adf or browne.residual.nt")
+        }
+        method <- "default"
+    }
 
     # NOTE: if we add additional arguments, it is not the same generic
     # anova() function anymore, and match.call will be screwed up
@@ -52,14 +66,12 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                               function(x) deparse(x))
     }
 
-    ## put them in order (using number of free parameters)
-    #nfreepar <- sapply(mods, function(x) x@optim$npar)
-    #if(any(duplicated(nfreepar))) { ## FIXME: what to do here?
-    #    # what, same number of free parameters?
-    #    # maybe, we need to count number of constraints
-    #    ncon <- sapply(mods, function(x) { nrow(x@Model@con.jac) })
-    #    nfreepar <- nfreepar - ncon
-    #}
+    # TDJ: Add user-supplied h1 model, if it exists
+    if( !is.null(object@external$h1) ) {
+        if(inherits(object@external$h1, "lavaan")) {
+            mods$h1 <- object@external$h1
+        }
+    }
 
     # put them in order (using degrees of freedom)
     ndf <- sapply(mods, function(x) x@test[[1]]$df)
@@ -113,6 +125,9 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
     } else {
         stop("lavaan ERROR: some models (but not all) have scaled test statistics")
     }
+    if(type %in% c("browne.residual.adf", "browne.residual.nt")) {
+        scaled <- FALSE
+    }
 
     # select method
     if(method == "default") {
@@ -153,7 +168,7 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                     "\n\t but no robust test statistics were used;",
                     "\n\t switching to the standard chi-square difference test")
 
-        method = "default"
+        method <- "default"
     }
 
 
@@ -173,6 +188,16 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
     if(type == "chisq") {
         Df <- sapply(mods, function(x) slot(x, "test")[[1]]$df)
         STAT <- sapply(mods, function(x) slot(x, "test")[[1]]$stat)
+    } else if(type == "browne.residual.nt") {
+        TESTlist <- lapply(mods,
+                           function(x) lavTest(x, test = "browne.residual.nt"))
+        Df <- sapply(TESTlist, function(x) x$df)
+        STAT <- sapply(TESTlist, function(x) x$stat)
+    } else if(type == "browne.residual.adf") {
+        TESTlist <- lapply(mods,
+                           function(x) lavTest(x, test = "browne.residual.adf"))
+        Df <- sapply(TESTlist, function(x) x$df)
+        STAT <- sapply(TESTlist, function(x) x$stat)
     } else if(type == "cf") {
         tmp <- lapply(mods, lavTablesFitCf)
         STAT <- unlist(tmp)
@@ -183,14 +208,23 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
 
 
     # difference statistics
-    STAT.delta  <- c(NA, diff(STAT))
+    STAT.delta   <- c(NA, diff(STAT))
     Df.delta     <- c(NA, diff(Df))
+    if(method == "satorra.2000" && scaled.shifted) {
+        a.delta <- b.delta <- rep(as.numeric(NA), length(STAT))
+    }
+    # new in 0.6-13
+    if(!scaled) {
+        RMSEA.delta  <- c(NA, lav_fit_rmsea(X2 = STAT.delta[-1],
+                                            df = Df.delta[-1],
+                                            N = ntotal, G = ngroups))
+    }
 
     # check for negative values in STAT.delta
     # but with a tolerance (0.6-12)!
     if(any(STAT.delta[-1] < -1*.Machine$double.eps^(1/3))) {
         txt <- c("Some restricted models fit better than less ",
-                 "restricted models; either these models are not nested, or",
+                 "restricted models; either these models are not nested, or ",
                  "the less restricted model failed to reach a global optimum.")
         txt <- c(txt, " Smallest difference = ", min(STAT.delta[-1]))
         warning(lav_txt2message(txt))
@@ -235,6 +269,10 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                                                  A.method = A.method)
                 STAT.delta[m+1] <- out$T.delta
                   Df.delta[m+1] <- out$df.delta
+                if(scaled.shifted) {
+                    a.delta[m+1] <- out$a
+                    b.delta[m+1] <- out$b
+                }
             }
         }
     }
@@ -263,15 +301,28 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                           row.names = names(mods),
                           check.names = FALSE)
     } else {
-        val <- data.frame(Df = Df,
-                          AIC = aic,
-                          BIC = bic,
-                          Chisq = STAT,
-                          "Chisq diff" = STAT.delta,
-                          "Df diff" = Df.delta,
-                          "Pr(>Chisq)" = Pvalue.delta,
-                          row.names = names(mods),
-                          check.names = FALSE)
+        if(scaled) {
+            val <- data.frame(Df = Df,
+                              AIC = aic,
+                              BIC = bic,
+                              Chisq = STAT,
+                              "Chisq diff" = STAT.delta,
+                              "Df diff" = Df.delta,
+                              "Pr(>Chisq)" = Pvalue.delta,
+                              row.names = names(mods),
+                              check.names = FALSE)
+        } else {
+            val <- data.frame(Df = Df,
+                              AIC = aic,
+                              BIC = bic,
+                              Chisq = STAT,
+                              "Chisq diff" = STAT.delta,
+                              "RMSEA" = RMSEA.delta,
+                              "Df diff" = Df.delta,
+                              "Pr(>Chisq)" = Pvalue.delta,
+                              row.names = names(mods),
+                              check.names = FALSE)
+        }
     }
 
     # catch Df.delta == 0 cases (reported by Florian Zsok in Zurich)
@@ -299,16 +350,24 @@ lavTestLRT <- function(object, ..., method = "default", A.method = "delta",
                       "function of two standard (not robust) statistics.",
                       sep = "")
             attr(val, "heading") <-
-                paste("Scaled Chi-Squared Difference Test (method = ",
+                paste("\nScaled Chi-Squared Difference Test (method = ",
                       dQuote(method), ")\n\n",
                       lav_txt2message(txt, header = "lavaan NOTE:",
                                            footer = " "), sep = "")
+            if(method == "satorra.2000" && scaled.shifted) {
+                attr(val, "scale") <- a.delta
+                attr(val, "shift") <- b.delta
+            }
         } else {
-            attr(val, "heading") <- "Chi-Squared Difference Test\n"
+            attr(val, "heading") <- "\nChi-Squared Difference Test\n"
         }
+    } else if(type  == "browne.residual.adf") {
+        attr(val, "heading") <- "\nChi-Squared Difference Test based on Browne's residual (ADF) Test\n"
+    } else if(type == "browne.residual.nt") {
+        attr(val, "heading") <- "\nChi-Squared Difference Test based on Browne's residual (NT) Test\n"
     } else if(type == "cf") {
         colnames(val)[c(3,4)] <- c("Cf", "Cf diff")
-        attr(val, "heading") <- "Cf Difference Test\n"
+        attr(val, "heading") <- "\nCf Difference Test\n"
     }
     class(val) <- c("anova", class(val))
 

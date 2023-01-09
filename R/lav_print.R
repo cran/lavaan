@@ -45,36 +45,69 @@ print.lavaan.list <- function(x, ...) {
 
 
 # prints only lower triangle of a symmetric matrix
-print.lavaan.matrix.symmetric <- function(x, ..., nd = 3L) {
+print.lavaan.matrix.symmetric <- function(x, ..., nd = 3L, shift = 0L,
+                                          diag.na.dot = TRUE) {
     # print only lower triangle of a symmetric matrix
     # this function was inspired by the `print.correlation' function
     # in package nlme
     y <- x; y <- unclass(y)
-    ll <- lower.tri(x, diag=TRUE)
-    y[ll] <- format(round(x[ll], digits=nd)); y[!ll] <- ""
-    if (!is.null(colnames(x))) {
+    ll <- lower.tri(x, diag = TRUE)
+    y[ ll] <- format(round(x[ll], digits = nd))
+    y[!ll] <- ""
+    if(diag.na.dot) {
+        # print a "." instead of NA on the main diagonal (eg summary.efaList)
+        diag.idx <- lav_matrix_diag_idx(ncol(x))
+        tmp <- x[diag.idx]
+        if(all(is.na(tmp))) {
+            y[diag.idx] <- paste(strrep(" ", nd + 2L), ".", sep = "")
+        }
+    }
+    if(!is.null(colnames(x))) {
       colnames(y) <- abbreviate(colnames(x), minlength = nd + 3L)
     }
-    print(y, ..., quote = FALSE)
+    if(shift > 0L) {
+        empty.string <- rep(strrep(x = " ", times = shift), times = nrow(x))
+        if(!is.null(rownames(x))) {
+            rownames(y) <- paste(empty.string, rownames(x), sep = "")
+        } else {
+            rownames(y) <- empty.string
+        }
+    }
+    print(y, ..., quote = FALSE, right = TRUE)
     invisible(x)
 }
 
 
-print.lavaan.matrix <- function(x, ..., nd = 3L) {
+print.lavaan.matrix <- function(x, ..., nd = 3L, shift = 0L) {
     y <- unclass(x)
-    if (!is.null(colnames(x))) {
+    if(!is.null(colnames(x))) {
       colnames(y) <- abbreviate(colnames(x), minlength = nd + 3L)
     }
-    print( round(y, nd), ... )
+    if(shift > 0L) {
+        empty.string <- rep(strrep(x = " ", times = shift), times = nrow(x))
+        if(!is.null(rownames(x))) {
+            rownames(y) <- paste(empty.string, rownames(x), sep = "")
+        } else {
+            rownames(y) <- empty.string
+        }
+    }
+    print( round(y, nd), right = TRUE, ... )
     invisible(x)
 }
 
-print.lavaan.vector <- function(x, ..., nd = 3L) {
+print.lavaan.vector <- function(x, ..., nd = 3L, shift = 0L) {
     y <- unclass(x)
     #if(!is.null(names(x))) {
     #    names(y) <- abbreviate(names(x), minlength = nd + 3)
     #}
-    print( round(y, nd), ... )
+    if(shift > 0L) {
+        empty.string <- strrep(x = " ", times = shift)
+        tmp <- format(y, digits = nd, width = 2L + nd)
+        tmp[1] <- paste(empty.string, tmp[1], sep = "")
+        print(tmp, quote = FALSE, ...)
+    } else {
+        print( round(y, nd), right = TRUE, ... )
+    }
     invisible(x)
 }
 
@@ -882,11 +915,19 @@ print.lavaan.summary <- function(x, ..., nd = 3L) {
                 cat("-- DRY RUN with 0 iterations --\n")
             } else if(optim.iterations > 0) {
                 if(optim.converged) {
-                    cat(sprintf("ended normally after %i iterations\n",
-                        optim.iterations))
+                    if(optim.iterations == 1L) {
+                        cat("ended normally after 1 iteration\n")
+                    } else {
+                        cat(sprintf("ended normally after %i iterations\n",
+                            optim.iterations))
+                    }
                 } else {
-                    cat(sprintf("did NOT end normally after %i iterations\n",
-                        optim.iterations))
+                    if(optim.iterations == 1L) {
+                        cat("did NOT end normally after 1 iteration\n")
+                    } else {
+                      cat(sprintf("did NOT end normally after %i iterations\n",
+                            optim.iterations))
+                    }
                     cat("** WARNING ** Estimates below are most likely unreliable\n")
                 }
             } else {
@@ -1050,6 +1091,9 @@ print.lavaan.summary <- function(x, ..., nd = 3L) {
             } else if(rotation$rotation == "oblimin") {
                 c1 <- c(c1, "Oblimin gamma")
                 c2 <- c(c2, rotation$rotation.args$oblimin.gamma)
+            } else if(rotation$rotation == "promax") {
+                c1 <- c(c1, "Promax kappa")
+                c2 <- c(c2, rotation$rotation.args$promax.kappa)
             }
 
             # rotation algorithm
@@ -1153,8 +1197,165 @@ print.lavaan.summary <- function(x, ..., nd = 3L) {
         print.lavaan.fitMeasures(y$fit, nd = nd, add.h0 = FALSE )
     }
 
+    # efa output
+    if(!is.null(y$efa)) {
+
+        # get cutoff, if it is stored as an attribute
+        CT <- attr(y, "cutoff")
+        if(!is.null(CT) && is.numeric(CT)) {
+            cutoff <- CT
+        } else {
+            cutoff <- 0.3
+        }
+        # get dot.cutoff, if it is stored as an attribute
+        DC <- attr(y, "dot.cutoff")
+        if(!is.null(DC) && is.numeric(DC)) {
+            dot.cutoff <- DC
+        } else {
+            dot.cutoff <- 0.1
+        }
+        # get alpha.level, if it is stored as an attribute
+        AL <- attr(y, "alpha.level")
+        if(!is.null(AL) && is.numeric(AL)) {
+            alpha.level <- AL
+        } else {
+            alpha.level <- 0.01
+        }
+
+        for(b in seq_len(y$efa$nblocks)) {
+            if(length(y$efa$block.label) > 0L) {
+                cat(y$efa$block.label[[b]], ":\n\n", sep = "")
+            }
+            if(!is.null(y$efa$lambda[[b]])) {
+                cat("\n")
+                if(!is.null(y$efa$lambda.se[[b]]) && alpha.level > 0) {
+                    cat("Standardized loadings: (* = significant at ",
+                        round(alpha.level * 100),
+                        "% level)\n\n", sep = "")
+                } else {
+                    cat("Standardized loadings:\n\n")
+                }
+                LAMBDA <- unclass(y$efa$lambda[[b]])
+                THETA <- unname(unclass(y$efa$theta[[b]]))
+                lav_print_loadings(LAMBDA, nd = nd, cutoff = cutoff,
+                                   dot.cutoff = dot.cutoff,
+                                   alpha.level = alpha.level,
+                                   resvar = THETA, # diag elements only
+                                   x.se = y$efa$lambda.se[[b]])
+            }
+
+            if(!is.null(y$efa$sumsq.table[[b]])) {
+                cat("\n")
+                print(y$efa$sumsq.table[[b]], nd = nd)
+            }
+
+            # factor correlations:
+            if( !y$efa$orthogonal && !is.null(y$efa$psi[[b]]) &&
+                ncol(y$efa$psi[[b]]) > 1L ) {
+                cat("\n")
+                if(!is.null(y$efa$psi.se[[b]]) && alpha.level > 0) {
+                    cat("Factor correlations: (* = significant at ",
+                        round(alpha.level * 100),
+                        "% level)\n\n", sep = "")
+                } else {
+                    cat("Factor correlations:\n\n")
+                }
+                lav_print_psi(y$efa$psi[[b]], nd = nd,
+                              alpha.level = alpha.level,
+                              x.se = y$efa$psi.se[[b]])
+            }
+
+            # factor score determinacy (for regression scores only!)
+            if( !is.null(y$efa$fs.determinacy[[b]]) ) {
+                cat("\n")
+                cat("Correlation regression factor scores and factors (determinacy):\n\n")
+                print(y$efa$fs.determinacy[[b]], nd = nd)
+                cat("\n")
+                cat("R2 regression factor scores (= squared correlations):\n\n")
+                tmp <- y$efa$fs.determinacy[[b]]
+                tmp2 <- tmp * tmp
+                class(tmp2) <- c("lavaan.vector", "numeric")
+                print(tmp2, nd = nd)
+            }
+
+            # lambda.structure
+            if(!is.null(y$efa$lambda.structure[[b]])) {
+                cat("\n")
+                cat("Standardized structure (= LAMBDA %*% PSI):\n\n")
+                print(y$efa$lambda.structure[[b]], nd = nd)
+            }
+
+            # standard errors lambda
+            if(!is.null(y$efa$theta.se[[b]])) { # we check for theta.se
+                                                # as lambda.se is needed for '*'
+                cat("\n")
+                cat("Standard errors standardized loadings:\n\n")
+                print(y$efa$lambda.se[[b]], nd = nd)
+            }
+
+            # z-statistics lambda
+            if(!is.null(y$efa$lambda.zstat[[b]])) {
+                cat("\n")
+                cat("Z-statistics standardized loadings:\n\n")
+                print(y$efa$lambda.zstat[[b]], nd = nd)
+            }
+
+            # pvalues lambda
+            if(!is.null(y$efa$lambda.pvalue[[b]])) {
+                cat("\n")
+                cat("P-values standardized loadings:\n\n")
+                print(y$efa$lambda.pvalue[[b]], nd = nd)
+            }
+
+            # standard errors theta
+            if(!is.null(y$efa$theta.se[[b]])) {
+                cat("\n")
+                cat("Standard errors unique variances:\n\n")
+                print(y$efa$theta.se[[b]], nd = nd)
+            }
+
+            # z-statistics theta
+            if(!is.null(y$efa$theta.zstat[[b]])) {
+                cat("\n")
+                cat("Z-statistics unique variances:\n\n")
+                print(y$efa$theta.zstat[[b]], nd = nd)
+            }
+
+            # pvalues theta
+            if(!is.null(y$efa$theta.pvalue[[b]])) {
+                cat("\n")
+                cat("P-values unique variances:\n\n")
+                print(y$efa$theta.pvalue[[b]], nd = nd)
+            }
+
+            # standard errors psi
+            if(!is.null(y$efa$theta.se[[b]])) { # we check for theta.se
+                                                # as psi.se is needed for '*'
+                cat("\n")
+                cat("Standard errors factor correlations:\n\n")
+                print(y$efa$psi.se[[b]], nd = nd)
+            }
+
+            # z-statistics psi
+            if(!is.null(y$efa$psi.zstat[[b]])) {
+                cat("\n")
+                cat("Z-statistics factor correlations:\n\n")
+                print(y$efa$psi.zstat[[b]], nd = nd)
+            }
+
+            # pvalues psi
+            if(!is.null(y$efa$psi.pvalue[[b]])) {
+                cat("\n")
+                cat("P-values factor correlations:\n\n")
+                print(y$efa$psi.pvalue[[b]], nd = nd)
+            }
+
+        } # blocks
+        cat("\n")
+    } # efa
+
     # parameter table
-    if(!is.null(y$pe)) {
+    if(!is.null(y$pe) && is.null(y$efa)) {
         PE <- y$pe
         class(PE) <- c("lavaan.parameterEstimates", "lavaan.data.frame",
                        "data.frame")
@@ -1171,3 +1372,89 @@ print.lavaan.summary <- function(x, ..., nd = 3L) {
 
     invisible(y)
 }
+
+# helper function to print the loading matrix, masking small loadings
+lav_print_loadings <- function(x, nd = 3L, cutoff = 0.3, dot.cutoff = 0.1,
+                               alpha.level = 0.01, resvar = NULL, x.se = NULL) {
+
+    # unclass
+    y <- unclass(x)
+
+    # round, and create a character matriy
+    y <- format(round(y, nd), width = 3L + nd, justify = "right")
+
+    # right-align column names
+    colnames(y)  <- format(colnames(y), width = 3L + nd, justify = "right")
+
+    # create dot/empty string
+    dot.string   <- format(".", width = 3L + nd, justify = "right")
+    empty.string <- format(" ", width = 3L + nd)
+
+    # print a 'dot' if dot.cutoff < |loading| < cutoff
+    if(dot.cutoff < cutoff) {
+        y[abs(x) < cutoff & abs(x) > dot.cutoff] <- dot.string
+    }
+
+    # print nothing if |loading| < dot.cutoff
+    y[abs(x) < min(dot.cutoff, cutoff)] <- empty.string
+
+    # add 'star' for significant loadings (if provided) using alpha = 0.01
+    if(!is.null(x.se) && !any(is.na(x.se))) {
+        colNAMES <- colnames(y)
+        rowNAMES <- rownames(y)
+        x.se[ x.se < sqrt(.Machine$double.eps)] <- 1 # to avoid NA
+        zstat <- x/x.se
+        z.cutoff <- qnorm(1 - (alpha.level/2))
+        zstat.string <- ifelse(abs(zstat) > z.cutoff, "*", " ")
+        y <- matrix(paste(y, zstat.string, sep = ""), nrow(y), ncol(y))
+        colnames(y) <- colNAMES
+        rownames(y) <- rowNAMES
+    }
+
+    # add resvar
+    if(!is.null(resvar)) {
+        NAMES <- colnames(y)
+        y <- cbind(y, format(round(cbind(resvar, 1 - resvar), nd),
+                             width = 12L + nd, justify = "right"))
+        resvar.names <- format(c("unique.var", "communalities"),
+                               width = 12L + nd, justify = "right")
+        colnames(y) <- c(NAMES, resvar.names)
+    }
+
+    # print
+    print(y, quote = FALSE)
+}
+
+# helper function to print the psi matrix, showing signif stars
+lav_print_psi <- function(x, nd = 3L, alpha.level = 0.01, x.se = NULL) {
+
+    # unclass
+    y <- unclass(x)
+
+    # round, and create a character matriy
+    y <- format(round(y, nd), width = 3L + nd, justify = "right")
+
+    # right-align column names
+    colnames(y)  <- format(colnames(y), width = 3L + nd, justify = "right")
+
+    # add 'star' for significant loadings (if provided) using alpha = 0.01
+    if(!is.null(x.se) && !any(is.na(x.se))) {
+        colNAMES <- colnames(y)
+        rowNAMES <- rownames(y)
+        x.se[ x.se < sqrt(.Machine$double.eps)] <- 1 # to avoid NA
+        zstat <- x/x.se
+        z.cutoff <- qnorm(1 - (alpha.level/2))
+        zstat.string <- ifelse(abs(zstat) > z.cutoff, "*", " ")
+        y <- matrix(paste(y, zstat.string, sep = ""), nrow(y), ncol(y))
+        colnames(y) <- colNAMES
+        rownames(y) <- rowNAMES
+    }
+
+    # remove upper part
+    ll <- upper.tri(x, diag = FALSE)
+    y[ll] <- ""
+
+    # print
+    print(y, quote = FALSE)
+}
+

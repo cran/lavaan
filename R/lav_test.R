@@ -1,4 +1,194 @@
-lav_model_test <- function(lavmodel       = NULL,
+# chi-square test statistic:
+# comparing the current model versus the saturated/unrestricted model
+
+lavTest <- function(lavobject, test = "standard",
+                    scaled.test = "standard",
+                    output = "list", drop.list.single = TRUE) {
+
+    # check output
+    if(!output %in% c("list", "text")) {
+        stop("lavaan ERROR: output should be list or text")
+    }
+
+    # extract 'test' slot
+    TEST <- lavobject@test
+
+    # which test?
+    if(!missing(test)) {
+
+        # check 'test'
+        if(!is.character(test)) {
+            stop("lavaan ERROR: test should be a character string.")
+        } else {
+            test <- lav_test_rename(test, check = TRUE)
+        }
+
+        # check scaled.test
+        if(!missing(scaled.test)) {
+            if(!is.character(scaled.test)) {
+                stop("lavaan ERROR: scaled.test should be a character string.")
+            } else {
+                scaled.test <- lav_test_rename(scaled.test, check = TRUE)
+            }
+
+            # merge
+            test <- unique(c(test, scaled.test))
+
+            # but "standard" must always be first
+            standard.idx <- which(test == "standard")
+            if(length(standard.idx) > 0L && standard.idx != 1L) {
+                test <- c("standard", test[-standard.idx])
+            }
+        }
+
+        if(test[1] == "none") {
+            return(list())
+        } else if(any(test %in% c("bootstrap", "bollen.stine"))) {
+            stop("lavaan ERROR: please use bootstrapLavaan() to obtain a bootstrap based test statistic.")
+        }
+
+        # check if we already have it:
+        if(all(test %in% names(TEST))) {
+            info.attr <- attr(TEST, "info")
+            test.idx <- which(names(TEST) %in% test)
+            TEST <- TEST[test.idx]
+            attr(TEST, "info") <- info.attr
+        } else {
+            # redo ALL of them, even if already have some in TEST
+            # later, we will allow to also change the options (like information)
+            # and this should be reflected in the 'info' attribute
+
+            # fill-in test in Options slot
+            lavobject@Options$test <- test
+
+            # fill-in scaled.test in Options slot
+            lavobject@Options$scaled.test <- scaled.test
+
+            # get requested test statistics
+            TEST <- lav_model_test(lavobject = lavobject)
+        }
+    }
+
+    if(output == "list") {
+        # remove 'info' attribute
+        attr(TEST, "info") <- NULL
+
+        # select only those that were requested (eg remove standard)
+        test.idx <- which(names(TEST) %in% test)
+        TEST <- TEST[test.idx]
+
+        # if only 1 test, drop outer list
+        if(length(TEST) == 1L && drop.list.single) {
+            TEST <- TEST[[1]]
+        }
+
+        return(TEST)
+    } else {
+        lav_test_print(TEST)
+    }
+
+    invisible(TEST)
+}
+
+# allow for 'flexible' names for the test statistics
+# 0.6-13: if multiple names, order them in such a way
+#         that the 'scaled' variants appear after the others
+lav_test_rename <- function(test, check = FALSE) {
+
+    test <- tolower(test)
+
+    if(length(target.idx <- which(test %in%
+        c("standard", "chisq", "chi", "chi-square", "chi.square"))) > 0L) {
+        test[target.idx] <- "standard"
+    }
+    if(length(target.idx <- which(test %in%
+        c("satorra", "sb", "satorra.bentler", "satorra-bentler",
+          "m.adjusted", "m", "mean.adjusted", "mean-adjusted"))) > 0L) {
+        test[target.idx] <- "satorra.bentler"
+    }
+    if(length(target.idx <- which(test %in%
+        c("yuan", "yb", "yuan.bentler", "yuan-bentler"))) > 0L) {
+        test[target.idx] <- "yuan.bentler"
+    }
+    if(length(target.idx <- which(test %in%
+        c("yuan.bentler.mplus", "yuan-bentler.mplus",
+          "yuan-bentler-mplus"))) > 0L) {
+        test[target.idx] <- "yuan.bentler.mplus"
+    }
+    if(length(target.idx <- which(test %in%
+        c("mean.var.adjusted", "mean-var-adjusted", "mv", "second.order",
+          "satterthwaite", "mv.adjusted"))) > 0L) {
+        test[target.idx] <- "mean.var.adjusted"
+    }
+    if(length(target.idx <- which(test %in%
+        c("mplus6", "scale.shift", "scaled.shifted",
+          "scaled-shifted"))) > 0L) {
+        test[target.idx] <- "scaled.shifted"
+    }
+    if(length(target.idx <- which(test %in%
+        c("bootstrap", "boot", "bollen.stine", "bollen-stine"))) > 0L) {
+        test[target.idx] <- "bollen.stine"
+    }
+    if(length(target.idx <- which(test %in%
+        c("browne", "residual", "residuals", "browne.residual",
+          "browne.residuals", "residual-based", "residual.based",
+          "browne.residuals.adf", "browne.residual.adf"))) > 0L) {
+        test[target.idx] <- "browne.residual.adf"
+    }
+    if(length(target.idx <- which(test %in%
+        c("browne.residuals.nt", "browne.residual.nt"))) > 0L) {
+        test[target.idx] <- "browne.residual.nt"
+    }
+
+    # check?
+    if(check) {
+
+        # report unknown values
+        bad.idx <- which(!test %in% c("standard", "none", "default",
+                                      "satorra.bentler",
+                                      "yuan.bentler",
+                                      "yuan.bentler.mplus",
+                                      "mean.adjusted",
+                                      "mean.var.adjusted",
+                                      "scaled.shifted",
+                                      "bollen.stine",
+                                      "browne.residual.nt",
+                                      "browne.residual.adf"))
+        if(length(bad.idx) > 0L) {
+            stop("lavaan ERROR: invalid value(s) in test= argument:\n\t\t",
+                 paste(test[bad.idx], collapse = " "), "\n")
+        }
+
+        # if 'default' is included, length(test) must be 1
+        if(length(test) > 1L && "default" %in% test) {
+            stop("lavaan ERROR: if test= argument contains \"default\", it cannot contain additional elements")
+        }
+
+        # if 'none' is included, length(test) must be 1
+        if(length(test) > 1L && "none" %in% test) {
+            stop("lavaan ERROR: if test= argument contains \"none\", it cannot contain additional elements")
+        }
+
+    }
+
+    # reorder: first nonscaled, then scaled
+    nonscaled.idx <- which(test %in% c("standard", "none", "default",
+                                    "bollen.stine",
+                                    "browne.residual.nt",
+                                    "browne.residual.adf"))
+    scaled.idx <- which(test %in% c("satorra.bentler",
+                                    "yuan.bentler",
+                                    "yuan.bentler.mplus",
+                                    "mean.adjusted",
+                                    "mean.var.adjusted",
+                                    "scaled.shifted"))
+    test <- c(test[nonscaled.idx], test[scaled.idx])
+
+    test
+}
+
+lav_model_test <- function(lavobject      = NULL,
+                           lavmodel       = NULL,
                            lavpartable    = NULL,
                            lavpta         = NULL,
                            lavsamplestats = NULL,
@@ -12,8 +202,32 @@ lav_model_test <- function(lavmodel       = NULL,
                            lavloglik      = NULL,
                            test.UGamma.eigvals = FALSE) {
 
+    # lavobject?
+    if(!is.null(lavobject)) {
+        lavmodel       <- lavobject@Model
+        lavpartable    <- lavobject@ParTable
+        lavpta         <- lavobject@pta
+        lavsamplestats <- lavobject@SampleStats
+        lavimplied     <- lavobject@implied
+        lavh1          <- lavobject@h1
+        lavoptions     <- lavobject@Options
+        x              <- lavobject@optim$x
+            fx                   <- lavobject@optim[["fx"]]
+            fx.group             <- lavobject@optim[["fx.group"]]
+            attr(fx, "fx.group") <- fx.group
+            attr(x, "fx")        <- fx
+        VCOV           <- lavobject@vcov$vcov
+        lavcache       <- lavobject@Cache
+        lavdata        <- lavobject@Data
+        lavloglik      <- lavobject@loglik
+    }
 
-    test <- lavoptions$test
+    # backwards compatibility
+    if(is.null(lavoptions$scaled.test)) {
+        lavoptions$scaled.test <- "standard"
+    }
+
+    test <- test.orig <- lavoptions$test
 
     TEST <- list()
 
@@ -30,6 +244,7 @@ lav_model_test <- function(lavmodel       = NULL,
             df <- df + neq
         }
     } else if(lavmodel@ceq.simple.only) {
+        # needed??
         ndat <- lav_partable_ndat(lavpartable)
         npar <- max(lavpartable$free)
         df <- ndat - npar
@@ -241,11 +456,41 @@ lav_model_test <- function(lavmodel       = NULL,
                         " not available for estimator PML")
             }
 
+        } else if(this.test %in% c("browne.residual.adf",
+                                   "browne.residual.nt")) {
+
+            ADF <- TRUE
+            if(this.test == "browne.residual.nt") {
+                ADF <- FALSE
+            }
+            out <- lav_test_browne(lavobject      = NULL,
+                                   lavdata        = lavdata,
+                                   lavsamplestats = lavsamplestats,
+                                   lavmodel       = lavmodel,
+                                   lavpartable    = lavpartable,
+                                   lavoptions     = lavoptions,
+                                   ADF            = ADF)
+            TEST[[this.test]] <- out
 
 
         } else if(this.test %in% c("satorra.bentler",
                                    "mean.var.adjusted",
                                    "scaled.shifted")) {
+
+            # which test statistic shall we scale?
+            unscaled.TEST <- TEST[[1]]
+            if(lavoptions$scaled.test != "standard") {
+                idx <- which(test.orig == lavoptions$scaled.test)
+                if(length(idx) > 0L) {
+                    unscaled.TEST <- TEST[[idx[1]]]
+                } else {
+                    warning("lavaan WARNING: scaled.test [",
+                            lavoptions$scaled.test,
+                            "] not found among available (non scaled) tests: ",
+                            paste(test, collapse = " "), "\n\t\t",
+                            "Using standard test instead.")
+                }
+            }
 
             out <- lav_test_satorra_bentler(lavobject = NULL,
                              lavsamplestats = lavsamplestats,
@@ -253,19 +498,35 @@ lav_model_test <- function(lavmodel       = NULL,
                              lavimplied     = lavimplied,
                              lavdata        = lavdata,
                              lavoptions     = lavoptions,
-                             TEST.unscaled  = TEST[[1]],
+                             TEST.unscaled  = unscaled.TEST,
                              E.inv          = attr(VCOV, "E.inv"),
                              Delta          = attr(VCOV, "Delta"),
                              WLS.V          = attr(VCOV, "WLS.V"),
                              Gamma          = attr(VCOV, "Gamma"),
                              test           = this.test,
                              mimic          = lavoptions$mimic,
-                             method         = "ABA",
+                             method         = "original", # since 0.6-13
                              return.ugamma  = FALSE)
             TEST[[this.test]] <- out[[this.test]]
 
         } else if(this.test %in% c("yuan.bentler",
                                    "yuan.bentler.mplus")) {
+
+            # which test statistic shall we scale?
+            unscaled.TEST <- TEST[[1]]
+            if(lavoptions$scaled.test != "standard") {
+                idx <- which(test.orig == lavoptions$scaled.test)
+                if(length(idx) > 0L) {
+                    unscaled.TEST <- TEST[[idx[1]]]
+                } else {
+                    warning("lavaan WARNING: scaled.test [",
+                            lavoptions$scaled.test,
+                            "] not found among available (non scaled) tests: ",
+                            paste(test, collapse = " "), "\n\t\t",
+                            "Using standard test instead.")
+                }
+            }
+
 
             out <- lav_test_yuan_bentler(lavobject = NULL,
                              lavsamplestats = lavsamplestats,
@@ -274,7 +535,7 @@ lav_model_test <- function(lavmodel       = NULL,
                              lavimplied     = lavimplied,
                              lavh1          = lavh1,
                              lavoptions     = lavoptions,
-                             TEST.unscaled  = TEST[[1]],
+                             TEST.unscaled  = unscaled.TEST,
                              E.inv          = attr(VCOV, "E.inv"),
                              B0.group       = attr(VCOV, "B0.group"),
                              test           = this.test,
@@ -305,19 +566,25 @@ lav_model_test <- function(lavmodel       = NULL,
                                            verbose         = lavoptions$verbose,
                                            type            = boot.type,
                                            FUN             = "test")
-                                           #warn            = -1L)
 
                 # new in 0.6-12: always warn for failed and nonadmissible
-                nfailed <- length(attr(BOOT.TEST, "error.idx"))
-                if(!is.null(nfailed) && nfailed > 0L && lavoptions$warn) {
+                error.idx <- attr(BOOT.TEST, "error.idx")
+                nfailed <- length(attr(BOOT.TEST, "error.idx")) # zero if NULL
+                if(nfailed > 0L && lavoptions$warn) {
                     warning("lavaan WARNING: ", nfailed,
                             " bootstrap runs failed or did not converge.")
                 }
 
-                notok <- attr(BOOT.TEST, "nonadmissible")
-                if(!is.null(notok) && notok > 0L && lavoptions$warn) {
+                notok <- length(attr(BOOT.TEST, "nonadmissible")) # zero if NULL
+                if(notok > 0L && lavoptions$warn) {
                     warning("lavaan WARNING: ", notok,
                         " bootstrap runs resulted in nonadmissible solutions.")
+                }
+
+                if(length(error.idx) > 0L) {
+                    # new in 0.6-13: we must still remove them!
+                    BOOT.TEST <- BOOT.TEST[-error.idx,,drop = FALSE]
+                    # this also drops the attributes
                 }
 
                 BOOT.TEST <- drop(BOOT.TEST)

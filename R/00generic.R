@@ -1,11 +1,44 @@
 # for blavaan
 # TDJ: add "..." to make the generic actually generic, for lavaan.mi objects
+
+# S3 generic for S3 dispatch
+fitMeasures <- function(object, fit.measures = "all", baseline.model = NULL,
+                        fm.args = list(standard.test     = "default",
+                                       scaled.test       = "default",
+                                       rmsea.ci.level    = 0.90,
+                                       rmsea.close.h0    = 0.05,
+                                       rmsea.notclose.h0 = 0.08),
+                        output = "vector", ...) {
+    UseMethod("fitMeasures", object)
+}
+fitmeasures <- function(object, fit.measures = "all", baseline.model = NULL,
+                        fm.args = list(standard.test     = "default",
+                                       scaled.test       = "default",
+                                       rmsea.ci.level    = 0.90,
+                                       rmsea.close.h0    = 0.05,
+                                       rmsea.notclose.h0 = 0.08),
+                        output = "vector", ...) {
+    UseMethod("fitmeasures", object)
+}
+
+
+# S4 generic for S4 dispatch
 setGeneric("fitMeasures",
     function(object, fit.measures = "all", baseline.model = NULL,
+             fm.args = list(standard.test     = "default",
+                            scaled.test       = "default",
+                            rmsea.ci.level    = 0.90,
+                            rmsea.close.h0    = 0.05,
+                            rmsea.notclose.h0 = 0.08),
              output = "vector", ...)
     standardGeneric("fitMeasures"))
 setGeneric("fitmeasures",
     function(object, fit.measures = "all", baseline.model = NULL,
+             fm.args = list(standard.test     = "default",
+                            scaled.test       = "default",
+                            rmsea.ci.level    = 0.90,
+                            rmsea.close.h0    = 0.05,
+                            rmsea.notclose.h0 = 0.08),
              output = "vector", ...)
     standardGeneric("fitmeasures"))
 
@@ -30,3 +63,4 @@ lavTech <- function(object, what                   = "free",
                             drop.list.single.group = FALSE) {
     UseMethod("lavTech", object)
 }
+

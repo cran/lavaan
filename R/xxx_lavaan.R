@@ -73,7 +73,50 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         if(inherits(data, "data.frame")) {
             # just in case it is not a traditional data.frame
             data <- as.data.frame(data)
+
+        } else if (inherits(data, "lavMoments")) {
+          # This object must contain summary statistics
+          # e.g., created by lavaan.mi::poolSat
+
+          # set required-data arguments
+          if ("sample.cov" %in% names(data)) {
+            sample.cov  <- data$sample.cov
+          } else stop("When data= is of class lavMoments, it must contain sample.cov")
+
+          if ("sample.nobs" %in% names(data)) {
+            sample.nobs <- data$sample.nobs
+          } else stop("When data= is of class lavMoments, it must contain sample.nobs")
+
+          # check for optional-data arguments
+          if ("sample.mean" %in% names(data)) sample.mean <- data$sample.mean
+          if ("sample.th"   %in% names(data)) sample.th   <- data$sample.th
+          if ("NACOV"       %in% names(data)) NACOV       <- data$NACOV
+          if ("WLS.V"       %in% names(data)) WLS.V       <- data$WLS.V
+
+          # set other args not included in dotdotdot
+          if (length(data$lavOptions)) {
+            newdots <- setdiff(names(data$lavOptions), names(dotdotdot))
+            if (length(newdots)) {
+              for (dd in newdots) dotdotdot[[dd]] <- data$lavOptions[[dd]]
+            }
+          }
+
+          #FIXME: Should WLS.V be an I(dentity) matrix when ULS is requested?
+          #       Unused for point estimates, but still used to scale/shift test
+          # if (!is.null(dotdotdot$estimator)) {
+          #   if (grepl(pattern = "ULS", x = toupper(dotdotdot$estimator[1L]) ) &&
+          #       !is.null(WLS.V)) {
+          #     ## set to diagonal
+          #     if (is.list(WLS.V)) {
+          #       WLS.V <- lapply(WLS.V, function(w) {diag(w) <- 1 ; return(w) } )
+          #     } else diag(WLS.V) <- 1
+          #   }
+          # }
+
+          # get rid of data= argument
+          data <- NULL
         }
+
         if(is.function(data)) {
             stop("lavaan ERROR: data is a function; it should be a data.frame")
         }
@@ -473,8 +516,15 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         opt <- modifyList(opt, dotdotdot)
 
         # no data?
-        if(is.null(data) && is.null(sample.cov)) {
+        if(is.null(slotData) && is.null(data) && is.null(sample.cov)) {
             opt$bounds <- FALSE
+        }
+
+        # only sample moments?
+        if(!is.null(slotData) && !slotData@data.type == "full") {
+            opt$missing <- "listwise"
+        } else if(is.null(slotData) && is.null(data)) {
+            opt$missing <- "listwise"
         }
 
         # categorical mode?
@@ -501,6 +551,9 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             if(any(sapply(data[, OV.names.y], inherits, "ordered")) ) {
                 opt$.categorical <- TRUE
             }
+        }
+        if(tolower(opt$estimator) == "catml") {
+            opt$.categorical <- FALSE
         }
 
         # clustered?
@@ -650,6 +703,12 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         }
         # more needed?
     }
+    # sanity check
+    if(!is.null(slotParTable) || inherits(model, "lavaan")) {
+        if(ngroups != lavdata@ngroups) {
+            stop("lavaan ERROR: mismatch between number of groups in data, and number of groups in model.")
+        }
+    }
     timing$Data <- (proc.time()[3] - start.time)
     start.time <- proc.time()[3]
     if(lavoptions$verbose) {
@@ -698,10 +757,18 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         #    tmp <- vnames(FLAT, type = "ov.x", ov.x.fatal = TRUE)
         #}
 
+        if(lavoptions$estimator == "catML") {
+            lavoptions$meanstructure <- FALSE
+            DataOV <- lavdata@ov
+            DataOV$type <- rep("numeric", length(DataOV$type))
+        } else {
+            DataOV <- lavdata@ov
+        }
+
         lavpartable <-
             lavaanify(model            = FLAT,
                       constraints      = constraints,
-                      varTable         = lavdata@ov,
+                      varTable         = DataOV,
                       ngroups          = lavdata@ngroups,
 
                       meanstructure    = lavoptions$meanstructure,
@@ -714,6 +781,7 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                       conditional.x    = lavoptions$conditional.x,
                       fixed.x          = lavoptions$fixed.x,
                       std.lv           = lavoptions$std.lv,
+                      correlation      = lavoptions$correlation,
                       effect.coding    = lavoptions$effect.coding,
                       ceq.simple       = lavoptions$ceq.simple,
                       parameterization = lavoptions$parameterization,
@@ -1316,8 +1384,17 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
             cat("lavoptim           ... start:\n")
         }
 
+        # non-iterative methods (fabin, ...)
+        if(lavoptions$optim.method == "noniter") {
+            x <- try(lav_optim_noniter(lavmodel       = lavmodel,
+                                       lavsamplestats = lavsamplestats,
+                                       lavdata        = lavdata,
+                                       lavpartable    = lavpartable,
+                                       lavpta         = lavpta,
+                                       lavoptions     = lavoptions),
+                     silent = TRUE)
         # EM for multilevel models
-        if(lavoptions$optim.method == "em") {
+        } else if(lavoptions$optim.method == "em") {
             # multilevel only for now
             stopifnot(lavdata@nlevels > 1L)
             x <- try(lav_mvnorm_cluster_em_h0(lavsamplestats = lavsamplestats,
@@ -1334,11 +1411,6 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
         # Gauss-Newton
         } else if(lavoptions$optim.method == "gn") {
             # only tested for DLS (for now)
-            #if(lavoptions$estimator != "DLS") {
-            #    stop("lavaan ERROR: optim.method = ", dQuote("gn"),
-            #         " is only available for estimator = ", dQuote("DLS"),
-            #         " (for now).")
-            #}
             x <- try(lav_optim_gn(lavmodel       = lavmodel,
                                   lavsamplestats = lavsamplestats,
                                   lavdata        = lavdata,
@@ -1938,7 +2010,19 @@ lavaan <- function(# user-specified model: can be syntax, parameter Table, ...
                   external     = list()               # empty list
                  )
 
-
+    # if model.type = "efa", add standardized solution to partable
+    if( (.hasSlot(lavmodel, "nefa")) && (lavmodel@nefa > 0L)) {
+        if(lavoptions$verbose) {
+            cat("computing standardized solution ... ")
+        }
+        STD <- standardizedSolution(lavaan, remove.eq = FALSE,
+                                    remove.ineq = FALSE, remove.def = FALSE)
+        if(lavoptions$verbose) {
+            cat(" done.\n")
+        }
+        lavaan@ParTable$est.std <- STD$est.std
+        lavaan@ParTable$se.std  <- STD$se
+    }
 
     # post-fitting check of parameters
     if(!is.null(lavoptions$check.post) && lavoptions$check.post &&

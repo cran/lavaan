@@ -1,0 +1,119 @@
+# EFA: exploratory factor analysis
+#
+# EFA is implemented as a special version of ESEM
+# - it is therefore a wrapper around the lavaan() function to simplify
+#   the input
+# - a lavaan model is generated with a single 'block' that can be rotated
+# - the 'default' output produces output that is more in line with traditional
+#   EFA software (in R) like factanal() and fa() from the psych package
+
+# YR 20 Sept 2022 - first version
+
+efa <- function(data           = NULL,
+                nfactors       = 1L,
+                sample.cov     = NULL,
+                sample.nobs    = NULL,
+                rotation       = "geomin",
+                rotation.args  = list(),
+                ov.names       = names(data),
+                bounds         = "pos.var",
+                ...,
+                output         = "efa") {
+
+    # handle dotdotdot
+    dotdotdot <- list(...)
+
+    # twolevel?
+    twolevel.flag <- !is.null(dotdotdot$cluster)
+
+    # check for unallowed arguments
+    if(!is.null(dotdotdot$group)) {
+        stop("lavaan ERROR: efa has no support for multiple groups (for now)")
+    }
+
+    # handle ov.names
+    if(!is.null(data) && inherits(data, "data.frame")) {
+        if(length(ov.names) > 0L) {
+            if(twolevel.flag) {
+                data <- data[, c(ov.names, dotdotdot$cluster)]
+            } else {
+                data <- data[, ov.names, drop = FALSE]
+            }
+        } else {
+            ov.names <- names(data)
+        }
+    }
+
+    # check nfactors
+    if(any(nfactors < 1L)) {
+        stop("lavaan ERROR: nfactors must be greater than zero.")
+    } else {
+        # check for maximum number of factors
+        # Fixme: can we do this more efficiently? also holds for categorical?
+        nvar <- length(ov.names)
+        p.star <- nvar * (nvar + 1)/2
+        nfac.max <- 0L
+        for(nfac in seq_len(nvar)) {
+            # compute number of free parameters
+            npar <- nfac*nvar + nfac*(nfac+1L)/2 + nvar - nfac^2
+            if(npar > p.star) {
+                nfac.max <- nfac - 1L
+                break
+            }
+        }
+        if(any(nfactors > nfac.max)) {
+            stop("lavaan ERROR: when nvar = ", nvar,
+                 " the maximum number of factors is ", nfac.max, sep = "")
+        }
+    }
+
+    # output
+    output <- tolower(output)
+    if(!output %in% c("lavaan", "efa")) {
+        stop("lavaan ERROR: output= must be either \"lavaan\" or \"efa\"")
+    }
+    if(output == "lavaan" && length(nfactors) > 1L) {
+        stop("lavaan ERROR: when output = \"lavaan\", nfactors must be a single (integer) number.")
+    }
+
+    # fit models
+    nfits <- length(nfactors)
+    out <- vector("list", length = nfits)
+    for(f in seq_len(nfits)) {
+        # generate model syntax
+        model.syntax <- lav_syntax_efa(ov.names = ov.names,
+                                       nfactors = nfactors[f],
+                                       twolevel = twolevel.flag)
+        # call lavaan (using sem())
+        FIT <- do.call("sem",
+                       args = c(list(model         = model.syntax,
+                                     data          = data,
+                                     sample.cov    = sample.cov,
+                                     sample.nobs   = sample.nobs,
+                                     rotation      = rotation,
+                                     rotation.args = rotation.args,
+                                     bounds        = bounds),
+                                dotdotdot))
+
+        if(output == "efa") {
+            FIT@Options$model.type <- "efa"
+        }
+
+        out[[f]] <- FIT
+    }
+
+    # class
+    if(nfits == 1L && output == "lavaan") {
+        out <- out[[1]]
+    } else {
+        names(out) <- paste0("nf", nfactors)
+        # add loadings element to the end of the list
+        # so we an use the non-generic but useful loadings() function
+        # from the stats package
+        out$loadings <- lav_efa_get_loadings(out)
+        class(out) <- c("efaList", "list")
+    }
+
+    out
+}
+

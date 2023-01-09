@@ -7,9 +7,19 @@
 # - the result is a S3 class lavaan.summary
 # - the actual printing is done by print.lavaan.summary (see lav_print.R)
 
+# YR 26 July 2022: add fm.args= argument to change the way (some) fit measures
+#                  are computed
+# YR 24 Sept 2022: add efa= argument
+
 # create summary of a lavaan object
 lav_object_summary <- function(object, header       = TRUE,
                                        fit.measures = FALSE,
+                                       fm.args      =
+                                           list(standard.test     = "default",
+                                                scaled.test       = "default",
+                                                rmsea.ci.level       = 0.90,
+                                                rmsea.h0.closefit    = 0.05,
+                                                rmsea.h0.notclosefit = 0.08),
                                        estimates    = TRUE,
                                        ci           = FALSE,
                                        fmi          = FALSE,
@@ -19,6 +29,18 @@ lav_object_summary <- function(object, header       = TRUE,
                                        cov.std      = TRUE,
                                        rsquare      = FALSE,
                                        std.nox      = FALSE,
+                                       efa          = FALSE,
+                                       efa.args     =
+                                           list(lambda           = TRUE,
+                                                theta            = TRUE,
+                                                psi              = TRUE,
+                                                eigenvalues      = TRUE,
+                                                sumsq.table      = TRUE,
+                                                lambda.structure = FALSE,
+                                                fs.determinacy   = FALSE,
+                                                se               = FALSE,
+                                                zstat            = FALSE,
+                                                pvalue           = FALSE),
                                        modindices   = FALSE) {
 
     # return a list with the main ingredients
@@ -35,8 +57,12 @@ lav_object_summary <- function(object, header       = TRUE,
     if(header) {
 
         # 1. collect header information
-        res$header <- list(lavaan.version   =
-                               packageDescription("lavaan", fields="Version"),
+        if(.hasSlot(object, "version")) {
+            VERSION <- object@version
+        } else {
+            VERSION <- "pre 0.6"
+        }
+        res$header <- list(lavaan.version   = VERSION,
                            sam.approach     = (.hasSlot(object, "internal") &&
                                        !is.null(object@internal$sam.method)),
                            optim.method     = object@Options$optim.method,
@@ -119,6 +145,11 @@ lav_object_summary <- function(object, header       = TRUE,
         } # regular sem
     } # header
 
+    # efa-related info
+    if(efa) {
+        res$efa <- lav_efa_summary(object, efa.args = efa.args)
+    } # efa
+
     # only if requested, add the additional fit measures
     if(fit.measures) {
         # some early warnings (to avoid a hard stop)
@@ -130,7 +161,8 @@ lav_object_summary <- function(object, header       = TRUE,
         } else if(object@optim$npar > 0L && !object@optim$converged) {
             warning("lavaan WARNING: fit measures not available if model did not converge\n\n")
         } else {
-            FIT <- fitMeasures(object, fit.measures="default")
+            FIT <- lav_fit_measures(object, fit.measures = "default",
+                                    fm.args = fm.args)
             res$fit = FIT
         }
     }

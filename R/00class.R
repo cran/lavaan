@@ -10,6 +10,7 @@ setClass("lavData",
         group="character",         # group variable
         ngroups="integer",         # number of groups
         group.label="character",   # group labels
+        block.label="character",   # block labels
         cluster="character",       # cluster variable(s)
         nlevels="integer",         # number of levels
         level.label="character",   # level labels
@@ -96,6 +97,7 @@ setClass("lavModel",          # MATRIX representation of the sem model
         representation="character",  # stub, until we define more classes
         modprop="list",              # model properties
         meanstructure="logical",
+        correlation="logical",
         categorical="logical",
         multilevel="logical",
         group.w.free="logical",

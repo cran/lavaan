@@ -34,24 +34,32 @@ lav_model_nvcov_bootstrap <- function(lavmodel       = NULL,
                                    FUN  = ifelse(boot.type == "bollen.stine",
                                               "coeftest", "coef"))
                                    #warn            = -1L)
+    COEF.orig <- COEF
 
     # new in 0.6-12: always warn for failed and nonadmissible
-    nfailed <- length(attr(COEF, "error.idx"))
-    if(!is.null(nfailed) && nfailed > 0L && lavoptions$warn) {
+    error.idx <- attr(COEF, "error.idx")
+    nfailed <- length(error.idx) # zero if NULL
+    if(nfailed > 0L && lavoptions$warn) {
         warning("lavaan WARNING: ", nfailed,
                 " bootstrap runs failed or did not converge.")
     }
 
-    notok <- attr(COEF, "nonadmissible")
-    if(!is.null(notok) && notok > 0L && lavoptions$warn) {
+    notok <- length(attr(COEF, "nonadmissible")) # zero if NULL
+    if(notok > 0L && lavoptions$warn) {
         warning("lavaan WARNING: ", notok,
                 " bootstrap runs resulted in nonadmissible solutions.")
+    }
+
+    if(length(error.idx) > 0L) {
+        # new in 0.6-13: we must still remove them!
+        COEF <- COEF[-error.idx,,drop = FALSE]
+        # this also drops the attributes
     }
 
     if(boot.type == "bollen.stine") {
         nc <- ncol(COEF)
         TEST <- COEF[,nc]
-        COEF <- COEF[,-nc]
+        COEF <- COEF[,-nc,drop = FALSE]
     }
 
     # FIXME: cov rescale? Yes for now
@@ -59,7 +67,7 @@ lav_model_nvcov_bootstrap <- function(lavmodel       = NULL,
     NVarCov <- lavsamplestats@ntotal * (cov(COEF) * (nboot-1)/nboot )
 
     # save COEF and TEST (if any)
-    attr(NVarCov, "BOOT.COEF") <- COEF
+    attr(NVarCov, "BOOT.COEF") <- COEF.orig # including attributes
     attr(NVarCov, "BOOT.TEST") <- TEST
 
     NVarCov
@@ -159,7 +167,8 @@ lav_model_nvcov_robust_sem <- function(lavmodel       = NULL,
 
     if( (lavoptions$information[1] == lavoptions$information[2]) &&
         (lavoptions$h1.information[1] == lavoptions$h1.information[2]) &&
-        (lavoptions$observed.information[1] ==
+        (lavoptions$information[2] == "expected" ||
+         lavoptions$observed.information[1] ==
          lavoptions$observed.information[2]) ) {
         # only when same type of information is used # new in 0.6-6
         attr(NVarCov, "E.inv") <- E.inv
@@ -202,7 +211,7 @@ lav_model_nvcov_robust_sandwich <- function(lavmodel       = NULL,
 
     # new in 0.6-6, check for h1.information.meat
     lavoptions2 <- lavoptions
-    if(!is.null(lavoptions$h1.information.meat)) {
+    if(!is.null(lavoptions$information.meat)) {
         lavoptions2$information <- lavoptions$information.meat
     }
     if(!is.null(lavoptions$h1.information.meat)) {
@@ -231,7 +240,8 @@ lav_model_nvcov_robust_sandwich <- function(lavmodel       = NULL,
 
     if( (lavoptions$information[1] == lavoptions$information[2]) &&
         (lavoptions$h1.information[1] == lavoptions$h1.information[2]) &&
-        (lavoptions$observed.information[1] ==
+        (lavoptions$information[2] == "expected" ||
+         lavoptions$observed.information[1] ==
          lavoptions$observed.information[2]) ) {
         # only when same type of information is used # new in 0.6-6
         attr(NVarCov, "E.inv") <- E.inv
@@ -385,7 +395,8 @@ lav_model_nvcov_two_stage <- function(lavmodel       = NULL,
     attr(NVarCov, "Gamma") <- Gamma
     if( (lavoptions$information[1] == lavoptions$information[2]) &&
         (lavoptions$h1.information[1] == lavoptions$h1.information[2]) &&
-        (lavoptions$observed.information[1] ==
+        (lavoptions$information[2] == "expected" ||
+         lavoptions$observed.information[1] ==
          lavoptions$observed.information[2]) ) {
         # only when same type of information is used # new in 0.6-6
         attr(NVarCov, "E.inv") <- E.inv

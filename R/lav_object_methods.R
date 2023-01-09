@@ -21,11 +21,22 @@
 
 setMethod("show", "lavaan",
 function(object) {
+    # efa?
+    efa.flag <- object@Options$model.type == "efa"
+
     # show only basic information
     res <- lav_object_summary(object, fit.measures = FALSE,
                                       estimates    = FALSE,
-                                      modindices   = FALSE)
-    print(res)
+                                      modindices   = FALSE,
+                                      efa          = efa.flag)
+    if(efa.flag) {
+        # print (standardized) loadings only
+        class(res) <- c("lavaan.efa", "list")
+        print(res)
+    } else {
+        # print lavaan header
+        print(res)
+    }
     invisible(res)
 })
 
@@ -41,17 +52,32 @@ function(object, header       = TRUE,
                  cov.std      = TRUE,
                  rsquare      = FALSE,
                  std.nox      = FALSE,
+                 fm.args      = list(rmsea.ci.level       = 0.90,
+                                     rmsea.h0.closefit    = 0.05,
+                                     rmsea.h0.notclosefit = 0.08),
                  modindices   = FALSE,
-                 nd = 3L) {
+                 nd = 3L, cutoff = 0.3, dot.cutoff = 0.1) {
+
+    # efa?
+    efa.flag <- object@Options$model.type == "efa"
 
     res <- lav_object_summary(object = object, header = header,
                fit.measures = fit.measures, estimates = estimates,
                ci = ci, fmi = fmi, std = std, standardized = standardized,
                remove.step1 = remove.step1, cov.std = cov.std,
-               rsquare = rsquare, std.nox = std.nox, modindices = modindices)
+               rsquare = rsquare, std.nox = std.nox, efa = efa.flag,
+               fm.args = fm.args, modindices = modindices)
+    # res has class c("lavaan.summary", "list")
 
     # what about nd? only used if we actually print; save as attribute
     attr(res, "nd") <- nd
+
+    # if efa, add cutoff and dot.cutoff, and change class
+    if(efa.flag) {
+        #class(res) <- c("lavaan.summary.efa", "list")
+        attr(res, "cutoff") <- cutoff
+        attr(res, "dot.cutoff") <- dot.cutoff
+    }
 
     res
 })
@@ -423,6 +449,11 @@ parameterestimates <- function(object,
        "bootstrap" %in%  object@Options$test ||
        "bollen.stine" %in% object@Options$test) {
         BOOT <- lav_object_inspect_boot(object)
+        bootstrap.seed <- attr(BOOT, "seed") # for bca
+        error.idx <- attr(BOOT, "error.idx")
+        if(length(error.idx) > 0L) {
+            BOOT <- BOOT[-error.idx,,drop = FALSE] # drops attributes
+        }
     } else {
         BOOT <- NULL
     }
@@ -466,7 +497,7 @@ parameterestimates <- function(object,
                                           "bca.simple", "bca"))
             if(boot.ci.type == "norm") {
                 fac <- qnorm(a)
-                boot.x <- colMeans(BOOT)
+                boot.x <- colMeans(BOOT, na.rm = TRUE)
                 boot.est <-
                     lav_model_get_parameters(object@Model,
                                        GLIST=lav_model_x2GLIST(object@Model, boot.x),
@@ -571,14 +602,14 @@ parameterestimates <- function(object,
                # TODO:
                # - add cin/ceq
             } else if(boot.ci.type == "bca") { # new in 0.6-12
-               # we assume that the 'ordinary' (nonparametric)
-               # was used
+               # we assume that the 'ordinary' (nonparametric) was used
 
-               if(object@Data@ngroups > 1L) {
-                   stop("lavaan ERROR: BCa confidence intervals not available (yet) for multiple groups.")
-               }
-
+               lavoptions <- object@Options
+               ngroups <- object@Data@ngroups
+               nobs <- object@SampleStats@nobs
                ntotal <- object@SampleStats@ntotal
+
+               # we need enough bootstrap runs
                if(nrow(BOOT) < ntotal) {
                    txt <- paste("BCa confidence intervals require more ",
                                 "(successful) bootstrap runs (", nrow(BOOT),
@@ -593,30 +624,30 @@ parameterestimates <- function(object,
                }
 
                # check if we have a seed
-               bootstrap.seed <- attr(BOOT, "seed")
                if(is.null(bootstrap.seed)) {
                    stop("lavaan ERROR: seed not available in BOOT object.")
                }
 
                # compute 'X' matrix with frequency indices (to compute
                # the empirical influence values using regression)
-               # NOTE: does not work (yet) for multiple groups, as they
-               #       are currently treated separately in
-               #       lav_bootstrap_internal, leading to interweaved indices
-               FREQ <- lav_utils_bootstrap_indices(R = object@Options$bootstrap,
-                   N = ntotal, seed = bootstrap.seed, return.freq = TRUE)
-               error.idx <- attr(BOOT, "error.idx")
+               FREQ <- lav_utils_bootstrap_indices(R = lavoptions$bootstrap,
+                   nobs = nobs, parallel = lavoptions$parallel[1],
+                   ncpus = lavoptions$ncpus, cl = lavoptions[["cl"]],
+                   iseed = bootstrap.seed, return.freq = TRUE,
+                   merge.groups = TRUE)
                if(length(error.idx) > 0L) {
                    FREQ <- FREQ[-error.idx, , drop = FALSE]
                }
                stopifnot(nrow(FREQ) == nrow(BOOT))
 
                # compute empirical influence values (using regression)
-               LM <- lm.fit(x = cbind(1, FREQ[,-1]), y = BOOT)
+               # remove first column per group
+               first.idx <- sapply(object@Data@case.idx, "[[", 1L)
+               LM <- lm.fit(x = cbind(1, FREQ[,-first.idx]), y = BOOT)
                BETA <- unname(LM$coefficients)[-1,,drop = FALSE]
                LL <- rbind(0, BETA)
 
-               # compute 'a' for all parameters
+               # compute 'a' for all parameters at once
                AA <- apply(LL, 2L, function(x) {
                            L <- x - mean(x); sum(L^3)/(6*sum(L^2)^1.5) })
 
@@ -700,15 +731,32 @@ parameterestimates <- function(object,
             warning("lavaan WARNING: rsquare = TRUE, but there are no dependent variables")
         } else {
             if(lav_partable_nlevels(LIST) == 1L) {
-            R2 <- data.frame( lhs = NAMES, op = rep("r2", nel), rhs = NAMES,
-                              block = rep(1:length(r2), sapply(r2, length)),
-                              est = unlist(r2), stringsAsFactors = FALSE )
+                block <- rep(1:length(r2), sapply(r2, length))
+                first.block.idx <- which(!duplicated(LIST$block) &
+                                         LIST$block > 0L)
+                GVAL <- LIST$group[first.block.idx]
+                if(length(GVAL) > 0L) {
+                    group <- rep(GVAL, sapply(r2, length))
+                } else {
+                    # single block, single group
+                    group <- rep(1L, length(block))
+                }
+                R2 <- data.frame( lhs = NAMES, op = rep("r2", nel), rhs = NAMES,
+                                  block = block, group = group,
+                                  est = unlist(r2), stringsAsFactors = FALSE )
             } else {
-            # add level column
-            R2 <- data.frame( lhs = NAMES, op = rep("r2", nel), rhs = NAMES,
-                              block = rep(1:length(r2), sapply(r2, length)),
-                              level = rep(lav_partable_level_values(LIST),
-                                          sapply(r2, length)),
+                # add level column
+                block <- rep(1:length(r2), sapply(r2, length))
+                first.block.idx <- which(!duplicated(LIST$block) &
+                                         LIST$block > 0L)
+                # always at least two blocks
+                GVAL <- LIST$group[first.block.idx]
+                group <- rep(GVAL, sapply(r2, length))
+                LVAL <- LIST$level[first.block.idx]
+                level <- rep(LVAL, sapply(r2, length))
+                R2 <- data.frame( lhs = NAMES, op = rep("r2", nel), rhs = NAMES,
+                              block = block, group = group,
+                              level = level,
                               est = unlist(r2), stringsAsFactors = FALSE )
             }
             LIST <- lav_partable_merge(pt1 = LIST, pt2 = R2, warn = FALSE)

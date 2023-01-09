@@ -86,8 +86,12 @@ lav_cfa_fabin3 <- function(S, marker.idx = NULL, lambda.nonzero.idx = NULL) {
 # - THETA is diagonal
 # - PSI is unrestricted
 # - we assume W = S^{-1}
+#
+# YR 17 oct 2022: - add lower/upper bounds for theta
+#                 - use 'lambda' correction to ensure PSI is positive definite
+#
 lav_cfa_lambda2thetapsi <- function(lambda = NULL, S = NULL, S.inv = NULL,
-                                    GLS = FALSE) {
+                                    GLS = FALSE, bounds = TRUE) {
     LAMBDA <- as.matrix(lambda)
     nvar <- nrow(LAMBDA); nfac <- ncol(LAMBDA)
 
@@ -111,11 +115,112 @@ lav_cfa_lambda2thetapsi <- function(lambda = NULL, S = NULL, S.inv = NULL,
         theta <-  solve(diag(nvar) - D*D, diag(S - (D %*% S %*% D)))
     }
 
+    # check bounds for theta
+    if(bounds) {
+        diagS <- diag(S)
+
+        # nonnegative
+        too.small.idx <- which(theta < 0)
+        theta[too.small.idx] <- 0
+
+        # not larger than diag(S)
+        too.large.idx <- which(theta > diagS)
+        if(length(too.large.idx) > 0L) {
+            theta[too.large.idx] <- diagS[too.large.idx] * 0.99
+        }
+    }
+
     # psi
-    SminTheta <- S
-    diag.idx <- lav_matrix_diag_idx(nvar)
-    SminTheta[diag.idx] <- SminTheta[diag.idx] - theta
-    PSI <- M %*% SminTheta %*% t(M)
+    diag.theta <- diag(theta)
+    lambda <- try(lav_matrix_symmetric_diff_smallest_root(S, diag.theta),
+                  silent = TRUE)
+    if(inherits(lambda, "try-error")) {
+        warning("lavaan WARNING: failed to compute lambda")
+        SminTheta <- S - diag.theta # and hope for the best
+    } else {
+        N <- 20L # conservative lower bound, no need to change
+        cutoff <- 1 + 1/(N-1) # 1.052632
+        if(lambda < cutoff) {
+            lambda.star <- lambda - 1/(N - 1)
+            SminTheta <- S - lambda.star * diag.theta
+        } else {
+            SminTheta <- S - diag.theta
+        }
+    }
+    PSI <- M %*% SminTheta %*% t(M) # Just like local SAM
 
     list(lambda = LAMBDA, theta = theta, psi = PSI)
 }
+
+# internal function to be used inside lav_optim_noniter
+# return 'x', the estimated vector of free parameters
+lav_cfa_fabin_internal <- function(lavmodel = NULL, lavsamplestats = NULL,
+                                   lavpartable = NULL, lavpta = NULL,
+                                   lavdata = NULL, lavoptions = NULL) {
+    # no structural part!
+    if(any(lavpartable$op == "~")) {
+        stop("lavaan ERROR: FABIN estimator only available for CFA models")
+    }
+    # no BETA matrix! (i.e., no higher-order factors)
+    if(!is.null(lavmodel@GLIST$beta)) {
+        stop("lavaan ERROR: FABIN estimator not available for models the require a BETA matrix")
+    }
+    # no std.lv = TRUE for now
+    if(lavoptions$std.lv) {
+        stop("lavaan ERROR: FABIN estimator not available if std.lv = TRUE")
+    }
+
+    nblocks <- lav_partable_nblocks(lavpartable)
+    stopifnot(nblocks == 1L) # for now
+    b <- 1L
+    sample.cov <- lavsamplestats@cov[[b]]
+    nvar <- nrow(sample.cov)
+    lv.names <- lavpta$vnames$lv.regular[[b]]
+    nfac <- length(lv.names)
+    marker.idx <- lavpta$vidx$lv.marker[[b]]
+    lambda.idx <- which(names(lavmodel@GLIST) == "lambda")
+    lambda.nonzero.idx <- lavmodel@m.free.idx[[lambda.idx]]
+    # only diagonal THETA for now...
+    # because if we have correlated residuals, we should remove the
+    # corresponding variables as instruments before we estimate lambda...
+    # (see MIIV)
+    theta.idx <- which(names(lavmodel@GLIST) == "theta") # usually '2'
+    m.theta <- lavmodel@m.free.idx[[theta.idx]]
+    nondiag.idx <- m.theta[!m.theta %in% lav_matrix_diag_idx(nvar)]
+    if(length(nondiag.idx) > 0L) {
+        warning("lavaan WARNING: this implementation of FABIN does not handle correlated residuals yet!")
+    }
+
+    # 1. estimate LAMBDA
+    if(lavoptions$estimator == "FABIN2") {
+        LAMBDA <- lav_cfa_fabin2(S = sample.cov, marker.idx = marker.idx,
+                                 lambda.nonzero.idx = lambda.nonzero.idx)
+    } else {
+        LAMBDA <- lav_cfa_fabin3(S = sample.cov, marker.idx = marker.idx,
+                                 lambda.nonzero.idx = lambda.nonzero.idx)
+    }
+
+    # 2. simple ULS method to get THETA and PSI (for now)
+    out <- lav_cfa_lambda2thetapsi(lambda = LAMBDA, S = sample.cov,
+                                   S.inv = lavsamplestats@icov[[b]],
+                                   GLS = FALSE)
+    THETA <- diag(out$theta)
+    PSI <- out$psi
+
+    # 3. correlated residuals (if any) are just the difference between
+    #    Sigma and S
+    #if(length(nondiag.idx) > 0L) {
+    #    Sigma <- LAMBDA %*% PSI %*% t(LAMBDA) + THETA
+    #    THETA[nondiag.idx] <- (sample.cov - Sigma)[nondiag.idx]
+    #}
+
+    # store matrices in lavmodel@GLIST
+    lavmodel@GLIST$lambda <- LAMBDA
+    lavmodel@GLIST$theta  <- THETA
+    lavmodel@GLIST$psi    <- PSI
+
+    # extract free parameters only
+    x <- lav_model_get_parameters(lavmodel)
+    x
+}
+
