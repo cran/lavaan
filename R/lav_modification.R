@@ -50,6 +50,7 @@ modindices <- function(object,
     FIT <- lav_object_extended(object, add = FULL, all.free = TRUE)
     LIST <- FIT@ParTable
 
+
     # compute information matrix 'extended model'
     # ALWAYS use *expected* information (for now)
     Information <- lavTech(FIT, paste("information", information, sep = "."))
@@ -98,7 +99,7 @@ modindices <- function(object,
     V.diag <- diag(V)
     # dirty hack: catch very small or negative values in diag(V)
     # this is needed eg when parameters are not identified if freed-up;
-    idx <- which(V.diag < sqrt(.Machine$double.eps))
+    idx <- which(V.diag < .Machine$double.eps^(1/3)) # was 1/2 <0.6-14
     if(length(idx) > 0L) {
         V.diag[idx] <- as.numeric(NA)
     }
@@ -238,6 +239,7 @@ modindices <- function(object,
     # remove some columns
     LIST$id <- LIST$ustart <- LIST$exo <- LIST$label <- LIST$plabel <- NULL
     LIST$start <- LIST$free <- LIST$est <- LIST$se <- LIST$prior <- NULL
+    LIST$upper <- LIST$lower <- NULL
 
     if(power) {
         LIST$sepc.lv <- LIST$sepc.nox <- NULL

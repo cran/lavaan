@@ -61,8 +61,6 @@ lav_options_default <- function(mimic = "lavaan") {
                                                 # c("loadings", "intercepts")
                 ceq.simple         = FALSE,      # treat simple eq cons special?
                 parameterization   = "default",
-                #ov.order           = "model",  # how to 'order' ov's in the
-                #                               # partable
 
                 auto.fix.first     = FALSE,
                 auto.fix.single    = FALSE,
@@ -760,7 +758,9 @@ lav_options_set <- function(opt = NULL) {
         }
         bad.idx <- which(!opt$test %in% c("standard", "none",
                                           "browne.residual.nt", # == standard
-                                          "browne.residual.adf"))
+                                          "browne.residual.nt.model",
+                                          "browne.residual.adf",
+                                          "browne.residual.adf.model"))
         if(length(bad.idx) > 0L) {
             stop("lavaan ERROR: invalid value(s) in test= argument when estimator is GLS:\n\t\t",
                  paste(opt$test[bad.idx], collapse = " "), "\n")
@@ -792,7 +792,9 @@ lav_options_set <- function(opt = NULL) {
         }
         bad.idx <- which(!opt$test %in% c("standard", "none",
                                           "browne.residual.nt",
-                                          "browne.residual.adf"))
+                                          "browne.residual.nt.model",
+                                          "browne.residual.adf",
+                                          "browne.residual.adf.model"))
         if(length(bad.idx) > 0L) {
             stop("lavaan ERROR: invalid value(s) in test= argument when estimator is NTRLS:\n\t\t",
                  paste(opt$test[bad.idx], collapse = " "), "\n")
@@ -855,7 +857,9 @@ lav_options_set <- function(opt = NULL) {
         }
         bad.idx <- which(!opt$test %in% c("standard", "none",
                                           "browne.residual.nt",
-                                          "browne.residual.adf")) # == standard
+                                          "browne.residual.nt.model",
+                                          "browne.residual.adf", # == standard
+                                          "browne.residual.adf.model"))
         if(length(bad.idx) > 0L) {
             stop("lavaan ERROR: invalid value(s) in test= argument when estimator is WLS:\n\t\t",
                  paste(opt$test[bad.idx], collapse = " "), "\n")
@@ -894,14 +898,18 @@ lav_options_set <- function(opt = NULL) {
         bad.idx <- which(!opt$test %in% c("standard", "none",
                                           "satorra.bentler",
                                           "browne.residual.nt", # == standard
-                                          "browne.residual.adf"))
+                                          "browne.residual.nt.model",
+                                          "browne.residual.adf",
+                                          "browne.residual.adf.model"))
         if(length(bad.idx) > 0L) {
             stop("lavaan ERROR: invalid value(s) in test= argument when estimator is DLS:\n\t\t",
                  paste(opt$test[bad.idx], collapse = " "), "\n")
         }
 
         # always include "satorra.bentler"
-        if(opt$test[1] %in% c("browne.residual.nt", "browne.residual.adf")) {
+        if(opt$test[1] %in% c("browne.residual.nt", "browne.residual.adf",
+                              "browne.residual.nt.model",
+                              "browne.residual.adf.model")) {
             opt$test <- union("satorra.bentler", opt$test)
         }
 
@@ -1195,14 +1203,29 @@ lav_options_set <- function(opt = NULL) {
 
 
     ##################################################################
-    # FABIN                                                          #
+    # FABIN, GUTTMAN1952, BENTLER, ...                               #
     ##################################################################
-    } else if(opt$estimator %in% c("fabin", "fabin2", "fabin3")) {
+    } else if(opt$estimator %in% c("fabin", "fabin2", "fabin3",
+                                    "guttman", "gutman", "guttman1952",
+                                    "bentler", "bentler1982")) {
         # experimental, for cfa or sam only
+
+        # sample.cov.rescale
+        if(is.logical(opt$sample.cov.rescale)) {
+            # nothing to do
+        } else if(opt$sample.cov.rescale == "default") {
+            opt$sample.cov.rescale <- TRUE
+        } else {
+            stop("lavaan ERROR: sample.cov.rescale value must be logical.")
+        }
 
         # estimator
         if(opt$estimator == "fabin") {
             opt$estimator <- "FABIN2"
+        } else if(opt$estimator %in% c("guttman", "gutman", "guttmann")) {
+            opt$estimator <- "GUTTMAN1952"
+        } else if(opt$estimator %in% c("bentler", "bentler1982")) {
+            opt$estimator <- "BENTLER1982"
         } else {
             opt$estimator <- toupper(opt$estimator)
         }
@@ -1212,11 +1235,65 @@ lav_options_set <- function(opt = NULL) {
             opt$se <- "none"
         }
 
+        # bounds
+        if(opt$bounds == "default") {
+            opt$bounds <- "standard"
+        }
+
         # test
-        opt$test <- "none" # for now
+        if(opt$test == "default") {
+            opt$test <- "none" # for now
+        }
 
         # missing
         opt$missing <- "listwise" # for now (until we have two-stage working)
+
+        # options for fabin
+        if(opt$estimator %in% c("FABIN2", "FABIN3")) {
+            if(is.null(opt$estimator.args)) {
+                opt$estimator.args <- list(thetapsi.method = "GLS")
+            } else {
+                if(is.null(opt$estimator.args$thetapsi.method)) {
+                    opt$estimator.args$thetapsi.method <- "GLS"
+                } else {
+                    opt$estimator.args$thetapsi.method <-
+                        toupper(opt$estimator.args$thetapsi.method)
+                    if(opt$estimator.args$thetapsi.method %in% c("ULS",
+                                 "GLS", "WLS", "ULS.ML", "GLS.ML", "WLS.ML")) {
+                        if(opt$estimator.args$thetapsi.method == "WLS") {
+                            opt$estimator.args$thetapsi.method <- "GLS"
+                        }
+                        if(opt$estimator.args$thetapsi.method == "WLS.ML") {
+                            opt$estimator.args$thetapsi.method <- "GLS.ML"
+                        }
+                    } else {
+                        stop("lavaan ERROR: unknown value for estimator.args$thetapsi.method option: ", opt$estimator.args$thetapsi.method)
+                   }
+                }
+            }
+        }
+
+        # options for Bentler
+        if(opt$estimator == "BENTLER1982") {
+            if(is.null(opt$estimator.args)) {
+                opt$estimator.args <- list(GLS = FALSE)
+            } else {
+                if(is.null(opt$estimator.args$GLS)) {
+                    opt$estimator.args$GLS <- FALSE
+                }
+            }
+        }
+
+        # options for guttman1952
+        if(opt$estimator == "GUTTMAN1952") {
+            if(is.null(opt$estimator.args)) {
+                opt$estimator.args <- list(psi.mapping = FALSE)
+            } else {
+                if(is.null(opt$estimator.args$psi.mapping)) {
+                    opt$estimator.args$psi.mapping <- FALSE
+                }
+            }
+        }
 
         # brute-force override
         opt$optim.method <- "noniter"
@@ -1274,7 +1351,7 @@ lav_options_set <- function(opt = NULL) {
     }
 
     # likelihood approach (wishart or normal) + sample.cov.rescale
-    if(!opt$estimator %in% c("ML", "REML", "PML", "FML","NTRLS")) {
+    if(!opt$estimator %in% c("ML", "REML", "PML", "FML","NTRLS","catML")) {
         if(opt$likelihood != "default") {
             stop("lavaan ERROR: likelihood argument is only relevant if estimator = ML")
         }
@@ -1680,12 +1757,15 @@ lav_options_set <- function(opt = NULL) {
                             "yuan.bentler", "yuan.bentler.mplus",
                             "mean.var.adjusted", "scaled.shifted",
                             "browne.residual.adf", "browne.residual.nt",
+                            "browne.residual.nt.model",
+                            "browne.residual.adf.model",
                             "bollen.stine"))
     if(length(wrong.idx) > 0L) {
         txt <- c("invalid option(s) for test argument: ",
                  paste(dQuote(opt$test[wrong.idx]), collapse = " "), ". ",
                  "Possible options are: \"none\", \"standard\",
                  \"browne.residual.adf\", \"browne.residual.nt\",
+                 \"browne.residual.adf.model\", \"browne.residual.nt.model\",
                  \"satorra.bentler\", \"yuan.bentler\", \"yuan.bentler.mplus\",
                  \"mean.var.adjusted\",
                  \"scaled.shifted\", or \"bollen.stine\"")
@@ -2012,8 +2092,9 @@ lav_options_check_se <- function(opt = NULL) {
                                  "robust.huber.white")
     }
 
-    # FABIN
-    else if(orig.estimator %in% c("fabin", "fabin2", "fabin3")) {
+    # FABIN, GUTTMAN1952, BENTLER1982, ...
+    else if(orig.estimator %in% c("fabin", "fabin2", "fabin3", "guttman",
+                                  "guttman1952")) {
         ok.flag <- opt$se %in% c("default", "none", "bootstrap", "external")
     }
 

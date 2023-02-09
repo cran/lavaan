@@ -1,6 +1,6 @@
 Package: lavaan
 Title: Latent Variable Analysis
-Version: 0.6-13
+Version: 0.6-14
 Authors@R: c(person(given   = "Yves", family = "Rosseel",
                     role    = c("aut", "cre"),
                     email   = "Yves.Rosseel@UGent.be",
@@ -51,13 +51,13 @@ Description: Fit a variety of latent variable models, including confirmatory
    factor analysis, structural equation modeling and latent growth curve models.
 Depends: R(>= 3.4)
 Imports: methods, stats4, stats, utils, graphics, MASS, mnormt,
-        pbivnorm, numDeriv
+        pbivnorm, numDeriv, quadprog
 License: GPL (>= 2)
 LazyData: yes
 ByteCompile: true
 URL: https://lavaan.ugent.be
 NeedsCompilation: no
-Packaged: 2023-01-08 10:41:33 UTC; yves
+Packaged: 2023-02-09 12:46:29 UTC; yves
 Author: Yves Rosseel [aut, cre] (<https://orcid.org/0000-0002-4129-4477>),
   Terrence D. Jorgensen [aut] (<https://orcid.org/0000-0001-5111-6773>),
   Nicholas Rockwood [aut] (<https://orcid.org/0000-0001-5931-183X>),
@@ -74,4 +74,4 @@ Author: Yves Rosseel [aut, cre] (<https://orcid.org/0000-0002-4129-4477>),
   Han Du [ctb]
 Maintainer: Yves Rosseel <Yves.Rosseel@UGent.be>
 Repository: CRAN
-Date/Publication: 2023-01-09 08:40:06 UTC
+Date/Publication: 2023-02-09 17:50:02 UTC
