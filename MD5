@@ -1,5 +1,5 @@
-21712371c94d55d7f3769f66d1f487e9 *DESCRIPTION
-7bdc3539cab05c7d06b1ffdcf8e94145 *NAMESPACE
+ceccc6c1de4f09cd871a5dfe003eefe5 *DESCRIPTION
+0e50b3573d5997effa05c508cbd7f923 *NAMESPACE
 8c07055a2f6d2c4fed52c259cdeef334 *R/00class.R
 d3ff28a992eb9ad9f3302dab2d1db831 *R/00generic.R
 38752e01bebf37f3e6a30e121565a942 *R/ctr_estfun.R
@@ -13,7 +13,7 @@ f8449cb947eaeb0f474f7e6a71cf90db *R/ctr_pml_plrt.R
 7037519cf3c4973a139602463cda59f6 *R/ctr_pml_plrt2.R
 1f6abdeeee0f828057b0550be0a27575 *R/ctr_pml_plrt_nested.R
 6635c66e092e2bb8609674f3a1d43924 *R/ctr_pml_utils.R
-14e65418e7e7176e4cf707946632b2fd *R/lav_bootstrap.R
+1d53c8c7f7f87a09d2d10b8ae8167a2b *R/lav_bootstrap.R
 802062ef84ed7cb27563939c9cfc4caf *R/lav_bootstrap_lrt.R
 786955839de8160c7e81d23c636ee109 *R/lav_bvmix.R
 4db8c88bc456d03f7e5eb93ca13f2bad *R/lav_bvord.R
@@ -22,9 +22,10 @@ de4d729b1c11b91d149d37468efd7c92 *R/lav_cfa_1fac.R
 6ab321fbdc2199123a68d06d32507ea1 *R/lav_cfa_bentler1982.R
 0b4b0e7c54eb33ea29bb597b29a6efb7 *R/lav_cfa_fabin.R
 8c8196806e4831bb4973d7613130a6ea *R/lav_cfa_guttman1952.R
-9d094e4f1360b839869c079fb0e2b5d8 *R/lav_cfa_utils.R
+459371fe3ee8767385dc3b50f485abc8 *R/lav_cfa_jamesstein.R
+89362108a9aa09bd8a9bb31e8d7b01f8 *R/lav_cfa_utils.R
 7e34cae25007369f6eefb62e15fc2956 *R/lav_constraints.R
-5f1943d5b50b829ff175d2e4060afa3e *R/lav_cor.R
+c54ee15382ab153c7e84ed15ec78fe01 *R/lav_cor.R
 b6e7214ae9c97cac7d0aa998682ea112 *R/lav_data.R
 12fc53360224efb5cb05d7d1362913b8 *R/lav_data_patterns.R
 510d1f1e5455693f07d76f501885497c *R/lav_data_print.R
@@ -42,7 +43,7 @@ e6633a2398d5837013b0841cceb4a714 *R/lav_efa_print.R
 5b1408371dd3b6303e579d6bee6d6ed5 *R/lav_fit_aic.R
 a7c4280094e9cba742ed82edccc78db4 *R/lav_fit_cfi.R
 debace4e95c32d5c76190c5541b4040b *R/lav_fit_gfi.R
-84e8ef21698150669b2e893a16e2fdb3 *R/lav_fit_measures.R
+e57c23e463d14413998b62a815d2763f *R/lav_fit_measures.R
 373616ebbeb1182310e96fc77a84d748 *R/lav_fit_other.R
 239ab22eccc8c6d08d387378020cfe30 *R/lav_fit_rmsea.R
 0cbb5b20e43624b28d68a2ef3046c72f *R/lav_fit_srmr.R
@@ -58,7 +59,7 @@ da1f299fdd19b249f16557bffe447c6c *R/lav_lavaanList_methods.R
 04e57c141fc9ecb958491d8a187dfc98 *R/lav_lavaanList_multipleGroups.R
 a4603d9dd7d900db3e0ac06aa3912d57 *R/lav_lavaanList_multipleImputation.R
 b0a9f7eff4f795b955e1bc8d7e44387b *R/lav_lavaanList_simulate.R
-3d3397a2e2084d4a76c9f0c8fb94c0e3 *R/lav_matrix.R
+86d7db55ecd08909714f9e1915bd33ae *R/lav_matrix.R
 69d1d8697b94d2882c1852e5d4323e0d *R/lav_matrix_rotate.R
 a8db43f516ad7cee63261fd4a640f321 *R/lav_matrix_rotate_methods.R
 341752928a4366761365b66e681ead51 *R/lav_matrix_rotate_utils.R
@@ -101,8 +102,8 @@ bdb77c93e5ef0c514220940b9b858c98 *R/lav_object_inspect.R
 0eb2e28617f98430eb94cdf9bc70bae9 *R/lav_objective.R
 7458ef10c42164365d6cdd606ea21968 *R/lav_optim_gn.R
 c1eea693e94eaa1d21a33db58870c970 *R/lav_optim_nlminb_constr.R
-97dcb35a552d219c584cb048165f60a8 *R/lav_optim_noniter.R
-cdb56a180cba732fa3cd20e5044b62e7 *R/lav_options.R
+5b705348c5131ab60e472465eea36134 *R/lav_optim_noniter.R
+9a0bf7b810dc94b64dd76505facc4b84 *R/lav_options.R
 3198011aa92ba0079caa41d183b9d47a *R/lav_partable.R
 00b1df081c75af43613d181e7121e83e *R/lav_partable_attributes.R
 fea6713eaefb45aeeaafe4025cb11dad *R/lav_partable_bounds.R
@@ -119,11 +120,11 @@ ca3ea92f0ede0741192173e18ab62efc *R/lav_partable_full.R
 990d96f3e550f1808807707dd314b96d *R/lav_partable_subset.R
 b75fd0632684d788dc731e54de35f8fe *R/lav_partable_unrestricted.R
 c8f24afbd6e6c8afef3285e4f2abcf4e *R/lav_partable_utils.R
-d48f3e258822c1f24f233b13aa821455 *R/lav_partable_vnames.R
+73d46bd54614166b41b58865f169c897 *R/lav_partable_vnames.R
 e94c70b6ff32491c3c7a3d547de866e6 *R/lav_predict.R
 a32a85b7962efe002db3c6f983d65625 *R/lav_predict_y.R
 ef4aab312133fcecd6b33c10e6ee03e3 *R/lav_prelis.R
-a3261cb1f08618c1bc7765f73db1a9a9 *R/lav_print.R
+5f20fc8fc5d52ec550a34d78cb180d52 *R/lav_print.R
 704a67f366f62b1597c514c2742d6369 *R/lav_representation.R
 5ef4a5b05de392cf249738eb931c9d07 *R/lav_representation_lisrel.R
 9cb82137123d946b609a213dec35b2ba *R/lav_representation_ram.R
@@ -186,7 +187,7 @@ b88073fe6a281aa96c0fc126e3fecf8c *man/bootstrap.Rd
 e10ce2f596f1e9105b12d1e9860aacfd *man/getCov.Rd
 c09580c5994692adf594e66741cfce54 *man/growth.Rd
 73e825fa761127c81205c806be420ffa *man/inspectSampleCov.Rd
-a9db35f788a7250e1661e72710bc908b *man/lavCor.Rd
+bdeed4c0e6f40ea31a4c7caab104accd *man/lavCor.Rd
 225af6a64d1104380844614ca4191caa *man/lavExport.Rd
 a08b3a571a4a07694853667a7a6a7372 *man/lavInspect.Rd
 26119d475ad895f46006afe1e0587060 *man/lavListInspect.Rd
