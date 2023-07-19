@@ -191,13 +191,15 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
     for(g in 1:ngroups) {
 
         # check nobs
-        if(nobs[[g]] < 2L) {
-            if(nobs[[g]] == 0L) {
-                stop("lavaan ERROR: data contains no observations",
+        if(is.null(WT[[g]])) {
+            if(nobs[[g]] < 2L) {
+                if(nobs[[g]] == 0L) {
+                    stop("lavaan ERROR: data contains no observations",
                      ifelse(ngroups > 1L, paste(" in group ", g, sep=""), ""))
-            } else {
-                stop("lavaan ERROR: data contains only a single observation",
+                } else {
+                    stop("lavaan ERROR: data contains only a single observation",
                      ifelse(ngroups > 1L, paste(" in group ", g, sep=""), ""))
+                }
             }
         }
 
@@ -1675,6 +1677,13 @@ lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL,
         # cluster-means
         Y2 <- rowsum.default(Y1, group = cluster.idx, reorder = FALSE,
                      na.rm = FALSE) / cluster.size
+
+        if(length(within.idx) > 0L) {
+            for(i in 1:length(within.idx)) {
+                Y2[, within.idx[i]] <- Y1.means[within.idx[i]]
+            }
+        }
+
         Y2c <- t( t(Y2) - Y1.means )
 
         # compute S.w

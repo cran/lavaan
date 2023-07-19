@@ -61,6 +61,10 @@
 # mean-and-variance corrected test statistic with nonnormal data in SEM.
 # Multivariate behavioral research, 53(3), 419-429.
 
+# missing = "fiml":
+# Zhang, X., & Savalei, V. (2022). New computations for RMSEA and CFI following
+# FIML and TS estimation with missing data. Psychological Methods.
+
 
 # always using N (if a user needs N-1, just replace N by N-1)
 # vectorized!
@@ -201,6 +205,7 @@ lav_fit_rmsea_lavobject <- function(lavobject = NULL, fit.measures = "rmsea",
                                     scaled.test   = "none",
                                     ci.level = 0.90,
                                     close.h0 = 0.05, notclose.h0 = 0.08,
+                                    robust = TRUE,
                                     cat.check.pd = TRUE) {
 
     # check lavobject
@@ -215,7 +220,7 @@ lav_fit_rmsea_lavobject <- function(lavobject = NULL, fit.measures = "rmsea",
     if(test.names[1] == "none" || standard.test == "none") {
         return(list())
     }
-    test.idx <- which(test.names == standard.test)
+    test.idx <- which(test.names == standard.test)[1]
     if(length(test.idx) == 0L) {
         return(list())
     }
@@ -231,7 +236,7 @@ lav_fit_rmsea_lavobject <- function(lavobject = NULL, fit.measures = "rmsea",
 
     # robust?
     robust.flag <- FALSE
-    if(scaled.flag &&
+    if(robust && scaled.flag &&
        scaled.test %in% c("satorra.bentler", "yuan.bentler.mplus",
                           "yuan.bentler", "scaled.shifted")) {
         robust.flag <- TRUE
@@ -239,7 +244,7 @@ lav_fit_rmsea_lavobject <- function(lavobject = NULL, fit.measures = "rmsea",
 
     # FIML?
     fiml.flag <- FALSE
-    if(lavobject@Options$missing %in% c("ml", "ml.x")) {
+    if(robust && lavobject@Options$missing %in% c("ml", "ml.x")) {
         fiml.flag <- robust.flag <- TRUE
         # check if we can compute corrected values
         if(scaled.flag) {

@@ -260,6 +260,15 @@ lav_matrix_vech_match_idx <- function(n = 1L, diagonal = TRUE,
     lav_matrix_vech(B, diagonal = diagonal)
 }
 
+# check if square matrix is diagonal (no tolerance!)
+lav_matrix_is_diagonal <- function(A = NULL) {
+    A <- as.matrix.default(A)
+    stopifnot(nrow(A) == ncol(A))
+
+    diag(A) <- 0
+    all(A == 0)
+}
+
 
 # create the duplication matrix (D_n): it 'duplicates' the elements
 # in vech(S) to create vec(S) (where S is symmetric)
@@ -769,19 +778,19 @@ lav_matrix_commutation_post <- function(A = matrix(0,0,0)) {
 
     # number of columns of A
     n2 <- ncol(A)
-     
+
     # K_nn only (n2 = m * n)
     stopifnot(sqrt(n2) == round(sqrt(n2)))
 
     # dimension
     n <- sqrt(n2)
-    
+
     # compute col indices
     #row.idx <- as.integer(t(matrix(1:n2, n, n)))
     col.idx <- rep(1:n, each = n) + (0:(n-1L))*n
 
     OUT <- A[, col.idx, drop = FALSE]
-    OUT 
+    OUT
 }
 
 # compute K_n %*% A %*% K_n without explicitly computing K
@@ -793,13 +802,13 @@ lav_matrix_commutation_pre_post <- function(A = matrix(0,0,0)) {
 
     # number of columns of A
     n2 <- NCOL(A)
-    
+
     # K_nn only (n2 = m * n)
     stopifnot(sqrt(n2) == round(sqrt(n2)))
 
     # dimension
-    n <- sqrt(n2)     
-   
+    n <- sqrt(n2)
+
     # compute col indices
     row.idx <- rep(1:n, each = n) + (0:(n-1L))*n
     col.idx <- row.idx

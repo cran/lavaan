@@ -21,6 +21,7 @@ lavaanify <- lavParTable <- function(
                       meanstructure    = FALSE,
                       int.ov.free      = FALSE,
                       int.lv.free      = FALSE,
+                      marker.int.zero  = FALSE,
                       orthogonal       = FALSE,
                       orthogonal.y     = FALSE,
                       orthogonal.x     = FALSE,
@@ -126,6 +127,12 @@ lavaanify <- lavParTable <- function(
         # we only call this function for the warning message
         tmp <- lav_partable_vnames(FLAT, "ov.x", warn = TRUE); rm(tmp)
     }
+
+    # check if group.equal is non-empty, but ngroups = 1L
+    # fixme: triggers this if mimic="Mplus"!
+    # if(ngroups == 1L && length(group.equal) > 0L) {
+    #    warning("lavaan WARNING: group.equal= argument has no effect if no groups are specified.")
+    #}
 
     # auto=TRUE?
     if(auto && model.type == "sem") { # mimic sem/cfa auto behavior
@@ -928,6 +935,42 @@ lavaanify <- lavParTable <- function(
 
         LIST <- lav_partable_merge(LIST, TMP)
     }
+
+    # marker.int.zero
+    if(meanstructure && marker.int.zero) {
+        # for each block
+        nblocks <- lav_partable_nblocks(LIST)
+        for(b in seq_len(nblocks)) {
+            # lv's for this block/set
+            lv.names <- lav_partable_vnames(LIST, type = "lv.regular",
+                                            block = b)
+            lv.marker <- lav_partable_vnames(LIST, type = "lv.regular",
+                                            block = b)
+
+            if(length(lv.names) == 0L) {
+                next
+            }
+
+            # markers for this block
+            lv.marker <- lav_partable_vnames(LIST, type = "lv.marker",
+                                            block = b)
+
+            # fix marker intercepts to zero
+            marker.idx <- which(LIST$op == "~1" &
+                                LIST$lhs %in% lv.marker & LIST$block == b &
+                                LIST$user == 0L)
+            LIST$free[marker.idx] <- 0L
+            LIST$ustart[marker.idx] <- 0
+
+            # free latent means
+            lv.idx <- which(LIST$op == "~1" &
+                            LIST$lhs %in% lv.names & LIST$block == b &
+                            LIST$user == 0L)
+            LIST$free[lv.idx] <- 1L
+            LIST$ustart[lv.idx] <- as.numeric(NA)
+        } # block
+    }
+
 
     # mg.lv.variances
     if(ngroups > 1L && "mg.lv.variances" %in% effect.coding) {
