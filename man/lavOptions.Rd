@@ -92,9 +92,8 @@ Model features (only available for the \code{lavaan()} function):
     \item{\code{auto.fix.single}:}{If \code{TRUE}, the residual variance (if 
       included) of an observed indicator is set to zero if it is the only 
       indicator of a latent variable.}
-    \item{\code{auto.var}:}{If \code{TRUE}, the residual variances and the 
-      variances of exogenous latent variables are included in the model and 
-      set free.}
+    \item{auto.var}{If \code{TRUE}, the (residual) variances of both observed
+      and latent variables are set free.}
     \item{\code{auto.cov.lv.x}:}{If \code{TRUE}, the covariances of exogenous 
       latent variables are included in the model and set free.}
     \item{\code{auto.cov.y}:}{If \code{TRUE}, the covariances of dependent 
@@ -528,6 +527,9 @@ Miscellaneous:
     \item{\code{store.vcov}}{Logical. If \code{TRUE}, and \code{se=} is not
       set to \code{"none"}, store the full variance-covariance matrix of
       the model parameters in the vcov slot of the fitted lavaan object.}
+    \item{\code{parser}}{Character. If \code{"new"} (the default), the new
+      parser is used to parse the model syntax. If \code{"old"}, the original
+      (pre 0.6-17) parser is used.}
 }
 
 }

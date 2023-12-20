@@ -70,8 +70,20 @@ lav_model_estimate <- function(lavmodel       = NULL,
 
     if(lavoptions$optim.parscale == "none") {
         # do nothing, but still set SCALE, as before
+
+
+    # 0.6-17:
+    # only temporarily: 'keep' this mistake, and change it later:
+    # (note the "standarized")
+    # we only do this to avoid breaking a test in semlbci
     } else if(lavoptions$optim.parscale %in% c("stand", "st", "standardize",
                                                "standarized", "stand.all")) {
+
+    # this is what it should be:
+    # } else if(lavoptions$optim.parscale %in% c("stand", "st", "standardize",
+    #                                            "standardized", "stand.all")) {
+
+
         # rescale parameters as if the data was standardized
         # new in 0.6-2
         #
@@ -429,7 +441,7 @@ lav_model_estimate <- function(lavmodel       = NULL,
                 if(debug) {
                     print(Sigma.hat[[g]][,])
                 }
-                warning("lavaan ERROR: initial model-implied matrix (Sigma) is not positive definite;\n  check your model and/or starting parameters", group.txt)
+                warning("lavaan WARNING: initial model-implied matrix (Sigma) is not positive definite;\n  check your model and/or starting parameters", group.txt)
                 x <- start.x
                 fx <- as.numeric(NA)
                 attr(fx, "fx.group") <- rep(as.numeric(NA), ngroups)

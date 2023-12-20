@@ -105,6 +105,7 @@ lav_options_default <- function(mimic = "lavaan") {
 
                 # summary data
                 sample.cov.rescale = "default",
+                sample.cov.robust  = FALSE,
                 sample.icov        = TRUE,
                 ridge              = FALSE,
                 ridge.constant     = "default",
@@ -217,6 +218,9 @@ lav_options_default <- function(mimic = "lavaan") {
 
                 # storage of information
                 store.vcov             = "default",
+
+                # internal
+                parser                 = "old",
 
                 # verbosity
                 verbose                = FALSE,
@@ -715,9 +719,9 @@ lav_options_set <- function(opt = NULL) {
             if(orig.estimator %in% c("ml", "mlf")) {
                 if(opt$test[1] == "default") {
                     opt$test <- "standard"
-                } else {
-                    opt$test <- union("standard", opt$test)
-                }
+                } #else {
+                #    opt$test <- union("standard", opt$test)
+                #}
             } else if(orig.estimator == "mlm") {
                 if(opt$test[1] == "default") {
                     opt$test <- "satorra.bentler"
@@ -988,6 +992,14 @@ lav_options_set <- function(opt = NULL) {
     ##################################################################
     } else if(opt$estimator  %in% c("dwls", "wlsm", "wlsmv", "wlsmvs")) {
 
+        # new in 0.6-17: if !categorical, give a warning
+        if(!opt$.categorical) {
+            warning("lavaan WARNING: estimator ",
+                    dQuote(toupper(opt$estimator)),
+                    " is not recommended for continuous data.",
+                    "\n\t\t  Did you forget to set the ordered= argument?")
+        }
+
         # estimator
         opt$estimator <- "DWLS"
 
@@ -1010,9 +1022,9 @@ lav_options_set <- function(opt = NULL) {
             if(orig.estimator == "dwls") {
                 if(opt$test[1] == "default") {
                     opt$test <- "standard"
-                } else {
-                    opt$test <- union("standard", opt$test)
-                }
+                } # else {
+                  #  opt$test <- union("standard", opt$test)
+                #}
             } else if(orig.estimator == "wlsm") {
                 if(opt$test[1] == "default") {
                     opt$test <- "satorra.bentler"
@@ -1062,9 +1074,9 @@ lav_options_set <- function(opt = NULL) {
             if(orig.estimator == "uls") {
                 if(opt$test[1] == "default") {
                     opt$test <- "standard"
-                } else {
-                    opt$test <- union("standard", opt$test)
-                }
+                } #else {
+                  #  opt$test <- union("standard", opt$test)
+                #}
             } else if(orig.estimator == "ulsm") {
                 if(opt$test[1] == "default") {
                     opt$test <- "satorra.bentler"
@@ -1219,7 +1231,7 @@ lav_options_set <- function(opt = NULL) {
 
 
     ##################################################################
-    # FABIN, MULTIPLE-GROUP-METHOD (MGM( BENTLER, ...                #
+    # FABIN, MULTIPLE-GROUP-METHOD (MGM), BENTLER1982, ...           #
     ##################################################################
     } else if(opt$estimator %in% c("fabin", "fabin2", "fabin3",
                                    "mgm", "guttman", "gutman", "guttman1952",
@@ -1324,6 +1336,52 @@ lav_options_set <- function(opt = NULL) {
                 if(is.null(opt$estimator.args$quadprog)) {
                     opt$estimator.args$quadprog <- FALSE
                 }
+            }
+        }
+
+        # brute-force override
+        opt$optim.method <- "noniter"
+        opt$start <- "simple"
+
+    ##################################################################
+    # MIIV-2SLS and friends                                          #
+    ##################################################################
+    } else if(opt$estimator %in% c("miiv", "iv", "miiv-2sls")) {
+        opt$estimator <- "MIIV"
+
+        # sample.cov.rescale
+        if(is.logical(opt$sample.cov.rescale)) {
+            # nothing to do
+        } else if(opt$sample.cov.rescale == "default") {
+            opt$sample.cov.rescale <- TRUE
+        } else {
+            stop("lavaan ERROR: sample.cov.rescale value must be logical.")
+        }
+
+        # se
+        if(opt$se == "default") {
+            opt$se <- "none" # for now
+        }
+
+        # bounds
+        if(opt$bounds == "default") {
+            opt$bounds <- "standard"
+        }
+
+        # test
+        if(opt$test == "default") {
+            opt$test <- "none" # for now
+        }
+
+        # missing
+        opt$missing <- "listwise" # for now
+
+        # estimator options
+        if(is.null(opt$estimator.args)) {
+            opt$estimator.args <- list(method = "2SLS")
+        } else {
+            if(is.null(opt$estimator.args$method)) {
+                opt$estimator.args$method <- "2SLS"
             }
         }
 
@@ -2015,7 +2073,45 @@ lav_options_set <- function(opt = NULL) {
         }
     }
 
+    # parser
+    if(opt$parser %in% c("orig", "old", "classic")) {
+        opt$parser <- "old"
+    } else if(opt$parser %in% c("new", "ldw")) {
+        opt$parser <- "new"
+    } else {
+        stop("lavaan ERROR: parser= argument should be \"old\" or \"new\"")
+    }
 
+    # sample.cov.robust
+    # new in 0.6-17
+    # sample.cov.robust cannot be used if:
+    # - data is missing (for now),
+    # - sampling weights are used
+    # - estimator is (D)WLS
+    # - multilevel
+    # - conditional.x
+    if(opt$sample.cov.robust) {
+        if(opt$missing != "listwise") {
+            stop("lavaan ERROR: sample.cov.robust = TRUE does not work (yet) if data is missing.")
+        }
+        if(opt$.categorical) {
+            stop("lavaan ERROR: sample.cov.robust = TRUE does not work (yet) if data is categorical")
+        }
+        if(opt$.clustered || opt$.multilevel) {
+            stop("lavaan ERROR: sample.cov.robust = TRUE does not work (yet) if data is clustered")
+        }
+        if(opt$conditional.x) {
+             stop("lavaan ERROR: sample.cov.robust = TRUE does not work (yet) if conditional.x = TRUE")
+        }
+        if(!opt$estimator %in% c("ML", "GLS")) {
+            stop("lavaan ERROR: sample.cov.robust = TRUE does not work (yet) if estimator is not GLS or ML")
+        }
+    }
+
+
+
+    # store orig.estimator as estimator.orig in upper case
+    opt$estimator.orig <- toupper(orig.estimator)
 
     # group.w.free
     #if(opt$group.w.free && opt$.categorical) {

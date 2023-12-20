@@ -34,12 +34,14 @@ predict.efaList <- function(object, ...) {
     predict(object, ...)
 }
 
-# main function
+# public function
 lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
                        type = "lv", method = "EBM", transform = FALSE,
                        se = "none", acov = "none", label = TRUE, fsm = FALSE,
+                       mdist = FALSE,
                        append.data = FALSE, assemble = FALSE, # or TRUE?
-                       level = 1L, optim.method = "bfgs", ETA = NULL) {
+                       level = 1L, optim.method = "bfgs", ETA = NULL,
+                       drop.list.single.group = TRUE) {
 
     # catch efaList objects
     if(inherits(object, "efaList")) {
@@ -58,21 +60,69 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
     lavmodel       <- object@Model
     lavdata        <- object@Data
     lavsamplestats <- object@SampleStats
+    # backward compatibility
+    if(.hasSlot(object, "h1")) {
+        lavh1 <- object@h1
+    } else {
+        lavh1 <- lav_h1_implied_logl(lavdata = object@Data,
+                                     lavsamplestats = object@SampleStats,
+                                     lavoptions = object@Options)
+    }
     lavimplied     <- object@implied
     lavpta         <- object@pta
 
+    res <- lav_predict_internal(lavmodel = lavmodel, lavdata = lavdata,
+        lavsamplestats = lavsamplestats, lavimplied = lavimplied, lavh1 = lavh1,
+        lavpta = lavpta, newdata = newdata, type = type, method = method,
+        transform = transform, se = se, acov = acov, label = label, fsm = fsm,
+        mdist = mdist, append.data = append.data, assemble = assemble,
+        level = level, optim.method = optim.method, ETA = ETA,
+        drop.list.single.group = drop.list.single.group)
+
+    res
+}
+
+# internal version, to be used if lavobject does not exist yet
+lav_predict_internal <- function(lavmodel = NULL,
+                                 lavdata  = NULL,
+                                 lavsamplestats = NULL,
+                                 lavh1 = NULL,
+                                 lavimplied = NULL,
+                                 lavpta = NULL,
+                       # standard options
+                       newdata = NULL, # keep order of predict(), 0.6-7
+                       type = "lv", method = "EBM", transform = FALSE,
+                       se = "none", acov = "none", label = TRUE, fsm = FALSE,
+                       mdist = FALSE,
+                       append.data = FALSE, assemble = FALSE, # or TRUE?
+                       level = 1L, optim.method = "bfgs", ETA = NULL,
+                       drop.list.single.group = TRUE) {
+
+
     # type
     type <- tolower(type)
-    if(type %in% c("latent", "lv", "factor", "factor.score", "factorscore"))
+    if(type %in% c("latent", "lv", "factor", "factor.score", "factorscore")) {
         type <- "lv"
-    if(type %in% c("ov","yhat"))
+    } else if(type %in% c("ov","yhat")) {
         type <- "yhat"
+    } else if(type %in% c("residuals", "resid", "error")) {
+        type <- "resid"
+    }
 
+    # if resid, not for categorical
+    if(type == "resid" && lavmodel@categorical) {
+        stop("lavaan ERROR: casewise residuals not available if data is categorical")
+    }
 
     # append.data? check level
     if(append.data && level > 1L) {
         warning("lavaan WARNING: append.data not available if level > 1L")
         append.data <- FALSE
+    }
+
+    # mdist? -> fsm = TRUE
+    if(mdist) {
+        fsm <- TRUE
     }
 
     # se?
@@ -89,7 +139,7 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
         if(type != "lv") {
             stop("lavaan ERROR: standard errors only available if type = \"lv\"")
         }
-        if(lavInspect(object, "categorical")) {
+        if(lavmodel@categorical) {
             se <- acov <- "none"
             warning("lavaan WARNING: standard errors not available (yet) for non-normal data")
         }
@@ -147,7 +197,7 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
         }
 
         # post fit check (lv pd?)
-        ok <- lav_object_post_check(object)
+        # ok <- lav_object_post_check(object)
         #if(!ok) {
         #    stop("lavaan ERROR: lavInspect(,\"post.check\") is not TRUE; factor scores can not be computed. See the WARNING message.")
         #}
@@ -183,15 +233,45 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
                                lavmodel@ov.x.dummy.lv.idx[[bb]])
                    ret <- out[[g]]
                    if(length(lv.idx) > 0L) {
-                       ret <- out[[g]][, -lv.idx, drop=FALSE]
+                       ret <- out[[g]][, -lv.idx, drop = FALSE]
                    }
                    ret
                })
 
+        # we need to remove the dummy's before we transform
+        if(fsm) {
+            FSM <- lapply(seq_len(lavdata@ngroups), function(g) {
+                       # determine block
+                       if(lavdata@nlevels == 1L) {
+                           bb <- g
+                       } else {
+                           bb <- (g - 1)*lavdata@nlevels + level
+                       }
+                       lv.idx <- c(lavmodel@ov.y.dummy.lv.idx[[bb]],
+                                   lavmodel@ov.x.dummy.lv.idx[[bb]])
+                       #ov.idx <- lavmodel@ov.x.dummy.ov.idx[[bb]]
+                       # or should we use pta$vidx$ov.ind?
+                       ov.ind <- lavpta$vidx$ov.ind[[bb]]
+                       ret <- FSM[[g]]
+                       if(length(lv.idx) > 0L) {
+                           if(is.matrix(FSM[[g]])) {
+                               ret <- FSM[[g]][-lv.idx, ov.ind, drop = FALSE]
+                           } else if(is.list(FSM[[g]])) {
+                               FSM[[g]] <- lapply(FSM[[g]], function(x) {
+                                   ret <- x[-lv.idx, ov.ind, drop = FALSE]
+                                   ret})
+                           }
+                       }
+                       ret
+                   })
+        }
+
         # new in 0.6-16
+        # we assume the dummy lv's have already been removed
         if(transform) {
-            VETA <- lavTech(object, "cov.lv")
-            EETA <- lavTech(object, "mean.lv")
+            VETA <- computeVETA(lavmodel = lavmodel, remove.dummy.lv = TRUE)
+            EETA <- computeEETA(lavmodel = lavmodel,
+                       lavsamplestats = lavsamplestats, remove.dummy.lv = TRUE)
             out <- lapply(seq_len(lavdata@ngroups), function(g) {
                        # determine block
                        if(lavdata@nlevels == 1L) {
@@ -203,12 +283,42 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
                        FS.centered <- scale(out[[g]], center = TRUE,
                                             scale = FALSE)
                        FS.cov <- crossprod(FS.centered)/nrow(FS.centered)
-                       FS.cov.inv <- solve(FS.cov)
+                       FS.cov.inv <- try(solve(FS.cov), silent = TRUE)
+                       if(inherits(FS.cov.inv, "try-error")) {
+                           warning("lavaan WARNING: could not invert (co)variance matrix of factor scores; returning original factor scores.")
+                           return(out[[g]])
+                       }
                        fs.inv.sqrt <- lav_matrix_symmetric_sqrt(FS.cov.inv)
                        veta.sqrt <- lav_matrix_symmetric_sqrt(VETA[[g]])
+                       if(fsm) {
+                           # change FSM
+                           FSM[[g]] <<- veta.sqrt %*% fs.inv.sqrt %*% FSM[[g]]
+                       }
                        tmp <- FS.centered %*% fs.inv.sqrt %*% veta.sqrt
                        ret <- t( t(tmp) + drop(EETA[[g]]) )
 
+                       ret
+                   })
+        }
+
+        # new in 0.6-17
+        if(mdist) {
+            VETA <- computeVETA(lavmodel = lavmodel, remove.dummy.lv = TRUE)
+            EETA <- computeEETA(lavmodel = lavmodel,
+                       lavsamplestats = lavsamplestats, remove.dummy.lv = TRUE)
+            MDIST <- lapply(seq_len(lavdata@ngroups), function(g) {
+                       A <- FSM[[g]]
+                       Sigma <- lavimplied$cov[[g]]
+                       if(transform) {
+                           fs.cov <- VETA[[g]]
+                       } else {
+                           fs.cov <- A %*% Sigma %*% t(A)
+                       }
+                       fs.cov.inv <- solve(fs.cov)
+                       # Mahalobis distance
+                       fs.c <- t( t(out[[g]]) - EETA[[g]] ) # center
+                       df.squared <- rowSums((fs.c %*% fs.cov.inv) * fs.c)
+                       ret <- df.squared # squared!
                        ret
                    })
         }
@@ -217,33 +327,6 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
         if(append.data && level == 1L) {
             out <- lapply(seq_len(lavdata@ngroups), function(g) {
                        ret <- cbind(out[[g]], data.obs[[g]])
-                       ret
-                   })
-        }
-
-
-        if(fsm) {
-            FSM <- lapply(seq_len(lavdata@ngroups), function(g) {
-                       # determine block
-                       if(lavdata@nlevels == 1L) {
-                           bb <- g
-                       } else {
-                           bb <- (g - 1)*lavdata@nlevels + level
-                       }
-                       lv.idx <- c(lavmodel@ov.y.dummy.lv.idx[[bb]],
-                                   lavmodel@ov.x.dummy.lv.idx[[bb]])
-                       ov.idx <- c(lavmodel@ov.y.dummy.ov.idx[[bb]],
-                                   lavmodel@ov.x.dummy.ov.idx[[bb]])
-                       ret <- FSM[[g]]
-                       if(length(lv.idx) > 0L) {
-                           if(is.matrix(FSM[[g]])) {
-                               ret <- FSM[[g]][-lv.idx, -ov.idx, drop = FALSE]
-                           } else if(is.list(FSM[[g]])) {
-                               FSM[[g]] <- lapply(FSM[[g]], function(x) {
-                                   ret <- x[-lv.idx, -ov.idx, drop = FALSE]
-                                   ret})
-                           }
-                       }
                        ret
                    })
         }
@@ -279,7 +362,7 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
                            if(is.matrix(ACOV[[g]])) {
                                ret <- ACOV[[g]][-lv.idx, -lv.idx, drop = FALSE]
                            } else if(is.list(ACOV[[g]])) {
-                               ACOV[[g]] <- lapply(ACOV[[g]], function(x) {
+                               ret <- lapply(ACOV[[g]], function(x) {
                                    ret <- x[-lv.idx, -lv.idx, drop = FALSE]
                                    ret})
                            }
@@ -306,23 +389,31 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
                 }
 
                 if(fsm) {
-                    if(is.matrix(FSM[[g]])) {
+                    if(is.null(FSM[[g]])) {
+                        # skip
+                    } else if(is.matrix(FSM[[g]])) {
                         dimnames(FSM[[g]]) <- list(lavpta$vnames$lv[[gg]],
-                                                   ov.names[[g]]) # !not gg
+                                                   #ov.names[[g]]) # !not gg
+                                                   lavpta$vnames$ov.ind[[gg]])
                     } else if(is.list(FSM[[g]])) {
                         FSM[[g]] <- lapply(FSM[[g]], function(x) {
                             dimnames(x) <- list(lavpta$vnames$lv[[gg]],
-                                                ov.names[[g]]) # !not gg
+                                                #ov.names[[g]]) # !not gg
+                                                lavpta$vnames$ov.ind[[gg]])
                             x})
                     }
                 }
 
                 if(se != "none") {
-                    colnames(SE[[g]]) <- lavpta$vnames$lv[[gg]]
+                    if(!is.null(SE[[g]])) {
+                        colnames(SE[[g]]) <- lavpta$vnames$lv[[gg]]
+                    }
                 }
 
                 if(acov != "none") {
-                    if(is.matrix(ACOV[[g]])) {
+                    if(is.null(ACOV[[g]])) {
+                        # skip
+                    } else if(is.matrix(ACOV[[g]])) {
                         dimnames(ACOV[[g]]) <- list(lavpta$vnames$lv[[gg]],
                                                     lavpta$vnames$lv[[gg]])
                     } else if(is.list(ACOV[[g]])) {
@@ -348,14 +439,21 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
 
         } # label
 
-    # estimated value for the observed indicators, given (estimated)
+    # yhat: estimated value for the observed indicators, given (estimated)
     # factor scores
-    } else if(type == "yhat") {
+    # resid: y - yhat
+    } else if(type %in% c("yhat", "resid")) {
+        resid.flag <- type == "resid"
         out <- lav_predict_yhat(lavobject = NULL, lavmodel = lavmodel,
                    lavdata = lavdata, lavsamplestats = lavsamplestats,
                    lavimplied = lavimplied,
                    data.obs = data.obs, eXo = eXo,
-                   ETA = ETA, method = method, optim.method = optim.method)
+                   ETA = ETA, method = method, optim.method = optim.method,
+                   fsm = fsm,
+                   resid.flag = resid.flag)
+        if(fsm) {
+            FSM <- attr(out, "fsm")
+        }
 
         # label?
         if(label) {
@@ -363,6 +461,55 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
                 colnames(out[[g]]) <- lavpta$vnames$ov[[g]]
             }
         }
+
+        # mdist
+        if(mdist) {
+            LAMBDA <- computeLAMBDA(lavmodel = lavmodel,
+                                    remove.dummy.lv = FALSE)
+            MDIST <- lapply(seq_len(lavdata@ngroups), function(g) {
+                       Sigma <- lavimplied$cov[[g]]; LA <- LAMBDA[[g]]
+                       if(type == "resid") {
+                           ILA <- diag(ncol(Sigma)) - LA %*% FSM[[g]]
+                           Omega.e <- ILA %*% Sigma %*% t(ILA)
+                           eig <- eigen(Omega.e, symmetric = TRUE)
+                           A <- eig$vectors[,seq_len(nrow(LA) - ncol(LA)),
+                                             drop = FALSE]
+                       } else if(type == "yhat") {
+                           LAA <- LA %*% FSM[[g]]
+                           Omega.e <- LAA %*% Sigma %*% t(LAA)
+                           eig <- eigen(Omega.e, symmetric = TRUE)
+                           A <- eig$vectors[,seq_len(ncol(LA)),drop = FALSE]
+                       }
+                       outA <- apply(out[[g]], 1L, function(x)
+                                       colSums(A * x, na.rm = TRUE))
+                       if(is.matrix(outA)) {
+                           outA <- t(outA)
+                       } else {
+                           outA <- as.matrix(outA)
+                       }
+                       # if(lavmodel@meanstructure) {
+                       #     est.mean <- drop(t(lavimplied$mean[[g]]) %*% A)
+                       #     if(type == "resid") {
+                       #         obs.mean <- drop(lavh1$implied$mean[[g]] %*% A)
+                       #         est.mean <- drop(t(lavimplied$mean[[g]]) %*% A)
+                       #         outA.mean <- obs.mean - est.mean
+                       #     } else if(type == "yhat") {
+                       #         outA.mean <- est.mean
+                       #     }
+                       # } else {
+                       #     outA.mean <- colMeans(outA)
+                       # }
+                       outA.cov <-  t(A) %*% Omega.e %*% A
+                       outA.cov.inv <- solve(outA.cov)
+                       # Mahalobis distance
+                       # outA.c <- t( t(outA) - outA.mean ) # center
+                       outA.c <- outA
+                       df.squared <- rowSums((outA.c %*% outA.cov.inv) * outA.c)
+                       ret <- df.squared # squared!
+                       ret
+                   })
+        }
+
 
     # density for each observed item, given (estimated) factor scores
     } else if(type == "fy") {
@@ -386,7 +533,7 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
     # lavaan.matrix
     out <- lapply(out, "class<-", c("lavaan.matrix", "matrix"))
 
-    if(lavdata@ngroups == 1L) {
+    if(lavdata@ngroups == 1L && drop.list.single.group) {
         res <- out[[1L]]
     } else {
         res <- out
@@ -423,8 +570,12 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
         res <- DATA
     }
 
-    if(fsm) {
+    if(fsm && type == "lv") {
         attr(res, "fsm") <- FSM
+    }
+
+    if(mdist) {
+        attr(res, "mdist") <- MDIST
     }
 
     if(se != "none") {
@@ -607,6 +758,11 @@ lav_predict_eta_normal <- function(lavobject = NULL,  # for convenience
                 Data.B <- matrix(0, nrow = nrow(MB.j),
                                     ncol = ncol(data.obs[[g]]))
                 Data.B[, ov.idx[[1]] ] <- MB.j
+                between.idx <- Lp$between.idx[[2*g]]
+                if(length(between.idx) > 0L) {
+                  Data.B[, between.idx] <- data.obs[[g]][!duplicated(Lp$cluster.idx[[2]]),
+                                                         between.idx]
+                }
                 data.obs.g <- Data.B[, ov.idx[[2]] ]
             } else {
                 stop("lavaan ERROR: only 2 levels are supported")
@@ -885,6 +1041,11 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
                 Data.B <- matrix(0, nrow = nrow(MB.j),
                                     ncol = ncol(data.obs[[g]]))
                 Data.B[, ov.idx[[1]] ] <- MB.j
+                between.idx <- Lp$between.idx[[2*g]]
+                if(length(between.idx) > 0L) {
+                  Data.B[, between.idx] <- data.obs[[g]][!duplicated(Lp$cluster.idx[[2]]),
+                                                         between.idx]
+                }
                 data.obs.g <- Data.B[, ov.idx[[2]] ]
             } else {
                 stop("lavaan ERROR: only 2 levels are supported")
@@ -1141,7 +1302,7 @@ lav_predict_eta_ebm_ml <- function(lavobject = NULL,  # for convenience
     EETAx <- computeEETAx(lavmodel = lavmodel, lavsamplestats = lavsamplestats,
                           eXo = eXo, nobs = lapply(data.obs, NROW),
                           remove.dummy.lv = TRUE) ## FIXME?
-    TH    <- computeTH(   lavmodel = lavmodel)
+    TH    <- computeTH(   lavmodel = lavmodel, delta = FALSE)
     THETA <- computeTHETA(lavmodel = lavmodel)
 
     # check for zero entries in THETA (new in 0.6-4)
@@ -1305,7 +1466,9 @@ lav_predict_yhat <- function(lavobject = NULL, # for convience
                              # options
                              method = "EBM",
                              duplicate = FALSE,
-                             optim.method = "bfgs") {
+                             optim.method = "bfgs",
+                             fsm = FALSE,
+                             resid.flag = FALSE) {
 
     # full object?
     if(inherits(lavobject, "lavaan")) {
@@ -1332,7 +1495,8 @@ lav_predict_yhat <- function(lavobject = NULL, # for convience
                    lavdata = lavdata, lavsamplestats = lavsamplestats,
                    lavimplied = lavimplied,
                    data.obs = data.obs, eXo = eXo, method = method,
-                   optim.method = optim.method)
+                   optim.method = optim.method, fsm = fsm)
+        FSM <- attr(ETA, "fsm")
     } else {
         # matrix
         if(is.matrix(ETA)) { # user-specified?
@@ -1367,7 +1531,20 @@ lav_predict_yhat <- function(lavobject = NULL, # for convience
                    ret })
     }
 
-    YHAT
+    # residuals? compute y - yhat
+    if(resid.flag) {
+        RES <- lapply(seq_len(lavdata@ngroups), function(g) {
+                   ret <- data.obs[[g]] - YHAT[[g]]
+                   ret })
+    } else {
+        RES <- YHAT
+    }
+
+    # fsm?
+    if(fsm)
+    attr(RES, "fsm") <- FSM
+
+    RES
 }
 
 # conditional density y -- assuming independence!!
@@ -1414,10 +1591,7 @@ lav_predict_fy <- function(lavobject = NULL, # for convience
                 duplicate = FALSE, optim.method = optim.method)
 
     THETA <- computeTHETA(lavmodel = lavmodel)
-    TH    <- computeTH(   lavmodel = lavmodel)
-
-    # all normal?
-    NORMAL <- all(lavdata@ov$type == "numeric")
+    TH    <- computeTH(   lavmodel = lavmodel, delta = FALSE)
 
     FY <- vector("list", length=lavdata@ngroups)
     for(g in seq_len(lavdata@ngroups)) {
@@ -1551,7 +1725,8 @@ lav_predict_fy_eta.i <- function(lavmodel = NULL, lavdata = NULL,
                             ov.y.dummy.ov.idx = lavmodel@ov.y.dummy.ov.idx[[g]],
                             ov.x.dummy.ov.idx = lavmodel@ov.x.dummy.ov.idx[[g]],
                             ov.y.dummy.lv.idx = lavmodel@ov.y.dummy.lv.idx[[g]],
-                            ov.x.dummy.lv.idx = lavmodel@ov.x.dummy.lv.idx[[g]])
+                            ov.x.dummy.lv.idx = lavmodel@ov.x.dummy.lv.idx[[g]],
+                            delta = FALSE)
 
     # P(y_i | eta_i, x_i) for all items
     if(all(lavdata@ov$type == "numeric")) {

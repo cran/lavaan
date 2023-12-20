@@ -24,6 +24,11 @@
 
 # note: robust MLM == robust MLMV
 
+# categorical data:
+# Savalei, V. (2021). Improving fit indices in structural equation modeling with
+# categorical data. Multivariate Behavioral Research, 56(3), 390-407. doi:
+# 10.1080/00273171.2020.1717922
+
 # when missing = "fiml":
 # Zhang, X., & Savalei, V. (2023). New computations for RMSEA and CFI following
 # FIML and TS estimation with missing data. Psychological Methods, 28(2),
@@ -594,9 +599,9 @@ lav_fit_measures_check_baseline <- function(fit.indep = NULL, object = NULL) {
         if(!sameTest) {
             warning("lavaan WARNING:\n",
                     "\t Baseline model was using test(s) = ",
-                    dQuote(fit.indep@Options$test),
+                    paste(dQuote(fit.indep@Options$test), collapse = ","),
                     "\n\t But original model was using test(s) = ",
-                    dQuote(object@Options$test),
+                    paste(dQuote(object@Options$test), collapse = ","),
                     "\n\t Refitting baseline model!")
         }
         sameEstimator <- ( object@Options$estimator ==

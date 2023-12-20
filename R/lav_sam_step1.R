@@ -97,7 +97,18 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
     if(lavoptions$se == "none") {
         lavoptions.mm$se <- "none"
     } else {
-        lavoptions.mm$se <- "standard" # may be overriden later
+        # categorical?
+        if(FIT@Model@categorical) {
+            lavoptions.mm$se <- "robust.sem"
+        } else if(lavoptions$estimator.orig == "MLM") {
+            lavoptions.mm$se <- "robust.sem"
+        } else if(lavoptions$estimator.orig == "MLR") {
+            lavoptions.mm$se <- "robust.huber.white"
+        } else if(lavoptions$estimator.orig == "PML") {
+            lavoptions.mm$se <- "robust.huber.white"
+        } else {
+            lavoptions.mm$se <- "standard" # may be overriden later
+        }
     }
     #if(sam.method == "global") {
     #    lavoptions.mm$test <- "none"
@@ -152,6 +163,12 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
         PTM$est <- NULL
         PTM$se <- NULL
 
+        # check for categorical in PTM in this mm-block
+        if(!any(PTM$op == "|")) {
+            slotOptions.mm$categorical <- FALSE
+            slotOptions.mm$.categorical <- FALSE
+        }
+
         # update slotData for this measurement block
         ov.names.block <- lapply(1:ngroups, function(g)
             unique(unlist(lav_partable_vnames(PTM, type = "ov", group = g))))
@@ -200,10 +217,26 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
 
         # fill in point estimates measurement block (including slack values)
         PTM <- MM.FIT[[mm]]@ParTable
-        PT$est[ seq_len(length(PT$lhs)) %in% mm.idx &
-               (PT$free > 0L | PT$op %in% c(":=", ">", "<")) ] <-
-            PTM$est[ (PTM$free > 0L | PTM$op %in% c(":=", "<", ">")) &
-                     PTM$user != 3L ]
+        # pt.idx: the row-numbers in PT that correspond to the rows in PTM
+        #pt.idx <- lav_partable_map_id_p1_in_p2(p1 = PTM, p2 = PT,
+        #             stopifnotfound = TRUE, exclude.nonpar = FALSE)
+        # pt.idx == mm.idx
+        ptm.idx <- which((PTM$free > 0L | PTM$op %in% c(":=", "<", ">")) &
+                          PTM$user != 3L)
+        # if categorical, add non-free residual variances
+        if(fit.mm.block@Model@categorical || fit.mm.block@Model@correlation) {
+            extra.idx <- which(PTM$op %in% c("~~", "~*~") &
+                               PTM$lhs == PTM$rhs &
+                               PTM$user == 0L &
+                               PTM$free == 0L &
+                               PTM$ustart == 1)
+            if(length(extra.idx) > 0L) {
+                ptm.idx2 <- c(ptm.idx, extra.idx)
+            }
+            PT$est[mm.idx[ptm.idx2]] <- PTM$est[ptm.idx2]
+        } else {
+            PT$est[mm.idx[ptm.idx]] <- PTM$est[ptm.idx]
+        }
 
         # fill in standard errors measurement block
         if(lavoptions$se != "none") {
@@ -215,21 +248,25 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
                 PTM.free <- PTM$free
             }
 
-            PT$se[ seq_len(length(PT$lhs)) %in% mm.idx & PT$free > 0L ] <-
-                PTM$se[ PTM$free > 0L & PTM$user != 3L]
+            ptm.se.idx <- which(PTM$free > 0L & PTM$user != 3L) # no :=, <, >
+            #PT$se[ seq_len(length(PT$lhs)) %in% mm.idx & PT$free > 0L ] <-
+            #    PTM$se[ PTM$free > 0L & PTM$user != 3L]
+            PT$se[mm.idx[ptm.se.idx]] <- PTM$se[ptm.se.idx]
 
             # compute variance matrix for this measurement block
             sigma.11 <- MM.FIT[[mm]]@vcov$vcov
 
             # fill in variance matrix
-            par.idx <- PT.free[ seq_len(length(PT$lhs)) %in% mm.idx &
-                                PT$free > 0L ]
-            keep.idx <- PTM.free[ PTM$free > 0 & PTM$user != 3L ]
+            par.idx <- PT.free[mm.idx[ptm.idx]]
+            keep.idx <- PTM.free[ptm.idx]
+            #par.idx <- PT.free[ seq_len(length(PT$lhs)) %in% mm.idx &
+            #                    PT$free > 0L ]
+            #keep.idx <- PTM.free[ PTM$free > 0 & PTM$user != 3L ]
             Sigma.11[par.idx, par.idx] <-
                 sigma.11[keep.idx, keep.idx, drop = FALSE]
 
-            # store indices in step1.free.idx
-            step1.free.idx <- c(step1.free.idx, par.idx)
+            # store (ordered) indices in step1.free.idx
+            step1.free.idx <- c(step1.free.idx, sort.int(par.idx))
         }
 
     } # measurement block
@@ -293,6 +330,7 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
     LAMBDA.list <- vector("list", nMMblocks)
     THETA.list  <- vector("list", nMMblocks)
     NU.list     <- vector("list", nMMblocks)
+    DELTA.list  <- vector("list", nMMblocks) # correlation/categorical
     LV.idx.list <- vector("list", nMMblocks)
     OV.idx.list <- vector("list", nMMblocks)
     for(mm in seq_len(nMMblocks)) {
@@ -306,9 +344,13 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
         # store LAMBDA/THETA
         LAMBDA.list[[mm]] <- computeLAMBDA(fit.mm.block@Model )
          THETA.list[[mm]] <- computeTHETA( fit.mm.block@Model )
-        if(lavoptions$meanstructure) {
+        if(fit.mm.block@Model@meanstructure) {
             NU.list[[mm]] <- computeNU( fit.mm.block@Model,
                              lavsamplestats = fit.mm.block@SampleStats )
+        }
+        if(fit.mm.block@Model@categorical || fit.mm.block@Model@correlation) {
+            delta.idx <- which(names(fit.mm.block@Model@GLIST) == "delta")
+            DELTA.list[[mm]] <- fit.mm.block@Model@GLIST[delta.idx]
         }
 
         for(bb in seq_len(nblocks)) {
@@ -324,8 +366,12 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
     # assemble global LAMBDA/THETA (per block)
     LAMBDA <- computeLAMBDA(FIT@Model, handle.dummy.lv = FALSE)
     THETA  <- computeTHETA(FIT@Model, fix = FALSE) # keep dummy lv
-    if(lavoptions$meanstructure) {
+    if(FIT@Model@meanstructure) {
         NU <- computeNU(FIT@Model, lavsamplestats = FIT@SampleStats)
+    }
+    if(FIT@Model@categorical || FIT@Model@correlation) {
+        delta.idx <- which(names(FIT@Model@GLIST) == "delta")
+        DELTA <- FIT@Model@GLIST[delta.idx]
     }
     for(b in seq_len(nblocks)) {
         # remove 'lv.interaction' columns from LAMBDA[[b]]
@@ -349,11 +395,15 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
                 LAMBDA[[b]][dummy.ov.idx,] <- 0
                 LAMBDA[[b]][cbind(dummy.ov.idx, dummy.lv.idx)] <- 1
             }
-            if(lavoptions$meanstructure) {
+            if(FIT@Model@meanstructure) {
                 NU[[b]][ov.idx, 1] <- NU.list[[mm]][[b]]
                 if(length(dummy.ov.idx)) {
                     NU[[b]][dummy.ov.idx, 1] <- 0
                 }
+            }
+            if((FIT@Model@categorical || FIT@Model@correlation) &&
+                !is.null(DELTA.list[[mm]][[b]])) { # could be mixed cat/cont
+                DELTA[[b]][ov.idx, 1] <- DELTA.list[[mm]][[b]]
             }
         }
 
@@ -367,8 +417,11 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
     # store LAMBDA/THETA/NU per block
     STEP1$LAMBDA <- LAMBDA
     STEP1$THETA  <- THETA
-    if(lavoptions$meanstructure) {
+    if(FIT@Model@meanstructure) {
         STEP1$NU <- NU
+    }
+    if(FIT@Model@categorical || FIT@Model@correlation) {
+        STEP1$DELTA <- DELTA
     }
 
     VETA   <- vector("list", nblocks)
@@ -400,8 +453,6 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
                                   lavsamplestats = FIT@SampleStats,
                                   lavoptions     = FIT@Options)
     }
-
-
 
     for(b in seq_len(nblocks)) {
 
@@ -461,6 +512,13 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
             this.group <- b
             YBAR <- FIT@h1$implied$mean[[b]] # EM version if missing="ml"
             COV  <- FIT@h1$implied$cov[[b]]
+            # rescale COV?
+            if(FIT@Model@categorical || FIT@Model@correlation) {
+                SCALE.vector <- 1/(drop(DELTA[[b]]))
+                COV  <- SCALE.vector * COV * rep(SCALE.vector, each = ncol(COV))
+                YBAR <- SCALE.vector * YBAR # Checkme!
+            }
+            # do we need ICOV?
             if(local.M.method == "GLS") {
                 if(FIT@Options$sample.cov.rescale) {
                    # get unbiased S
@@ -532,6 +590,10 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
 
         # check for lv.interactions
         if(lv.interaction.flag && length(lv.int.names) > 0L) {
+
+            if(FIT@Model@categorical || FIT@Model@correlation) {
+                stop("SAM + lv interactions do not work (yet) if correlation structures are used.")
+            }
 
             # EETA2
             EETA1 <- EETA[[b]]

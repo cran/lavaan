@@ -179,6 +179,32 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     if(header) {
         cat("\nParameter Estimates:\n\n")
 
+        # info about parameterization (if categorical only)
+        categorical.flag <- attr(x, "categorical")
+        if(categorical.flag) {
+            # container
+            c1 <- c2 <- character(0L)
+
+            # which parameterization?
+            c1 <- c(c1, "Parameterization")
+            tmp.txt <- attr(x, "parameterization")
+            c2 <- c(c2, paste(toupper(substring(tmp.txt, 1, 1)),
+                                      substring(tmp.txt, 2), sep = ""))
+
+            # format c1/c2
+            c1 <- format(c1, width = 38L)
+            c2 <- format(c2,
+                   width = 13L + max(0, (nd - 3L)) * 4L, justify = "right")
+
+            # create character matrix
+            M <- cbind(c1, c2, deparse.level = 0)
+            colnames(M) <- rep("",  ncol(M))
+            rownames(M) <- rep(" ", nrow(M))
+
+            # print
+            write.table(M, row.names = TRUE, col.names = FALSE, quote = FALSE)
+        }
+
         # info about standard errors (if we have x$se only)
         # 1. information
         # 2. se
@@ -841,8 +867,6 @@ print.lavaan.fsr <- function(x, ..., nd = 3L, mm = FALSE, struc = FALSE) {
     if(struc) {
         cat("Structural Part\n")
         cat("\n")
-        #print.lavaan.parameterEstimates(y$PE, ..., nd = nd)
-
         print(summary(y$STRUC.FIT, fit.measures = FALSE, estimates = FALSE,
                                     modindices = FALSE))
         FIT <- fitMeasures(y$STRUC.FIT, fit.measures="default")
@@ -853,7 +877,7 @@ print.lavaan.fsr <- function(x, ..., nd = 3L, mm = FALSE, struc = FALSE) {
     PE <- parameterEstimates(y$STRUC.FIT, ci = FALSE,
                              remove.eq = FALSE, remove.system.eq = TRUE,
                              remove.ineq = FALSE, remove.def = FALSE,
-                             remove.nonfree = FALSE,
+                             remove.nonfree = FALSE, remove.unused = TRUE,
                              output = "text", header = TRUE)
     print.lavaan.parameterEstimates(PE, ..., nd = nd)
 

@@ -73,6 +73,13 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
         }
     }
 
+    # sample.cov.robust cannot be used if sampling weights are used
+    if(lavoptions$sample.cov.robust) {
+        if(!is.null(WT[[1]])) {
+            stop("lavaan ERROR: sample.cov.robust = TRUE does not work (yet) if sampling weights are provided.")
+        }
+    }
+
     # sample statistics per group
 
     # joint (y,x)
@@ -582,6 +589,13 @@ lav_samplestats_from_data <- function(lavdata           = NULL,
                     }
                     var[[g]]  <- diag(cov[[g]])
                     mean[[g]] <- out$center
+                } else if(lavoptions$sample.cov.robust) {
+                    # fixme: allow prob/max.it to be options
+                    out <- lav_cov_huber(Y = X[[g]], prob = 0.95,
+                                         max.it = 200L, tol = 1e-07)
+                    cov[[g]]  <- out$Sigma
+                    var[[g]]  <- diag(cov[[g]])
+                    mean[[g]] <- out$Mu
                 } else {
                     cov[[g]]  <-   stats::cov(X[[g]], use = "pairwise")
                     # rescale cov by (N-1)/N? (only COV!)
@@ -1677,17 +1691,19 @@ lav_samplestats_cluster_patterns <- function(Y = NULL, Lp = NULL,
         # cluster-means
         Y2 <- rowsum.default(Y1, group = cluster.idx, reorder = FALSE,
                      na.rm = FALSE) / cluster.size
-
-        if(length(within.idx) > 0L) {
-            for(i in 1:length(within.idx)) {
-                Y2[, within.idx[i]] <- Y1.means[within.idx[i]]
-            }
-        }
-
         Y2c <- t( t(Y2) - Y1.means )
 
         # compute S.w
-        Y1a <- Y1 - Y2[cluster.idx, , drop = FALSE]
+        # center within variables by grand mean instead of group mean?
+        # (YR: apparently not for S.PW)
+
+        Y2a <- Y2
+        #if(length(within.idx) > 0L) {
+        #    for(i in 1:length(within.idx)) {
+        #        Y2a[, within.idx[i]] <- Y1.means[within.idx[i]]
+        #    }
+        #}
+        Y1a <- Y1 - Y2a[cluster.idx, , drop = FALSE]
         S.w <- lav_matrix_crossprod(Y1a) / (N - nclusters)
 
         # S.b
