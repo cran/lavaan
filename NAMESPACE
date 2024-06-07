@@ -83,6 +83,7 @@ export("lavaan", "cfa", "sem", "growth",
        #"lavData",
        "lavPredict",
        "lavPredictY",
+       "lavPredictY_cv",
        "lavCor",
 
        # API functions
@@ -163,8 +164,11 @@ export("lavaan", "cfa", "sem", "growth",
        "lav_data_update",
  
        # lav_samplestats
-       "lav_samplestats_from_data"
+       "lav_samplestats_from_data",
 
+       # estimation
+       "lav_export_estimation"
+       
        # deprecated functions
        #"vech", "vech.reverse", "vechru", "vechru.reverse", "lower2full",
        #"vechr", "vechr.reverse", "vechu", "vechu.reverse", "upper2full",

@@ -17,7 +17,7 @@ string vector holding multiple option names. All option names are converted to
 lower case.}
 \item{default}{If a single option is specified but not available, this value
 is returned.}
-\item{mimic}{Character. Adjust the option list for this mimic flag.}
+\item{mimic}{Not used for now.}
 }
 \details{
 This is the full list of options that are accepted by the \code{lavaan()}
@@ -82,6 +82,15 @@ Model features (always available):
     \item{\code{parameterization}:}{Currently only used if data is 
       categorical. If \code{"delta"}, the delta parameterization is used. 
       If \code{"theta"}, the theta parameterization is used.}
+    \item{\code{correlation}:}{Only used for (single-level)
+     continuous data. If \code{TRUE}, analyze a correlation matrix (instead
+     of a (co)variance matrix). This implies that the residual observed
+     variances are no longer free parameters. Instead, they are set to
+     values to ensure the model-implied variances are unity. This also
+     affects the standard errors. The only available estimators are GLS and
+     WLS, which produce correct standard errors and a correct test statistic
+     under normal and non-normal conditions respectively. Always assuming
+     \code{fixed.x = FALSE} and \code{conditional.x = FALSE} (for now).}
 }
 
 Model features (only available for the \code{lavaan()} function):
@@ -113,8 +122,15 @@ Model features (only available for the \code{lavaan()} function):
 Data options:
 
 \describe{
-    \item{\code{std.ov}:}{If \code{TRUE}, all observed variables are 
-      standardized before entering the analysis.}
+    \item{\code{std.ov}:}{If \code{TRUE}, observed variables are 
+      standardized before entering the analysis. By default, these are
+      only the non-exogenous observed variables, unless \code{fixed.x = FALSE}.
+      Use this option with caution; it can be used to test if (for example)
+      nonconvergence was due to scaling issues. But this is still a covariance
+      based analysis, in the sense that no constraints are involved (to 
+      ensure the model-implied (co)variance matrix has unit variances), and the
+      standard errors still assume that the input was unstandardized. See
+      also the \code{correlation} option.}
     \item{\code{missing}:}{The default setting is \code{"listwise"}: all
          cases with missing values
       are removed listwise from the data before the analysis starts. This is
@@ -173,6 +189,10 @@ Data options:
       If \code{"group"}, the sampling weights are normalized per group:
       by dividing by the sum of the weights (in each group), and multiplying
       again by the group size. The default is \code{"total"}.}
+    \item{\code{samplestats}:}{Logical. If \code{FALSE}, no sample statistics
+      will be computed (and no estimation can take place). This can be useful
+      when only a dummy lavaan object is requested, without any computations.
+      The default is \code{TRUE}.}
 }
 
 Data summary options:
@@ -184,8 +204,12 @@ Data summary options:
       on the estimator and the likelihood option: it is set to \code{TRUE} if 
       maximum likelihood estimation is used and \code{likelihood="normal"}, 
       and \code{FALSE} otherwise.}
-    \item{\code{ridge}:}{Numeric. Small constant used for ridging. Only used 
-      if the sample covariance matrix is non positive definite.}
+    \item{\code{ridge}:}{Logical. If \code{TRUE} a small constant value will
+      be added the diagonal elements of the covariance (or correlation) 
+      matrix before analysis. The value can be set using the 
+      \code{ridge.constant} option.}
+    \item{\code{ridge.constant}:}{Numeric. Small constant used for ridging.
+      The default value is 1e-05.}
 }
 
 Multiple group options:
@@ -490,10 +514,11 @@ Check options:
 Verbosity options:
 
 \describe{
-    \item{\code{verbose}:}{If \code{TRUE}, the function value is printed out 
+    \item{\code{verbose}:}{If \code{TRUE}, show what lavaan is doing. During
+      estimation, the function value is printed out 
       during each iteration.}
-    \item{\code{warn}:}{If \code{TRUE}, some (possibly harmless) warnings 
-      are printed out during the iterations.}
+    \item{\code{warn}:}{If \code{FALSE}, suppress all lavaan-specific 
+      warning messages.}
     \item{\code{debug}:}{If \code{TRUE}, debugging information is printed 
       out.}
 }
@@ -529,7 +554,7 @@ Miscellaneous:
       the model parameters in the vcov slot of the fitted lavaan object.}
     \item{\code{parser}}{Character. If \code{"new"} (the default), the new
       parser is used to parse the model syntax. If \code{"old"}, the original
-      (pre 0.6-17) parser is used.}
+      (pre 0.6-18) parser is used.}
 }
 
 }
