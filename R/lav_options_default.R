@@ -369,7 +369,8 @@ lav_options_default <- function() {
   # optimization
   elm("control", list(), oklen = c(0L, 100L))
   elm("optim.method", "default", chr = c(
-    "nlminb", "gn", "default", "noniter", "none", "em"
+    "nlminb", "nlminb0", "nlminb1", "nlminb2",
+    "bfgs", "l.bfgs.b", "gn", "default", "noniter", "none", "em"
   )) # gn for DLS, nlminb rest
   elm("optim.attempts", 4L, nm = "[1, 4]")
   elm("optim.force.converged", FALSE, bl = TRUE)
@@ -406,7 +407,7 @@ lav_options_default <- function() {
   elm("parallel", "no", chr = c(
     "no", "multicore", "snow"
   ))
-  maxcpu <- parallel::detectCores() - 1L
+  maxcpu <- max(1L, parallel::detectCores() - 1L)
   elm("ncpus", maxcpu, nm = paste0("[1,", maxcpu, "]"))
   elm("cl", NULL, oklen = c(0L, 1L))
   elm("iseed", NULL, oklen = c(0L, 1L))
@@ -416,6 +417,7 @@ lav_options_default <- function() {
       nm = "[0, 1]", oklen = c(1L, -2L))
   elm("zero.keep.margins", "default", chr = "default", bl = TRUE)
   elm("zero.cell.warn", FALSE, bl = TRUE) # since 0.6-1
+  elm("allow.empty.cell", FALSE, bl = TRUE) # since 0.6-19
   elm("cat.wls.w", TRUE, bl = TRUE) # since 0.6-18
 
   # starting values (char values checked in lav_options_set())
@@ -428,6 +430,7 @@ lav_options_default <- function() {
   elm("check.vcov", TRUE, bl = TRUE)
   elm("check.lv.names", TRUE, bl = TRUE)
   elm("check.lv.interaction", TRUE, bl = TRUE)
+  elm("check.delta.cat.mediator", TRUE, bl = TRUE)
 
   # more models/info
   elm("h1", TRUE, bl = TRUE)

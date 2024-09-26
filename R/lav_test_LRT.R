@@ -69,7 +69,7 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
     if (type == "cf") {
       lav_msg_warn(gettext("`type' argument is ignored for a single model"))
     }
-    return(lav_test_lrt_single_model(object))
+    return(lav_test_lrt_single_model(object, method = method, test = test, type = type))
   }
 
   # list of models
@@ -137,7 +137,9 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
     scaled <- TRUE
     # which test to choose by default?
     # i.e., not determined by method=
-    scaledList <- sapply(object@test, function(x) !is.null(x$scaled.test.stat))
+    scaledList <- sapply(mods[[ which(ndf > 0)[1] ]]@test, # first mod with df>0
+                         #FIXME? If no mods have df > 0, this still yields error
+                         function(x) !is.null(x$scaled.test.stat))
     scaled.idx <- which(scaledList)[[1]]
     default.TEST <- object@test[[scaled.idx]]$test
     if (test == "default") {
@@ -474,7 +476,8 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
 
 
 # anova table for a single model
-lav_test_lrt_single_model <- function(object) {
+lav_test_lrt_single_model <- function(object, method = "default",
+                                      test = "default", type = "Chisq") {
   estimator <- object@Options$estimator
 
   aic <- bic <- c(NA, NA)
@@ -483,32 +486,62 @@ lav_test_lrt_single_model <- function(object) {
     bic <- c(NA, BIC(object))
   }
 
-  if (length(object@test) > 1L) {
-    val <- data.frame(
-      Df = c(0, object@test[[2L]]$df),
-      AIC = aic,
-      BIC = bic,
-      Chisq = c(0, object@test[[2L]]$stat),
-      "Chisq diff" = c(NA, object@test[[2L]]$stat),
-      "Df diff" = c(NA, object@test[[2L]]$df),
-      "Pr(>Chisq)" = c(NA, object@test[[2L]]$pvalue),
-      row.names = c("Saturated", "Model"),
-      check.names = FALSE
-    )
-    attr(val, "heading") <- "Chi-Squared Test Statistic (scaled)\n"
+  ## determine which @test element
+  tn <- names(object@test)
+  if (is.null(tn)) {
+    tn <- "standard" # for lavaan <0.6 objects
+  }
+  if (length(tn) == 1L) {
+    TEST <- 1L # only choice
+
+    ## More than 1.  Cycle through possible user specifications:
+  } else if (method[1] == "standard") {
+    TEST <- 1L
+  } else if (grepl(pattern = "browne", x = type) && type %in% tn) {
+    TEST <- type
+  } else if (test %in% tn) {
+    TEST <- test
   } else {
-    val <- data.frame(
-      Df = c(0, object@test[[1L]]$df),
-      AIC = aic,
-      BIC = bic,
-      Chisq = c(0, object@test[[1L]]$stat),
-      "Chisq diff" = c(NA, object@test[[1L]]$stat),
-      "Df diff" = c(NA, object@test[[1L]]$df),
-      "Pr(>Chisq)" = c(NA, object@test[[1L]]$pvalue),
-      row.names = c("Saturated", "Model"),
-      check.names = FALSE
-    )
+    ## Nothing explicitly (or validly) requested.
+    ## But there is > 1 test, so take the second element (old default)
+    TEST <- 2L
+  }
+
+  ## anova table
+  val <- data.frame(
+    Df = c(0, object@test[[TEST]]$df),
+    AIC = aic,
+    BIC = bic,
+    Chisq = c(0, object@test[[TEST]]$stat),
+    "Chisq diff" = c(NA, object@test[[TEST]]$stat),
+    "Df diff" = c(NA, object@test[[TEST]]$df),
+    "Pr(>Chisq)" = c(NA, object@test[[TEST]]$pvalue),
+    row.names = c("Saturated", "Model"),
+    check.names = FALSE
+  )
+  ## scale/shift attributes
+  if (!is.null(object@test[[TEST]]$scaling.factor)) {
+    attr(val, "scale") <- c(NA, object@test[[TEST]]$scaling.factor)
+  }
+  if (!is.null(object@test[[TEST]]$shift.parameter)) {
+    attr(val, "shift") <- c(NA, object@test[[TEST]]$shift.parameter)
+  }
+
+  ## heading
+  if (grepl(pattern = "browne", x = TEST)) {
+    attr(val, "heading") <- object@test[[TEST]]$label
+
+  } else if (TEST == 1L) {
     attr(val, "heading") <- "Chi-Squared Test Statistic (unscaled)\n"
+
+  } else {
+    LABEL <- object@test[[TEST]]$label
+    attr(val, "heading") <- paste0("Chi-Squared Test Statistic (scaled",
+                                   ifelse(TEST == "scaled.shifted",
+                                          yes = " and shifted)", no = ")"),
+                                   ifelse(is.null(LABEL),
+                                          yes = "\n", no = paste("\n ", LABEL)),
+                                   "\n")
   }
 
   class(val) <- c("anova", class(val))

@@ -45,6 +45,9 @@ lavData <- function(data = NULL, # data.frame
     level.label <- character(0L)
   }
 
+  # allow empty categories of ordinal variable
+  allow.empty.cell <- lavoptions$allow.empty.cell
+
   # block.labels
   block.label <- character(0L)
   if (length(group.label) > 0L && length(level.label) == 0L) {
@@ -147,7 +150,8 @@ lavData <- function(data = NULL, # data.frame
       ov.names.l = ov.names.l,
       std.ov = std.ov,
       missing = missing,
-      allow.single.case = allow.single.case
+      allow.single.case = allow.single.case,
+      allow.empty.cell = allow.empty.cell
     )
     sample.cov <- NULL # not needed, but just in case
   }
@@ -261,7 +265,7 @@ lavData <- function(data = NULL, # data.frame
     }
 
     # if std.ov = TRUE, give a warning (suggested by Peter Westfall)
-    if (std.ov) {
+    if (std.ov && !lavoptions$correlation) {
       lav_msg_warn(gettext(
         "std.ov argument is ignored if only sample statistics are provided."))
     }
@@ -504,7 +508,8 @@ lav_data_full <- function(data = NULL, # data.frame
                           ov.names.l = list(), # var per level
                           std.ov = FALSE, # standardize ov's?
                           missing = "listwise", # remove missings?
-                          allow.single.case = FALSE # allow single case?
+                          allow.single.case = FALSE, # allow single case?
+                          allow.empty.cell = FALSE
 ) {
   # number of groups and group labels
   if (!is.null(group) && length(group) > 0L) {
@@ -551,6 +556,9 @@ lav_data_full <- function(data = NULL, # data.frame
     group.label <- character(0L)
     group <- character(0L)
   }
+
+  # ensure allow.empty.cell is logical
+  if (is.null(allow.empty.cell)) allow.empty.cell <- FALSE
 
   # sampling weights
   if (!is.null(sampling.weights)) {
@@ -708,7 +716,7 @@ lav_data_full <- function(data = NULL, # data.frame
   ov <- lav_dataframe_vartable(
     frame = data, ov.names = ov.names,
     ov.names.x = ov.names.x, ordered = ordered,
-    as.data.frame. = FALSE
+    as.data.frame. = FALSE, allow.empty.cell = allow.empty.cell
   )
 
   # do some checking
@@ -829,6 +837,7 @@ lav_data_full <- function(data = NULL, # data.frame
   weights <- vector("list", length = ngroups)
 
   # collect information per upper-level group
+  # datam <- data.matrix(data) # YR: not yet, this breaks the stuart package!
   for (g in 1:ngroups) {
     # extract variables in correct order
     if (nlevels > 1L) {
@@ -895,6 +904,7 @@ lav_data_full <- function(data = NULL, # data.frame
     }
 
     # extract data
+    #X[[g]] <- datam[case.idx[[g]], ov.idx, drop = FALSE]
     X[[g]] <- data.matrix(data[case.idx[[g]], ov.idx, drop = FALSE])
     dimnames(X[[g]]) <- NULL ### copy?
 
@@ -924,7 +934,7 @@ lav_data_full <- function(data = NULL, # data.frame
     if (length(user.ordered.idx) > 0L) {
       for (i in user.ordered.idx) {
         X[[g]][, i][is.na(X[[g]][, i])] <- NA # change NaN to NA
-        X[[g]][, i] <- as.numeric(as.factor(X[[g]][, i]))
+        if (!allow.empty.cell) X[[g]][, i] <- as.numeric(as.factor(X[[g]][, i]))
         # possible alternative to the previous two lines:
         # X[[g]][,i] <- as.numeric(factor(X[[g]][,i], exclude = c(NA, NaN)))
       }
@@ -970,7 +980,7 @@ lav_data_full <- function(data = NULL, # data.frame
     }
     # check variances per group (if we have multiple groups)
     # to catch zero-variance variables within a group (new in 0.6-8)
-    if (ngroups > 1L) {
+    if (ngroups > 1L && !allow.empty.cell) {
       # X
       group.var <- apply(X[[g]], 2, var, na.rm = TRUE)
       zero.var <- which(group.var < .Machine$double.eps)

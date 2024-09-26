@@ -280,7 +280,7 @@ ldw_parse_step1 <- function(modelsrc, types) {
     if (elem.type[i] == types$identifier && elem.text[i] == "efa") {
       frm.hasefa <- TRUE
     }
-    if (any(elem.text[i] == c("+", "*", "=~"))) {
+    if (any(elem.text[i] == c("+", "*", "=~", "-"))) {
       if (frm.incremented) {
         frm.number <- frm.number - 1L
         elem.formula.number[i] <- frm.number
@@ -593,7 +593,7 @@ ldw_parse_get_modifier <- function(formul1, lhs, opi, modelsrc, types,
         if (j + 3L < nelem && formul1$elem.text[j + 3L] == "," &&
           any(formul1$elem.text[j] == c(
             "start", "fixed", "label",
-            "upp", "lower", "rv", "prior"
+            "upper", "lower", "rv", "prior"
           ))) {
           vector.type <- 0
           labnu <- j + 2L
@@ -1116,6 +1116,48 @@ ldw_parse_model_string <- function(model.syntax = "", as.data.frame. = FALSE) {
   if (length(int.idx) > 0L) {
     flat$op[int.idx] <- "~1"
   }
+  # if there are constraints that are simple lower or upper limits, put
+  # them in these members, add a modifier and remove constraint
+  aantal <- length(constraints)
+  if (aantal > 0) {
+    for (j in aantal:1) {
+      if (any(flat$label == constraints[[j]]$lhs) &&
+          any(constraints[[j]]$op == c("<", ">"))) {
+          rhslang <- str2lang(constraints[[j]]$rhs)
+          numbound <- NA_real_
+          if (mode(rhslang) == "numeric") {
+            numbound <- as.numeric(constraints[[j]]$rhs)
+          } else {
+            if (mode(rhslang) == "call") {
+              if (is.numeric(tryCatch(eval(rhslang),
+                                      error = function(e) "error"))) {
+                numbound <- eval(rhslang)
+              }
+            }
+          }
+          if (!is.na(numbound)) {
+            nrs <- which(flat$label == constraints[[j]]$lhs)
+            for (nr in nrs) {
+              nrm <- length(mod) + 1L
+              if (flat$mod.idx[nr] > 0L) {
+                nrm <- flat$mod.idx[nr]
+              } else {
+                flat$mod.idx[nr] <- nrm
+                mod <- c(mod, list(label = constraints[[j]]$lhs))
+              }
+              if (constraints[[j]]$op == "<") {
+                flat$upper[nr] <- as.character(numbound)
+                mod[[nrm]]$upper <- numbound
+              } else {
+                flat$lower[nr] <- as.character(numbound)
+                mod[[nrm]]$lower <- numbound
+              }
+            }
+            constraints <- constraints[-j]
+          }
+        }
+    }
+  }
   # new in 0.6, reorder covariances here!
   flat <- lav_partable_covariance_reorder(flat)
   if (as.data.frame.) {
@@ -1135,6 +1177,7 @@ ldw_parse_model_string <- function(model.syntax = "", as.data.frame. = FALSE) {
       }
     }
   }
+  # create output
   attr(flat, "modifiers") <- mod
   attr(flat, "constraints") <- constraints
   flat

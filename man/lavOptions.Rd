@@ -458,6 +458,9 @@ Categorical estimation options:
     \item{\code{zero.cell.warn}:}{Logical. Only used if some observed 
       endogenous variables are categorical. If \code{TRUE}, give a warning if 
       one or more cells of a bivariate frequency table are empty.}
+    \item{\code{allow.empty.cell}:}{Logical. If \code{TRUE}, ignore
+      situations where an ordinal variable has fewer categories than
+      expected, or where a category is empty in a specific group.}
 }
 
 Starting values options:
@@ -479,6 +482,17 @@ Starting values options:
       \code{paramaterEstimates()} function, the values of the \code{est} or
       \code{start} or \code{ustart} column (whichever is found first) will be
       extracted.}
+    \item{\code{rstarts}:}{Integer. The number of refits that lavaan should
+      try with random starting values. Random starting values are computed
+      by drawing random numbers from a uniform distribution. Correlations
+      are drawn from the interval [-0.5, +0.5] and then converted to
+      covariances. Lower and upper bounds for (residual) variances are
+      computed just like the standard bounds in bounded estimation.
+      Random starting values are not computed for regression coefficients
+      (which are always zero) and factor loadings of higher-order constructs
+      (which are always unity). From all the runs that converged, the final
+      solution is the one that resulted in the smallest value for the
+      discrepancy function.}
 }
 
 Check options:

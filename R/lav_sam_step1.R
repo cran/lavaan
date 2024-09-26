@@ -135,9 +135,12 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
   # for joint model later
   if (lavoptions$se != "none") {
     Sigma.11 <- matrix(0, npar, npar)
+    colnames(Sigma.11) <- rownames(Sigma.11) <-
+      lav_partable_labels(FIT@ParTable, type = "free")
   }
   step1.free.idx <- integer(0L)
-
+  block.mm.idx  <- vector("list", length = nMMblocks)
+  block.ptm.idx <- vector("list", length = nMMblocks)
 
   # NOTE: we should explicitly add zero-constrained LV covariances
   # to PT, and keep them zero in PTM
@@ -167,6 +170,7 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
     attr(PTM, "idx") <- NULL
     PTM$est <- NULL
     PTM$se <- NULL
+    block.mm.idx[[mm]] <- mm.idx
 
     # check for categorical in PTM in this mm-block
     if (!any(PTM$op == "|")) {
@@ -229,6 +233,7 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
     # pt.idx == mm.idx
     ptm.idx <- which((PTM$free > 0L | PTM$op %in% c(":=", "<", ">")) &
       PTM$user != 3L)
+    block.ptm.idx[[mm]] <- ptm.idx
     PT$est[mm.idx[ptm.idx]] <- PTM$est[ptm.idx]
 
     # if categorical, add non-free residual variances
@@ -275,7 +280,8 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
         sigma.11[keep.idx, keep.idx, drop = FALSE]
 
       # store (ordered) indices in step1.free.idx
-      step1.free.idx <- c(step1.free.idx, sort.int(par.idx))
+      this.mm.idx <- sort.int(par.idx)
+      step1.free.idx <- c(step1.free.idx, this.mm.idx) # all combined
     }
   } # measurement block
 
@@ -289,7 +295,10 @@ lav_sam_step1 <- function(cmd = "sem", mm.list = NULL, mm.args = list(),
   # create STEP1 list
   STEP1 <- list(
     MM.FIT = MM.FIT, Sigma.11 = Sigma.11,
-    step1.free.idx = step1.free.idx, PT.free = PT.free,
+    step1.free.idx = step1.free.idx,
+    block.mm.idx = block.mm.idx,
+    block.ptm.idx = block.ptm.idx,
+    PT.free = PT.free,
     mm.list = mm.list, PT = PT
   )
 
@@ -343,9 +352,9 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
   }
 
   LAMBDA.list <- vector("list", nMMblocks)
-  THETA.list <- vector("list", nMMblocks)
-  NU.list <- vector("list", nMMblocks)
-  DELTA.list <- vector("list", nMMblocks) # correlation/categorical
+  THETA.list  <- vector("list", nMMblocks)
+  NU.list     <- vector("list", nMMblocks)
+  DELTA.list  <- vector("list", nMMblocks) # correlation/categorical
   LV.idx.list <- vector("list", nMMblocks)
   OV.idx.list <- vector("list", nMMblocks)
   for (mm in seq_len(nMMblocks)) {
@@ -357,7 +366,7 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
 
     # store LAMBDA/THETA
     LAMBDA.list[[mm]] <- computeLAMBDA(fit.mm.block@Model)
-    THETA.list[[mm]] <- computeTHETA(fit.mm.block@Model)
+    THETA.list[[ mm]] <- computeTHETA( fit.mm.block@Model)
     if (fit.mm.block@Model@meanstructure) {
       NU.list[[mm]] <- computeNU(fit.mm.block@Model,
         lavsamplestats = fit.mm.block@SampleStats
@@ -454,6 +463,7 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
   MTM..  <- vector("list", nblocks)
   COV..  <- vector("list", nblocks)
   YBAR.. <- vector("list", nblocks)
+  FS.mean <- vector("list", nblocks)
   REL <- vector("list", nblocks)
   alpha <- vector("list", nblocks)
   lambda <- vector("list", nblocks)
@@ -481,7 +491,11 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
       FS[[b]] <- do.call("cbind", tmp)
       colnames(FS[[b]]) <- LABEL
 
-      # dummy lv's?
+      # dummy lv's? (both 'x' and 'y'!)
+	  dummy.ov.idx <- c(FIT@Model@ov.y.dummy.ov.idx[[b]],
+	                    FIT@Model@ov.x.dummy.ov.idx[[b]])
+      dummy.lv.idx <- c(FIT@Model@ov.y.dummy.lv.idx[[b]],
+	                    FIT@Model@ov.x.dummy.lv.idx[[b]])
       if (length(dummy.lv.idx) > 0L) {
         FS.obs <- FIT@Data@X[[b]][, dummy.ov.idx, drop = FALSE]
         colnames(FS.obs) <- FIT@Data@ov.names[[b]][dummy.ov.idx]
@@ -616,6 +630,7 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
     # compute EETA
     if (lavoptions$meanstructure) {
       EETA[[b]] <- lav_sam_eeta(M = Mb, YBAR = YBAR, NU = NU[[b]])
+	  FS.mean[[b]] <- EETA[[b]] # ok if no interaction
     }
 
     # compute VETA
@@ -658,8 +673,8 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
 
     # compute model-based RELiability
     MSM <- Mb %*% COV %*% t(Mb)
-    # REL[[b]] <- diag(VETA[[b]]] %*% solve(MSM)) # CHECKme!
-    REL[[b]] <- diag(VETA[[b]]) / diag(MSM)
+    # REL[[b]] <- diag(VETA[[b]]] %*% solve(MSM)) # CHECKme! -> done, must be:
+    REL[[b]] <- diag(VETA[[b]]) / diag(MSM) #
 
     # check for lv.interactions
     if (lv.interaction.flag && length(lv.int.names) > 0L) {
@@ -696,6 +711,7 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
         lambda[[b]] <- attr(tmp, "lambda")
         MSM..[[b]] <- attr(tmp, "MSM")
         MTM..[[b]] <- attr(tmp, "MTM")
+		FS.mean[[b]] <- attr(tmp, "FS.mean")
       } else {
         lav_msg_fixme("not ready yet!")
         # FSR -- no correction
@@ -719,6 +735,7 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
 	names(MTM..)  <- FIT@Data@block.label
 	names(COV..)  <- FIT@Data@block.label
 	names(YBAR..) <- FIT@Data@block.label
+	names(FS.mean)<- FIT@Data@block.label
   }
 
   # store EETA/VETA/M/alpha/lambda
@@ -732,6 +749,7 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
   STEP1$MTM    <- MTM..
   STEP1$COV    <- COV..
   STEP1$YBAR   <- YBAR..
+  STEP1$FS.mean<- FS.mean
 
   if (lav_verbose()) {
     cat("done.\n")
@@ -739,3 +757,4 @@ lav_sam_step1_local <- function(STEP1 = NULL, FIT = NULL,
 
   STEP1
 }
+

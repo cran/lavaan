@@ -552,7 +552,7 @@ estimator.PML <- function(Sigma.hat = NULL, # model-based var/cov/cor
         pstar.idx <- PSTAR[i, j]
         # cat("pstar.idx =", pstar.idx, "i = ", i, " j = ", j, "\n")
         if (ov.types[i] == "numeric" &&
-          ov.types[j] == "numeric") {
+            ov.types[j] == "numeric") {
           # ordinary pearson correlation
           LIK[, pstar.idx] <-
             lav_bvreg_lik(
@@ -565,7 +565,7 @@ estimator.PML <- function(Sigma.hat = NULL, # model-based var/cov/cor
               rho = Cor.hat[i, j]
             )
         } else if (ov.types[i] == "numeric" &&
-          ov.types[j] == "ordered") {
+                   ov.types[j] == "ordered") {
           # polyserial correlation
           ### FIXME: th.y2 should go into ps_lik!!!
           LIK[, pstar.idx] <-
@@ -579,7 +579,7 @@ estimator.PML <- function(Sigma.hat = NULL, # model-based var/cov/cor
               rho = Cor.hat[i, j]
             )
         } else if (ov.types[j] == "numeric" &&
-          ov.types[i] == "ordered") {
+                   ov.types[i] == "ordered") {
           # polyserial correlation
           ### FIXME: th.y1 should go into ps_lik!!!
           LIK[, pstar.idx] <-
@@ -593,7 +593,7 @@ estimator.PML <- function(Sigma.hat = NULL, # model-based var/cov/cor
               rho = Cor.hat[i, j]
             )
         } else if (ov.types[i] == "ordered" &&
-          ov.types[j] == "ordered") {
+                   ov.types[j] == "ordered") {
           LIK[, pstar.idx] <-
             pc_lik_PL_with_cov(
               Y1 = X[, i],
@@ -789,18 +789,18 @@ estimator.2L <- function(lavmodel = NULL,
 
   # here, we assume only 2!!! levels, at [[1]] and [[2]]
   if (lavmodel@conditional.x) {
-    Res.Sigma.W <- implied$res.cov[[(group - 1) * 2 + 1]]
-    Res.Int.W <- implied$res.int[[(group - 1) * 2 + 1]]
-    Res.Pi.W <- implied$res.slopes[[(group - 1) * 2 + 1]]
+    Res.Sigma.W <- implied$res.cov[[   (group - 1) * 2 + 1]]
+    Res.Int.W   <- implied$res.int[[   (group - 1) * 2 + 1]]
+    Res.Pi.W    <- implied$res.slopes[[(group - 1) * 2 + 1]]
 
-    Res.Sigma.B <- implied$res.cov[[(group - 1) * 2 + 2]]
-    Res.Int.B <- implied$res.int[[(group - 1) * 2 + 2]]
-    Res.Pi.B <- implied$res.slopes[[(group - 1) * 2 + 2]]
+    Res.Sigma.B <- implied$res.cov[[   (group - 1) * 2 + 2]]
+    Res.Int.B   <- implied$res.int[[   (group - 1) * 2 + 2]]
+    Res.Pi.B    <- implied$res.slopes[[(group - 1) * 2 + 2]]
   } else {
-    Sigma.W <- implied$cov[[(group - 1) * 2 + 1]]
-    Mu.W <- implied$mean[[(group - 1) * 2 + 1]]
-    Sigma.B <- implied$cov[[(group - 1) * 2 + 2]]
-    Mu.B <- implied$mean[[(group - 1) * 2 + 2]]
+    Sigma.W <- implied$cov[[( group - 1) * 2 + 1]]
+    Mu.W    <- implied$mean[[(group - 1) * 2 + 1]]
+    Sigma.B <- implied$cov[[ (group - 1) * 2 + 2]]
+    Mu.B    <- implied$mean[[(group - 1) * 2 + 2]]
   }
 
   if (lavsamplestats@missing.flag) {
@@ -847,7 +847,7 @@ estimator.2L <- function(lavmodel = NULL,
     }
   }
 
-  # minimize
+  # minimize (we already did -2*)
   objective <- 1 * loglik
 
   # divide by (N*2)
