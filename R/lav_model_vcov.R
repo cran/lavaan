@@ -63,6 +63,20 @@ lav_model_nvcov_bootstrap <- function(lavmodel = NULL,
     COEF <- COEF[, -nc, drop = FALSE]
   }
 
+  # new in 0.6-20: check for outliers, ie big difference between sd() and mad()
+  # see github issue 347
+  sd_mad_ratio <- ( apply(COEF, 2,  sd, na.rm = TRUE) /
+                    apply(COEF, 2, mad, na.rm = TRUE) )
+  crit.ratio <- 5
+  if (any(sd_mad_ratio > crit.ratio)) {
+    NAMES <- lav_partable_labels(lavpartable, type = "free")
+    params_w_outliers <- paste(NAMES[sd_mad_ratio > crit.ratio], collapse = " ")
+    lav_msg_warn(gettextf(
+      "The following boostrapped free parameters have a high (>5)
+      ratio of standard deviation to median absolute deviation: %s.
+      P-values and confidence intervals may not match.", params_w_outliers))
+  }
+
   # FIXME: cov rescale? Yes for now
   nboot <- nrow(COEF)
   NVarCov <- lavsamplestats@ntotal * (cov(COEF) * (nboot - 1) / nboot)
@@ -83,7 +97,11 @@ lav_model_nvcov_robust_sem <- function(lavmodel = NULL,
                                        lavimplied = NULL,
                                        lavh1 = NULL,
                                        lavoptions = NULL,
-                                       use.ginv = FALSE) {
+                                       use.ginv = FALSE,
+                                       attr.Delta = TRUE,
+                                       attr.tDVGVD = FALSE,
+                                       attr.E.inv = FALSE,
+                                       attr.WLS.V = FALSE) {
   # compute inverse of the expected(!) information matrix
   if (lavmodel@estimator == "ML" && lavoptions$mimic == "Mplus") {
     # YR - 11 aug 2010 - what Mplus seems to do is (see Muthen apx 4 eq102)
@@ -122,7 +140,8 @@ lav_model_nvcov_robust_sem <- function(lavmodel = NULL,
 
   Delta <- attr(E.inv, "Delta")
   WLS.V <- attr(E.inv, "WLS.V")
-
+  attr(E.inv, "Delta") <- NULL
+  attr(E.inv, "WLS.V") <- NULL
   # Gamma
   Gamma <- lavsamplestats@NACOV
   if (lavmodel@estimator == "ML" &&
@@ -167,7 +186,13 @@ lav_model_nvcov_robust_sem <- function(lavmodel = NULL,
   NVarCov <- (E.inv %*% tDVGVD %*% E.inv)
 
   # to be reused by lav_test()
-  attr(NVarCov, "Delta") <- Delta
+  if (attr.Delta) {
+    attr(NVarCov, "Delta") <- Delta
+  }
+  # for twostep.robust in sam()
+  if (attr.tDVGVD) {
+    attr(NVarCov, "tDVGVD") <- tDVGVD
+  }
 
   if ((lavoptions$information[1] == lavoptions$information[2]) &&
     (lavoptions$h1.information[1] == lavoptions$h1.information[2]) &&
@@ -176,6 +201,14 @@ lav_model_nvcov_robust_sem <- function(lavmodel = NULL,
         lavoptions$observed.information[2])) {
     # only when same type of information is used # new in 0.6-6
     attr(NVarCov, "E.inv") <- E.inv
+    attr(NVarCov, "WLS.V") <- WLS.V
+  }
+
+  # user override
+  if (attr.E.inv && is.null(attr(NVarCov, "E.inv"))) {
+    attr(NVarCov, "E.inv") <- E.inv
+  }
+  if (attr.WLS.V && is.null(attr(NVarCov, "WLS.V"))) {
     attr(NVarCov, "WLS.V") <- WLS.V
   }
 
@@ -353,8 +386,10 @@ lav_model_nvcov_two_stage <- function(lavmodel = NULL,
     # we use the same setting as to compute 'H' (the h1 information matrix)
     # so that at Omega = H if data is complete
     if (lavoptions$h1.information[1] == "unstructured") {
-      MU <- lavsamplestats@missing.h1[[g]]$mu
-      SIGMA <- lavsamplestats@missing.h1[[g]]$sigma
+      #MU <- lavsamplestats@missing.h1[[g]]$mu
+      #SIGMA <- lavsamplestats@missing.h1[[g]]$sigma
+      MU <- lavh1$implied$mean[[g]]
+      SIGMA <- lavh1$implied$cov[[g]]
     } else {
       MU <- lavimplied$mean[[g]]
       SIGMA <- lavimplied$cov[[g]]
@@ -434,9 +469,9 @@ lav_model_vcov <- function(lavmodel = NULL,
                            lavh1 = NULL,
                            use.ginv = FALSE) {
   likelihood <- lavoptions$likelihood
-  information <- lavoptions$information[1] # first one is for vcov
+#  information <- lavoptions$information[1] # first one is for vcov
   se <- lavoptions$se
-  mimic <- lavoptions$mimic
+#  mimic <- lavoptions$mimic
 
   # special cases
   if (se == "none" || se == "external" || se == "twostep") {
@@ -686,7 +721,22 @@ lav_model_vcov_se <- function(lavmodel, lavpartable, VCOV = NULL,
       } else {
         BOOT.def <- t(BOOT.def)
       }
-      def.cov <- cov(BOOT.def)
+      # new in 0.6-20: check for outliers, big difference betwen sd() and mad()
+      # see github issue 347
+      sd_mad_ratio <- ( apply(BOOT.def, 2,  sd, na.rm = TRUE) /
+                        apply(BOOT.def, 2, mad, na.rm = TRUE) )
+      crit.ratio <- 5
+      if (any(sd_mad_ratio > crit.ratio)) {
+        NAMES <- colnames(BOOT.def)
+        def_w_outliers <- paste(NAMES[sd_mad_ratio > crit.ratio],
+                                collapse = " ")
+        lav_msg_warn(gettextf(
+          "The following boostrapped defined parameters have a high (>5)
+          ratio of standard deviation to median absolute deviation: %s.
+          P-values and confidence intervals may not match.", def_w_outliers))
+      }
+      nboot <- nrow(BOOT.def)
+      def.cov <- cov(BOOT.def) * (nboot - 1) / nboot
     } else {
       # regular delta method
       x <- lav_model_get_parameters(lavmodel = lavmodel, type = "free")

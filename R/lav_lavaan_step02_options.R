@@ -54,6 +54,7 @@ lav_lavaan_step02_options <- function(slotOptions = NULL, # nolint
   #   if there are no exogene variables set opt$conditional.x FALSE
   #   if there are no exogene variables and fixed.x not explicitly requested,
   #     set opt$fixed.x to FALSE
+  #   if allow.empty.cell and estimator not Bayes, issue a warning
 
   if (!is.null(slotOptions)) {
     lavoptions <- slotOptions
@@ -152,7 +153,7 @@ lav_lavaan_step02_options <- function(slotOptions = NULL, # nolint
     # clustered?
     if (length(cluster) > 0L) {
       opt$.clustered <- TRUE
-      if (opt$.categorical & opt$estimator != "PML") {
+      if (opt$.categorical && opt$estimator != "PML") {
         lav_msg_stop(gettext("categorical + clustered is not supported yet."))
       }
     } else {
@@ -170,7 +171,12 @@ lav_lavaan_step02_options <- function(slotOptions = NULL, # nolint
     # HJ 18/10/23: Except for PML
     if (!is.null(sampling.weights) && !opt$.categorical &&
       opt$estimator %in% c("default", "ML", "PML")) {
-      opt$estimator <- "MLR"
+      if (opt$se != "none") {
+        opt$se <- "robust.huber.white"
+      }
+      if (opt$se != "none") {
+        opt$test <- "yuan.bentler.mplus"
+      }
     }
 
     # constraints
@@ -208,6 +214,12 @@ lav_lavaan_step02_options <- function(slotOptions = NULL, # nolint
       } else {
         opt$fixed.x <- FALSE
       }
+    }
+
+    # allow.empty.cell
+    if (opt$allow.empty.cell && opt$do.fit && opt$estimator != "Bayes") {
+      lav_msg_warn(
+        gettext("allow.empty.cell is not intended to salvage estimation of this model, see ?lavOptions"))
     }
 
     # fill in remaining "default" values

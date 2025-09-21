@@ -27,6 +27,7 @@ lavaanify <- lavParTable <- function(
                                      orthogonal.efa = FALSE,
                                      std.lv = FALSE,
                                      correlation = FALSE,
+                                     composites = TRUE,
                                      effect.coding = "",
                                      conditional.x = FALSE,
                                      fixed.x = FALSE,
@@ -380,7 +381,7 @@ lavaanify <- lavParTable <- function(
         int.ov.free = int.ov.free, int.lv.free = int.lv.free,
         orthogonal = orthogonal, orthogonal.y = orthogonal.y,
         orthogonal.x = orthogonal.x, orthogonal.efa = orthogonal.efa,
-        std.lv = std.lv, correlation = correlation,
+        std.lv = std.lv, correlation = correlation, composites = composites,
         conditional.x = conditional.x, fixed.x = fixed.x,
         parameterization = parameterization,
         auto.fix.first = auto.fix.first,
@@ -430,7 +431,7 @@ lavaanify <- lavParTable <- function(
       int.ov.free = int.ov.free, int.lv.free = int.lv.free,
       orthogonal = orthogonal, orthogonal.y = orthogonal.y,
       orthogonal.x = orthogonal.x, orthogonal.efa = orthogonal.efa,
-      std.lv = std.lv, correlation = correlation,
+      std.lv = std.lv, correlation = correlation, composites = composites,
       conditional.x = conditional.x, fixed.x = fixed.x,
       parameterization = parameterization,
       auto.fix.first = auto.fix.first, auto.fix.single = auto.fix.single,
@@ -447,8 +448,32 @@ lavaanify <- lavParTable <- function(
     print(as.data.frame(tmp.list, stringsAsFactors = FALSE))
   }
 
+  # check for auto-regressions
+  auto.reg.idx <- which(tmp.list$op == "~" &
+                        tmp.list$lhs == tmp.list$rhs)
+
+  # check ordinal variables
+  categorical <- FALSE
+  ov.ord <- lavNames(tmp.list, "ov.ord")
+  if (length(ov.ord) > 0L) {
+    categorical <- TRUE
+    ord.var.idx <- which(tmp.list$op == "~~" &
+                         tmp.list$lhs == tmp.list$rhs &
+                         tmp.list$lhs %in% ov.ord &
+                         tmp.list$user == 1L)
+    if (parameterization == "delta" && length(ord.var.idx) > 0L) {
+      lav_msg_warn(gettextf("variances of ordered variables are ignored when
+      parameterization = \"delta\"; please remove them from the model syntax
+      or use parameterization = \"theta\"; variables involved are: %s",
+      paste(tmp.list$lhs[ord.var.idx], collapse = " ")))
+      # force them to be nonfree and set ustart to 1 (new in 0.6-20)
+      # later, after we have processes the modifiers
+    }
+  } # ov.ord
+
   # handle multilevel-specific constraints
   multilevel <- FALSE
+  nlevels <- 1L
   if (!is.null(tmp.list$level)) {
     nlevels <- lav_partable_nlevels(tmp.list)
     if (nlevels > 1L) {
@@ -639,6 +664,21 @@ lavaanify <- lavParTable <- function(
   # remove mod.idx column
   tmp.list$mod.idx <- NULL
 
+  # categorical: check for nonfree variances if parameterization = "delta"
+  # we already gave warning; here, we force them to be nonfree
+  if (categorical && parameterization == "delta") {
+    ord.var.idx <- which(tmp.list$op == "~~" &
+                         tmp.list$lhs == tmp.list$rhs &
+                         tmp.list$lhs %in% ov.ord &
+                         tmp.list$user == 1L)
+    if (length(ord.var.idx) > 0L) {
+      # force them to be nonfree and set ustart to 1 (new in 0.6-20)
+      tmp.list$free[ord.var.idx]   <- rep(0L, length(ord.var.idx))
+      tmp.list$ustart[ord.var.idx] <- rep(1,  length(ord.var.idx))
+    }
+  } # categorical
+
+
   # warning about single label in multiple group setting?
   if (warn.about.single.label) {
     lav_msg_warn(gettext(
@@ -764,7 +804,9 @@ lavaanify <- lavParTable <- function(
 
       # sanity check: are all ustart values equal?
       ustart1 <- tmp.list$ustart[fixed.idx]
-      if (!all(ustart1 == tmp.list$ustart[fixed.all])) {
+      if (all(is.na(tmp.list$ustart[fixed.all]))) {
+        # nothing to do; ustart values have not been set yet
+      } else if (!all(ustart1 == tmp.list$ustart[fixed.all])) {
         lav_msg_warn(gettext(
           "equality constraints involve fixed parameters with different values;
           only the first one will be used"))
@@ -878,9 +920,22 @@ lavaanify <- lavParTable <- function(
     }
   }
 
-  # put lhs of := elements in label column
+  # check defined variables (:=)
   def.idx <- which(tmp.list$op == ":=")
-  tmp.list$label[def.idx] <- tmp.list$lhs[def.idx]
+  if (length(def.idx) > 0L) {
+    # check if the lhs is unique (new in 0.6-20)
+    def.lhs <- tmp.list$lhs[def.idx]
+    dup.idx <- which(duplicated(def.lhs))
+    if (length(dup.idx) > 0L) {
+      # warn or stop? warn for now
+      lav_msg_warn(gettextf("at least one defined variable (using the :=
+                             operator) has been duplicated, and will be
+                             overwritten by the last one: %s",
+                            paste(def.lhs[dup.idx], collapse = " ")))
+    }
+    # put lhs of := elements in label column
+    tmp.list$label[def.idx] <- def.lhs
+  }
 
 
   # handle effect.coding related equality constraints
@@ -894,6 +949,10 @@ lavaanify <- lavParTable <- function(
     # for each block
     nblocks <- lav_partable_nblocks(tmp.list)
     for (b in seq_len(nblocks)) {
+
+      # which group?
+      this.group <- floor(b / nlevels + 0.5)
+
       # lv's for this block/set
       lv.names <- unique(tmp.list$lhs[tmp.list$op == "=~" &
         tmp.list$block == b])
@@ -909,7 +968,8 @@ lavaanify <- lavParTable <- function(
           tmp.list$block == b &
           tmp.list$lhs == lv]
 
-        if ("loadings" %in% effect.coding) {
+        if ("loadings" %in% effect.coding &
+            (!"loadings" %in% group.equal || this.group == 1L)) {
           # factor loadings indicators of this lv
           loadings.idx <- which(tmp.list$op == "=~" &
             tmp.list$block == b &
@@ -948,7 +1008,8 @@ lavaanify <- lavParTable <- function(
           }
         } # loadings
 
-        if ("intercepts" %in% effect.coding) {
+        if ("intercepts" %in% effect.coding &
+            (!"intercepts" %in% group.equal || this.group == 1L)) {
           # intercepts for indicators of this lv
           intercepts.idx <- which(tmp.list$op == "~1" &
             tmp.list$block == b &

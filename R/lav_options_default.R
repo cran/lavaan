@@ -2,6 +2,28 @@
 
 lavaan_cache_env <- new.env(parent = emptyenv())
 
+# # function to get or set the switch to use c++ code in lavaanC
+# lav_use_lavaanC <- uselavaanC <- function(x) {
+#   if (missing(x)) {
+#     if (!exists("opt.lavaanC", lavaan_cache_env)) {
+#       assign("opt.lavaanC", requireNamespace("lavaanC", quietly = TRUE), lavaan_cache_env)
+#     }
+#     return(get("opt.lavaanC", lavaan_cache_env))
+#   } else {
+#     if (!is.logical(x) || length(x) != 1L)
+#       lav_msg_stop(gettext("'x' must be a scalar logical"))
+#     if (x) {
+#       if (!requireNamespace("lavaanC", quietly = TRUE)) {
+#         lav_msg_warn(gettext("cannot use lavaanC, package not found."))
+#         assign("opt.lavaanC", FALSE, lavaan_cache_env)
+#         return(invisible(NULL))
+#       }
+#     }
+#     assign("opt.lavaanC", x, lavaan_cache_env)
+#     return(invisible(NULL))
+#   }
+# }
+
 # functions to handle warn/debug/verbose options
 #             (no longer in 'standard' options)
 # if x not present returns the current value of opt.warn/debug/verbose
@@ -199,6 +221,7 @@ lav_options_default <- function() {
   elm("auto.th", FALSE, bl = TRUE)
   elm("auto.delta", FALSE, bl = TRUE)
   elm("auto.efa", FALSE, bl = TRUE)
+  elm("composites", TRUE, bl = TRUE)
 
   # rotation
   elm("rotation", "geomin", chr = c(crawfer = "cf", crawford.ferguson = "cf",
@@ -208,10 +231,10 @@ lav_options_default <- function() {
     entropy = "entropy", mccammon = "mccammon", infomax = "infomax",
     tandem1 = "tandem1", tandem2 = "tandem2", none = "none", promax = "promax",
     oblimax = "oblimax", bentler = "bentler", simplimax = "simplimax",
-    target = "target", pst = "pst", cf.quartimax = "cf-quartimax",
-    cf.varimax = "cf-varimax", cf.equamax = "cf-equamax",
-    cf.parsimax = "cf-parsimax", cf.facparsim = "cf-facparsim",
-    bi.quartimin = "biquartimin",
+    target.strict = "target.strict", target = "pst", pst = "pst",
+    cf.quartimax = "cf-quartimax", cf.varimax = "cf-varimax",
+    cf.equamax = "cf-equamax", cf.parsimax = "cf-parsimax",
+    cf.facparsim = "cf-facparsim", bi.quartimin = "biquartimin",
     biquartimin = "biquartimin", bi.geomin = "bigeomin", bigeomin = "bigeomin"
   ))
   elm("rotation.se", "bordered", chr = c("delta", "bordered"))
@@ -222,15 +245,15 @@ lav_options_default <- function() {
     default = "default", kaiser = "kaiser", none = "none",
     cureton.mulaik = "cm", cm = "cm"))
   elm(c("rotation.args", "std.ov"), TRUE, bl = TRUE)
-  elm(c("rotation.args", "geomin.epsilon"), 0.001, nm = "]0, 0.01]")
+  elm(c("rotation.args", "geomin.epsilon"), 0.001, nm = "]0, 1.00]")
   # was 0.01 < 0.6-10
   elm(c("rotation.args", "orthomax.gamma"), 1, nm = "[0, 1]")
   elm(c("rotation.args", "cf.gamma"), 0, nm = "[0, 1]")
   elm(c("rotation.args", "oblimin.gamma"), 0, nm = "[0, 1000]")
   elm(c("rotation.args", "promax.kappa"), 4, nm = "[0, 1000]")
-  elm(c("rotation.args", "target"), matrix(0, 0, 0), oklen = c(0L, 1000L))
-  elm(c("rotation.args", "target.mask"), matrix(0, 0, 0), oklen = c(0L, 1000L))
-  elm(c("rotation.args", "rstarts"), 30L, nm = "[0, 1000000]")
+  elm(c("rotation.args", "target"), matrix(0, 0L, 0L), oklen = c(0, 1e+32))
+  elm(c("rotation.args", "target.mask"), matrix(0, 0L, 0L), oklen = c(0, 1e+32))
+  elm(c("rotation.args", "rstarts"), 30L, nm = "[0, 1e+07]")
   elm(c("rotation.args", "algorithm"), "gpa", chr = c("gpa", "pairwise"))
   elm(c("rotation.args", "reflect"), TRUE, bl = TRUE)
   elm(c("rotation.args", "order.lv.by"), "index",
@@ -240,7 +263,7 @@ lav_options_default <- function() {
   elm(c("rotation.args", "warn"), FALSE, bl = TRUE)
   elm(c("rotation.args", "verbose"), FALSE, bl = TRUE)
   elm(c("rotation.args", "jac.init.rot"), TRUE, bl = TRUE)
-  elm(c("rotation.args", "max.iter"), 10000L, nm = "[0, 1000000]")
+  elm(c("rotation.args", "max.iter"), 10000L, nm = "[0, 1e+12]")
 
   # full data
   elm("std.ov", FALSE, bl = TRUE)
@@ -273,6 +296,7 @@ lav_options_default <- function() {
   elm("group.label", NULL, oklen = c(0L, 100L)) # no checks
   elm("group.equal", "", chr =
         c("", "none", "loadings", "intercepts", "means", "composite.loadings",
+          "composite.weights",
           "regressions", "residuals", "residual.covariances", "thresholds",
           "lv.variances", "lv.covariances"), oklen = c(0L, 100L))
   elm("group.partial", "", oklen = c(0L, 100L)) # no checks
@@ -307,7 +331,7 @@ lav_options_default <- function() {
   elm("bounds", "none", chr = c(
     "none", "default", "standard", "user", "wide", "wide.zerovar", "pos.var",
     "pos.ov.var", "pos.lv.var"))      # new in 0.6-6
-  elm("rstarts", 0L, nm = "[0, 1000]", num2int = TRUE) # new in 0.6-18
+  elm("rstarts", 0L, nm = "[0, 10000]", num2int = TRUE) # new in 0.6-18
 
   # inference
   elm("se", "default", chr = c(
@@ -444,7 +468,7 @@ lav_options_default <- function() {
 
   # internal
   elm("parser", "new", chr = c(old = "old", orig = "old", new = "new",
-                               classic = "old"))
+                               c.r = "c.r", cr = "c.r", classic = "old"))
 
   # categorical
   elm("categorical", "default", chr = "default", bl = TRUE)

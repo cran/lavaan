@@ -11,6 +11,13 @@ lav_sam_mapping_matrix <- function(LAMBDA = NULL, THETA = NULL,
 
   method <- toupper(method)
 
+  # catch empty columns in LAMBDA (eg higher order!)
+  LAMBDA.orig <- LAMBDA
+  empty.idx <- which(apply(LAMBDA, 2L, function(x) all(x == 0)))
+  if (length(empty.idx) > 0L) {
+    LAMBDA <- LAMBDA.orig[, -empty.idx, drop = FALSE]
+  }
+
   # ULS
   # M == solve( t(LAMBDA) %*% LAMBDA ) %*% t(LAMBDA)
   #   == MASS:::ginv(LAMBDA)
@@ -119,6 +126,13 @@ lav_sam_mapping_matrix <- function(LAMBDA = NULL, THETA = NULL,
     }
   } # ML
 
+  # empty.idx?
+  if (length(empty.idx) > 0L) {
+    M.full <- M
+    M <- matrix(0, nrow = ncol(LAMBDA.orig), ncol = ncol(M.full))
+    M[-empty.idx, ] <- M.full
+  }
+
   M
 }
 
@@ -138,7 +152,16 @@ lav_sam_mapping_matrix_tmat <- function(LAMBDA = NULL,
                                         THETA = NULL,
                                         marker.idx = NULL,
                                         std.lv = NULL) {
+
   LAMBDA <- as.matrix.default(LAMBDA)
+
+  # catch empty columns in LAMBDA (eg higher order!)
+  LAMBDA.orig <- LAMBDA
+  empty.idx <- which(apply(LAMBDA, 2L, function(x) all(x == 0)))
+  if (length(empty.idx) > 0L) {
+    LAMBDA <- LAMBDA.orig[, -empty.idx, drop = FALSE]
+  }
+
   nvar <- nrow(LAMBDA)
   nfac <- ncol(LAMBDA)
 
@@ -177,6 +200,13 @@ lav_sam_mapping_matrix_tmat <- function(LAMBDA = NULL,
 
   if (std.lv) {
     M <- M * marker.inv
+  }
+
+  # empty.idx?
+  if (length(empty.idx) > 0L) {
+    M.full <- M
+    M <- matrix(0, nrow = ncol(LAMBDA.orig), ncol = ncol(M.full))
+    M[-empty.idx, ] <- M.full
   }
 
   M
@@ -245,21 +275,38 @@ lav_sam_tmat <- function(LAMBDA = NULL,
 lav_sam_veta <- function(M = NULL, S = NULL, THETA = NULL,
                          alpha.correction = 0L, lambda.correction = TRUE,
                          N = 20L, dummy.lv.idx = integer(0L), extra = FALSE) {
+
+  # catch empty rows in M (higher-order?)
+  M.orig <- M
+  empty.idx <- which(apply(M.orig, 1L, function(x) all(x == 0)))
+  if (length(empty.idx) > 0L) {
+    M <- M.orig[-empty.idx,, drop = FALSE]
+  }
+
   # MSM
   MSM <- M %*% S %*% t(M)
 
   # MTM
   MTM <- M %*% THETA %*% t(M)
 
+  # empty theta elements?
+  empty.theta.idx <- which(diag(MTM) == 0)
+
   # new in 0.6-16: make sure MTM is pd
   # (otherwise lav_matrix_symmetric_diff_smallest_root will fail)
-  if (length(dummy.lv.idx) > 0L) {
-    MTM.nodummy <- MTM[-dummy.lv.idx, -dummy.lv.idx, drop = FALSE]
-    MTM.nodummy <- zapsmall(lav_matrix_symmetric_force_pd(
-      MTM.nodummy,
+  theta.rm.idx <- unique(c(dummy.lv.idx, empty.theta.idx))
+  if (length(theta.rm.idx) == nrow(MTM)) {
+    # all zero?
+    # do nothing, but certainly no need for alpha or lambda.correction
+    alpha.correction = 0L
+    lambda.correction = FALSE
+  } else if (length(theta.rm.idx) > 0L) {
+    MTM.small <- MTM[-theta.rm.idx, -theta.rm.idx, drop = FALSE]
+    MTM.small <- zapsmall(lav_matrix_symmetric_force_pd(
+      MTM.small,
       tol = 1e-04
     ))
-    MTM[-dummy.lv.idx, -dummy.lv.idx] <- MTM.nodummy
+    MTM[-theta.rm.idx, -theta.rm.idx] <- MTM.small
   } else {
     MTM <- zapsmall(lav_matrix_symmetric_force_pd(MTM, tol = 1e-04))
   }
@@ -278,6 +325,7 @@ lav_sam_veta <- function(M = NULL, S = NULL, THETA = NULL,
     alpha <- alpha.correction
   }
 
+  lambda <- lambda.star <- +Inf
   if (lambda.correction) {
     # use Fuller (1987) approach to ensure VETA is positive
     lambda <- try(lav_matrix_symmetric_diff_smallest_root(MSM, MTM),
@@ -299,10 +347,24 @@ lav_sam_veta <- function(M = NULL, S = NULL, THETA = NULL,
     VETA <- MSM - MTM
   }
 
+  # empty.idx?
+  if (length(empty.idx) > 0L) {
+    MSM.full <- MSM
+    MTM.full <- MTM
+    VETA.full <- VETA
+    nfac.orig <- nrow(M.orig)
+
+    MSM <- MTM <- VETA <- matrix(0, nrow = nfac.orig, ncol = nfac.orig)
+    MSM[ -empty.idx, -empty.idx] <- MSM.full
+    MTM[ -empty.idx, -empty.idx] <- MTM.full
+    VETA[-empty.idx, -empty.idx] <- VETA.full
+  }
+
   # extra attributes?
   if (extra) {
     attr(VETA, "lambda") <- lambda
     attr(VETA, "alpha") <- alpha
+    attr(VETA, "lambda.star") <- lambda.star
 	attr(VETA, "MSM") <- MSM
 	attr(VETA, "MTM") <- MTM
   }
@@ -324,6 +386,8 @@ lav_sam_veta2 <- function(FS = NULL, M = NULL,
                           dummy.lv.names = character(0L),
                           alpha.correction = 0L,
                           lambda.correction = TRUE,
+                          return.FS = FALSE,
+                          return.cov.iveta2 = TRUE,
                           extra = FALSE) {
 
   # small utility function: var() divided by N
@@ -398,12 +462,18 @@ lav_sam_veta2 <- function(FS = NULL, M = NULL,
   # select only what we need
   colnames(Var.FS2) <- rownames(Var.FS2) <- NAMES
   colnames(Var.ERROR) <- rownames(Var.ERROR) <- NAMES
+  colnames(FS2) <- NAMES
   lv.keep <- c(lv.names[-1], lv.int.names)
   Var.FS2 <- Var.FS2[lv.keep, lv.keep]
   Var.ERROR <- Var.ERROR[lv.keep, lv.keep]
   FS.mean <- colMeans(FS2, na.rm = TRUE)
   names(FS.mean) <- NAMES
+  FS2.mean <- FS.mean # all of them
   FS.mean <- FS.mean[lv.keep]
+
+  # compute Gamma for FS2[,lv.keep]
+  #FS.gamma <- lav_samplestats_Gamma(FS2[,lv.keep, drop  = FALSE],
+  #                                  meanstructure = TRUE)
 
   # apply small sample correction (if requested)
   if (alpha.correction > 0) {
@@ -419,6 +489,8 @@ lav_sam_veta2 <- function(FS = NULL, M = NULL,
     alpha <- alpha.correction
   }
 
+  lambda <- +Inf
+  lambda.star <- 1
   if (lambda.correction) {
     # use Fuller (1987) approach to ensure VETA2 is positive
     lambda <- try(lav_matrix_symmetric_diff_smallest_root(
@@ -443,13 +515,47 @@ lav_sam_veta2 <- function(FS = NULL, M = NULL,
     VETA2 <- Var.FS2 - Var.ERROR
   }
 
+  # new in 0.6-20: to compute Gamma.eta
+  if (return.cov.iveta2) {
+    IVETA2 <- matrix(0, N, ncol = length(lav_matrix_vech(VETA2)) + ncol(VETA2))
+    EF <- colMeans(FS)
+    for(i in 1:N) {
+      fi <- as.matrix(FS2[i,seq_len(nfac)])
+      tmp <- ( ((tcrossprod(fi) - MTM) %x% MTM) +
+           (MTM %x% (tcrossprod(fi) - MTM)) +
+           lav_matrix_commutation_post((tcrossprod(fi) - MTM) %x% MTM) +
+           lav_matrix_commutation_pre((tcrossprod(fi) - MTM) %x% MTM) +
+           (IK %*% (MTM %x% MTM)) )
+      iveta2 <- tcrossprod(FS2[i,] - FS2.mean) - lambda.star * tmp
+      colnames(iveta2) <- rownames(iveta2) <- NAMES
+
+      ieeta2 <- ( lav_matrix_vec(tcrossprod(fi)) -
+                  lav_matrix_vec(tcrossprod(EF)) +
+                  (EF %x% EF) -
+                  lambda.star * lav_matrix_vec(MTM) )
+      names(ieeta2) <- NAMES
+
+      IVETA2[i,] <- c(ieeta2[lv.keep],
+                      lav_matrix_vech(iveta2[lv.keep, lv.keep]))
+    } # N
+    cov.iveta2 <- cov(IVETA2) * (N-1)/N
+  }
+
   # extra attributes?
   if (extra) {
     attr(VETA2, "lambda") <- lambda
     attr(VETA2, "alpha") <- alpha
+    attr(VETA2, "lambda.star") <- lambda.star
     attr(VETA2, "MSM") <- Var.FS2
     attr(VETA2, "MTM") <- Var.ERROR
 	attr(VETA2, "FS.mean") <- FS.mean
+    #attr(VETA2, "FS.gamma") <- FS.gamma
+  }
+  if (return.FS) {
+    attr(VETA2, "FS") <- FS2[, lv.keep, drop = FALSE]
+  }
+  if (return.cov.iveta2) {
+    attr(VETA2, "cov.iveta2") <- cov.iveta2
   }
 
   VETA2
@@ -485,7 +591,7 @@ lav_sam_eeta2 <- function(EETA = NULL, VETA = NULL, lv.names = NULL,
   EETA2.aug
 }
 
-# compute veta including quadratic/interaction terms
+# compute var(fs2) including quadratic/interaction terms
 lav_sam_fs2 <- function(FS = NULL, lv.names = NULL, lv.int.names = NULL) {
   varn <- function(x, N) {
     var(x) * (N - 1) / N
@@ -529,6 +635,8 @@ lav_sam_step3_joint <- function(FIT = NULL, PT = NULL, sam.method = "local") {
 
   lavoptions.joint <- lavoptions
   lavoptions.joint$optim.method <- "none"
+  lavoptions.joint$optim.parscale <- "none"
+  lavoptions.joint$start <- "default"
   lavoptions.joint$optim.force.converged <- TRUE
   lavoptions.joint$check.gradient <- FALSE
   lavoptions.joint$check.start <- FALSE
@@ -537,10 +645,10 @@ lav_sam_step3_joint <- function(FIT = NULL, PT = NULL, sam.method = "local") {
   lavoptions.joint$se <- "none"
   lavoptions.joint$store.vcov <- FALSE # we do this manually
 
-  if (sam.method %in% c("local", "fsr")) {
+  if (sam.method %in% c("local", "fsr", "cfsr")) {
     lavoptions.joint$baseline <- FALSE
     lavoptions.joint$sample.icov <- FALSE
-    lavoptions.joint$h1 <- FALSE
+    #lavoptions.joint$h1 <- TRUE # we need this if we re-use the sam object
     lavoptions.joint$test <- "none"
     lavoptions.joint$estimator <- "none"
   } else {
@@ -560,7 +668,8 @@ lav_sam_step3_joint <- function(FIT = NULL, PT = NULL, sam.method = "local") {
   JOINT
 }
 
-lav_sam_table <- function(JOINT = NULL, STEP1 = NULL, FIT.PA = FIT.PA,
+lav_sam_table <- function(JOINT = NULL, STEP1 = NULL, FIT.PA = NULL,
+                          cmd = NULL, lavoptions = NULL,
                           mm.args = list(), struc.args = list(),
                           sam.method = "local",
                           local.options = list(), global.options = list()) {
@@ -587,7 +696,7 @@ lav_sam_table <- function(JOINT = NULL, STEP1 = NULL, FIT.PA = FIT.PA,
 
 
   # extra info for @internal slot
-  if (sam.method %in% c("local", "fsr")) {
+  if (sam.method %in% c("local", "fsr", "cfsr")) {
     sam.struc.fit <- try(
       fitMeasures(
         FIT.PA,
@@ -611,6 +720,7 @@ lav_sam_table <- function(JOINT = NULL, STEP1 = NULL, FIT.PA = FIT.PA,
 
 
   SAM <- list(
+    sam.cmd = cmd,
     sam.method = sam.method,
     sam.local.options = local.options,
     sam.global.options = global.options,
@@ -624,7 +734,268 @@ lav_sam_table <- function(JOINT = NULL, STEP1 = NULL, FIT.PA = FIT.PA,
     sam.mm.rel = sam.mm.rel,
     sam.struc.estimator = FIT.PA@Model@estimator,
     sam.struc.args = struc.args,
-    sam.struc.fit = sam.struc.fit
+    sam.struc.fit = sam.struc.fit,
+    sam.lavoptions = lavoptions
   )
   SAM
 }
+
+lav_sam_get_cov_ybar <- function(FIT = NULL, local.options = list(
+                                  M.method = "ML",
+                                  lambda.correction = TRUE,
+                                  alpha.correction = 0L,
+                                  twolevel.method = "h1"
+                                )) {
+
+  # local.twolevel.method
+  local.twolevel.method <- tolower(local.options[["twolevel.method"]])
+  if (!local.twolevel.method %in% c("h1", "anova", "mean")) {
+    lav_msg_stop(gettext(
+      "local option twolevel.method should be one of h1, anova or mean."))
+  }
+
+  local.M.method <- toupper(local.options[["M.method"]])
+
+  lavpta <- FIT@pta
+  ngroups <- lavpta$ngroups
+  nlevels <- lavpta$nlevels
+  nblocks <- lavpta$nblocks
+
+  # do we need H1?
+  if (nlevels > 1L && local.twolevel.method == "h1") {
+    H1 <- lav_h1_implied_logl(
+      lavdata = FIT@Data,
+      lavsamplestats = FIT@SampleStats,
+      lavoptions = FIT@Options
+    )
+    h1implied <- H1$implied
+  } else {
+    h1implied <- FIT@h1$implied
+    # if (FIT@Options$conditional.x) {
+    #   h1implied <- lav_model_implied_cond2uncond(h1implied)
+    # }
+  }
+
+  # containers
+  COV.list  <- vector("list", nblocks)
+  YBAR.list <- vector("list", nblocks)
+
+  # label
+  if (nblocks > 1L) {
+    names(COV.list)  <- FIT@Data@block.label
+    names(YBAR.list) <- FIT@Data@block.label
+  }
+
+  # collect COV/YBAR per block
+  for (b in seq_len(nblocks)) {
+
+    # get sample statistics for this block
+    if (nlevels > 1L) {
+      if (ngroups > 1L) {
+        this.level <- (b - 1L) %% ngroups + 1L
+      } else {
+        this.level <- b
+      }
+      this.group <- floor(b / nlevels + 0.5)
+
+      if (this.level == 1L) {
+        if (local.twolevel.method == "h1") {
+          COV <- h1implied$cov[[1]]
+          YBAR <- h1implied$mean[[1]]
+        } else if (local.twolevel.method == "anova" ||
+          local.twolevel.method == "mean") {
+          COV <- FIT@SampleStats@YLp[[this.group]][[2]]$Sigma.W
+          YBAR <- FIT@SampleStats@YLp[[this.group]][[2]]$Mu.W
+        }
+
+        # reduce
+        ov.idx <- FIT@Data@Lp[[this.group]]$ov.idx[[this.level]]
+        COV <- COV[ov.idx, ov.idx, drop = FALSE]
+        YBAR <- YBAR[ov.idx]
+      } else if (this.level == 2L) {
+        if (local.twolevel.method == "h1") {
+          COV <- h1implied$cov[[2]]
+          YBAR <- h1implied$mean[[2]]
+        } else if (local.twolevel.method == "anova") {
+          COV <- FIT@SampleStats@YLp[[this.group]][[2]]$Sigma.B
+          YBAR <- FIT@SampleStats@YLp[[this.group]][[2]]$Mu.B
+        } else if (local.twolevel.method == "mean") {
+          S.PW <- FIT@SampleStats@YLp[[this.group]][[2]]$Sigma.W
+          NJ <- FIT@SampleStats@YLp[[this.group]][[2]]$s
+          Y2 <- FIT@SampleStats@YLp[[this.group]][[2]]$Y2
+          # grand mean
+          MU.Y <- (FIT@SampleStats@YLp[[this.group]][[2]]$Mu.W + FIT@SampleStats@YLp[[this.group]][[2]]$Mu.B)
+          Y2c <- t(t(Y2) - MU.Y) # MUST be centered
+          YB <- crossprod(Y2c) / nrow(Y2c)
+          COV <- YB - 1 / NJ * S.PW
+          YBAR <- FIT@SampleStats@YLp[[this.group]][[2]]$Mu.B
+        }
+
+        # reduce
+        ov.idx <- FIT@Data@Lp[[this.group]]$ov.idx[[this.level]]
+        COV <- COV[ov.idx, ov.idx, drop = FALSE]
+        YBAR <- YBAR[ov.idx]
+      } else {
+        lav_msg_stop(gettext("level 3 not supported (yet)."))
+      }
+
+      # single level
+    } else {
+      this.group <- b
+      if (FIT@Model@conditional.x) {
+        YBAR <- h1implied$res.int[[b]]
+        COV  <- h1implied$res.cov[[b]]
+      } else {
+        YBAR <- h1implied$mean[[b]] # EM version if missing="ml"
+        COV  <- h1implied$cov[[b]]
+      }
+    } # single level
+
+    COV.list[[b]] <- COV
+    YBAR.list[[b]] <- YBAR
+  }
+
+  list(COV = COV.list, YBAR = YBAR.list)
+}
+
+# automatically generate mm.list; we create measurement blocks so that:
+# - unlinked factors become a singleton
+# - linked factor are joined into a single measurement block
+#   based: cross-loadings, or correlated residuals between item errors
+lav_sam_get_mmlist <- function(lavobject) {
+
+  lavmodel <- lavobject@Model
+  lavpta <- lavobject@pta
+  nblocks <- lavpta$nblocks
+
+  # flags
+  lv.interaction.flag <- FALSE
+  lv.higherorder.flag <- FALSE
+  if (length(unlist(lavpta$vnames$lv.interaction)) > 0L) {
+    lv.interaction.flag <- TRUE
+  }
+  if (length(unlist(lavpta$vnames$lv.ind)) > 0L) {
+    lv.higherorder.flag <- TRUE
+  }
+
+  lambda.idx <- which(names(lavmodel@GLIST) == "lambda")
+
+  mm.list <- vector("list", length = nblocks)
+
+  GLIST <- lavTech(lavobject, "partable")
+  for (b in seq_len(nblocks)) {
+    mm.in.block <- (seq_len(lavmodel@nmat[b]) +
+        cumsum(c(0, lavmodel@nmat))[b])
+    MLIST <- GLIST[mm.in.block]
+    CC <- t(MLIST$lambda) %*% MLIST$theta %*% MLIST$lambda
+
+    # note: CC contains dummy lv's, higher-order, etc... and they
+    # must be removed
+
+    # get ALL lv names (including dummy ov.x/ov.y)
+    ov.names <- lavmodel@dimNames[[lambda.idx[b]]][[1L]]
+    lv.names <- lavmodel@dimNames[[lambda.idx[b]]][[2L]]
+    NAMES <- lv.names
+
+    # needs to removed:
+    # - all lv.ind variables
+    # - all higher-order latent variables
+    # - all dummy lv's
+    rm.idx <- c(match(lavpta$vnames$lv.ind[[b]], lv.names),
+                match(lavpta$vnames$lv.interaction[[b]], lv.names),
+                which(lv.names %in% ov.names))
+    if (length(rm.idx) > 0L) {
+      CC <- CC[-rm.idx, -rm.idx, drop = FALSE]
+      NAMES <- lv.names[-rm.idx]
+    }
+
+    # cluster membership
+    membership <- lav_utils_get_connected_nodes(CC)
+
+    out <- split(NAMES, NAMES[membership])
+    names(out) <- paste("block", seq_len(length(out)), sep = "")
+
+    mm.list[[b]] <- out
+  }
+
+  mm.list
+}
+
+lav_sam_veta_partable <- function(lavobject, block = 1L) {
+
+  lavmodel <- lavobject@Model
+  lavpta   <- lavobject@pta
+  nblocks  <- lavpta$nblocks
+
+  lambda.idx <- which(names(lavmodel@GLIST) == "lambda")
+
+  GLIST <- lavTech(lavobject, "partable")
+  b <- block
+  mm.in.block <- (seq_len(lavmodel@nmat[b]) + cumsum(c(0, lavmodel@nmat))[b])
+  MLIST <- GLIST[mm.in.block]
+  PSI    <- (MLIST$psi    != 0) + 0L
+  nr <- nrow(MLIST$psi)
+  if (!is.null(MLIST$beta)) {
+    BETA <- (MLIST$beta != 0) + 0L
+    tmp <- -BETA
+    tmp[lav_matrix_diag_idx(nr)] <- 1
+    IB.inv <- solve(tmp)
+  } else {
+    IB.inv <- diag(nr)
+  }
+  VETA <- IB.inv %*% PSI %*% t(IB.inv)
+  # get ALL lv names (including dummy ov.x/ov.y)
+  lv.names <- lavmodel@dimNames[[lambda.idx[b]]][[2L]]
+  colnames(VETA) <- rownames(VETA) <- lv.names
+
+  VETA
+}
+
+lav_sam_veta_con <- function(S = NULL, LAMBDA = NULL, THETA = NULL,
+                             L.veta = NULL, local.M.method = "ML",
+                             tol = 1e-07, max.iter = 100L) {
+
+  # first do GLS/ULS
+  M <- ncol(LAMBDA)
+  if (local.M.method == "ULS") {
+    W <- diag(M)
+  } else {
+    W <- solve(S)
+  }
+
+  WL <- W %*% LAMBDA
+  tLW  <- t(WL)
+  tLWL <- tLW %*% LAMBDA
+  tmp1 <- t(L.veta) %*% (tLWL %x% tLWL) %*% L.veta
+  tmp2 <- t(L.veta) %*% lav_matrix_vec(tLW %*% (S - THETA) %*% WL)
+  out <- solve(tmp1, tmp2)
+  VETA.init <- matrix(L.veta %*% out, M, M)
+
+  if (local.M.method != "ML") {
+    # we are done!
+    return(VETA.init)
+  }
+
+  VETA.new <- VETA.init
+  for(i in seq_len(max.iter)) {
+    Sigma.ml <- LAMBDA %*% VETA.new %*% t(LAMBDA) + THETA
+    W <- solve(Sigma.ml)
+    WL <- W %*% LAMBDA
+    tLW  <- t(WL)
+    tLWL <- tLW %*% LAMBDA
+    tmp1 <- t(L.veta) %*% (tLWL %x% tLWL) %*% L.veta
+    tmp2 <- t(L.veta) %*% lav_matrix_vec(tLW %*% (S - THETA) %*% WL)
+    out <- solve(tmp1, tmp2)
+    VETA.ml <- matrix(L.veta %*% out, M, M)
+    rmsea <- sqrt(sum((VETA.new - VETA.ml)^2))
+    #cat("i = ", i, " rmsea = ", rmsea, "\n")
+    VETA.new <- VETA.ml
+    if (rmsea < tol) {
+      break
+    }
+  }
+
+  VETA.new
+}
+
+

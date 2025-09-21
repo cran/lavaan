@@ -10,6 +10,7 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
                               orthogonal.efa = FALSE,
                               std.lv = FALSE,
                               correlation = FALSE,
+                              composites = TRUE,
                               conditional.x = FALSE,
                               fixed.x = TRUE,
                               parameterization = "delta",
@@ -37,7 +38,18 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
   lv.names <- lav_partable_vnames(FLAT, type = "lv") # latent variables
   # lv.names.r   <- lav_partable_vnames(FLAT, type="lv.regular")
   # regular latent variables
-  lv.names.f <- lav_partable_vnames(FLAT, type = "lv.formative")
+  if (composites) {
+    lv.names.f <- character(0L)
+    lv.names.c <- lav_partable_vnames(FLAT, type = "lv.composite")
+    ov.ind.c <- lav_partable_vnames(FLAT, type = "ov.cind")
+    lv.names.noc <- lv.names[!lv.names %in% lv.names.c]
+  } else {
+    lv.names.c <- character(0L)
+    ov.ind.c <- character(0L)
+    lv.names.f <- lav_partable_vnames(FLAT, type = "lv.formative")
+    lv.names.noc <- lv.names
+  }
+
   # formative latent variables
   ov.names <- lav_partable_vnames(FLAT, type = "ov")
   # observed variables
@@ -131,16 +143,6 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
   if (length(ov.names.ord) > 0L) {
     categorical <- TRUE
   }
-
-  # std.lv = TRUE, group.equal includes "loadings"
-  # if(ngroups > 1L && std.lv && "loadings" %in% group.equal) {
-  # suggested by Michael Hallquist
-  # in 0.6.3, we gave a warning,
-  # warning("lavaan WARNING: std.lv = TRUE forces all variances to be unity",
-  # " in all groups, despite group.equal = \"loadings\"")
-  # in >0.6.4, we free the lv variances in all but the first group,
-  # }
-
 
   # do we have any EFA lv's? they need special treatment if auto.efa = TRUE
   if (!is.null(FLAT$efa) && auto.efa) {
@@ -256,7 +258,23 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
     }
   }
 
-  # e) efa latent variables COVARIANCES; only needed for 'mediators'
+  # e) indicators of composites: COVARIANCES
+  #    but only within/intra blocks
+  if ((ncx <- length(ov.ind.c)) > 0L) {
+    # create W1
+    W1 <- matrix(0, length(ov.ind.c), length(lv.names.c))
+    c.idx <- which(FLAT$op == "<~")
+    W1[cbind(match(FLAT$rhs[c.idx], ov.ind.c),
+             match(FLAT$lhs[c.idx], lv.names.c))] <- 1
+    W1W1 <- tcrossprod(W1)
+    W1W1[upper.tri(W1W1, diag = TRUE)] <- 0 # keep lower.tri only
+    if (ncx > 1L) {
+      lhs <- c(lhs, ov.ind.c[col(W1W1)[as.logical(W1W1)]])
+      rhs <- c(rhs, ov.ind.c[row(W1W1)[as.logical(W1W1)]])
+    }
+  }
+
+  # f) efa latent variables COVARIANCES; only needed for 'mediators'
   #    (not in lv.names.x, not in lv.names.y) -- added in 0.6-18
   if (auto.efa && length(lv.names.efa) > 1L) {
     efa.values <- lav_partable_efa_values(FLAT)
@@ -412,6 +430,8 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
     rep(0L, length(tmp.default$lhs))
   )
   mod.idx <- c(tmp.user$mod.idx, tmp.default$mod.idx)
+
+  # by default: everyting is free!
   free <- rep(1L, length(lhs))
   ustart <- rep(as.numeric(NA), length(lhs))
   # label   <- paste(lhs, op, rhs, sep="")
@@ -428,6 +448,7 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
   if (!auto.var) {
     var.idx <- which(op == "~~" &
       lhs == rhs &
+      !lhs %in% ov.ind.c &
       user == 0L)
     ustart[var.idx] <- 0.0
     free[var.idx] <- 0L
@@ -438,6 +459,22 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
       lhs %in% lv.names.f &
       user == 0L)
     ustart[var.idx] <- 0.0
+    free[var.idx] <- 0L
+  }
+
+  # 0c. for the ~~ for composite indicators: currently ALWAYS fixed
+  #     todo: create an option to free them anyway
+  if (length(ov.ind.c) > 0) {
+    var.idx <- which(op == "~~" & lhs %in% ov.ind.c)
+    ustart[var.idx] <- as.numeric(NA)
+    free[var.idx] <- 0L
+  }
+
+  # 0d. variances for composites: ALWAYS fixed (should be set later
+  #     by setVarianceComposites.LISREL
+  if (length(lv.names.c) > 0) {
+    var.idx <- which(op == "~~" & lhs %in% lv.names.c & lhs == rhs)
+    ustart[var.idx] <- as.numeric(NA)
     free[var.idx] <- 0L
   }
 
@@ -464,6 +501,12 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
     first.idx <- mm.idx[which(!duplicated(lhs[mm.idx]))]
     ustart[first.idx] <- 1.0
     free[first.idx] <- 0L
+    if (composites && length(lv.names.c) > 0L) {
+      mm.idx <- which(op == "<~")
+      first.idx <- mm.idx[which(!duplicated(lhs[mm.idx]))]
+      ustart[first.idx] <- 1.0
+      free[first.idx] <- 0L
+    }
   }
 
   # 2. fix residual variance of single indicators to zero
@@ -574,6 +617,13 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
         user == 0L)
       ustart[lv.int.idx] <- as.numeric(NA)
       free[lv.int.idx] <- 1L
+    }
+    # composites: always non-free, but with ustart = NA; value should be
+    # filled in later as a function of the other parameters
+    if (length(lv.names.c) > 0L) {
+      c.int.idx <- which(op == "~1" & lhs %in% lv.names.c & user == 0L)
+      ustart[c.int.idx] <- as.numeric(NA)
+      free[c.int.idx] <- 0L
     }
   }
 
@@ -694,6 +744,22 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
   # 6. multiple groups?
   group <- rep(1L, length(lhs))
   if (ngroups > 1) {
+
+    # only if "loadings" in group.equal and !std.lv:
+    # construct tempory tmp.list to obtain lv.marker
+    if (!std.lv & "loadings" %in% group.equal) {
+      tmp.list <- list(
+        id          = seq_along(lhs),
+        lhs         = lhs,
+        op          = op,
+        rhs         = rhs,
+        free        = free,
+        ustart      = ustart,
+        block       = rep(1, length(rhs)))
+      lv.marker <- lav_partable_vnames(tmp.list, "lv.marker")
+    }
+
+
     group <- rep(1:ngroups, each = length(lhs))
     user <- rep(user, times = ngroups)
     lhs <- rep(lhs, times = ngroups)
@@ -707,21 +773,30 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
 
     # specific changes per group
     for (g in 2:ngroups) {
-      # label
-      # label[group == g] <- paste(label[group == 1], ".g", g, sep="")
-
-      # free/fix intercepts
+      # free/fix intercepts latent variables
       if (meanstructure) {
         int.idx <- which(op == "~1" &
-          lhs %in% lv.names &
+          lhs %in% lv.names.noc &
           user == 0L &
           group == g)
         if (int.lv.free == FALSE && g > 1 &&
-          ("intercepts" %in% group.equal ||
-            "thresholds" %in% group.equal) &&
+          ("intercepts" %in% group.equal) &&
           !("means" %in% group.equal)) {
           free[int.idx] <- 1L
           ustart[int.idx] <- as.numeric(NA)
+        }
+      }
+
+      # free intercept indicators if equal thresholds (new in 0.6-20)
+      if (meanstructure && length(ov.names.ord) > 0L) {
+        ord.idx <- which(op == "~1" &
+          lhs %in% ov.names.ord &
+          user == 0L &
+          group == g)
+        if (int.lv.free == FALSE && g > 1 &&
+           "thresholds" %in% group.equal) {
+          free[ord.idx] <- 1L
+          ustart[ord.idx] <- as.numeric(NA)
         }
       }
 
@@ -738,10 +813,22 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
           free[lv.var.idx] <- 1L
           ustart[lv.var.idx] <- as.numeric(NA)
         }
+      # marker indicator if std.lv = FALSE (new in 0.6-20)
+      } else if(!std.lv && "loadings" %in% group.equal) {
+        marker.idx <- which(op == "=~" &
+          rhs %in% lv.marker &
+          free == 0L &
+          ustart == 1L &
+          group == g)
+        if (length(marker.idx) > 0L) {
+          free[marker.idx] <- 1L
+          ustart[marker.idx] <- as.numeric(NA)
+        }
       }
 
       # latent variances if efa = TRUE (new in 0.6-5)
-      if (auto.efa && "loadings" %in% group.equal &&
+      if (length(lv.names.efa) > 0L &&
+          auto.efa && "loadings" %in% group.equal &&
         !"lv.variances" %in% group.equal) {
         lv.var.idx <- which(op == "~~" &
           lhs %in% lv.names.efa &
@@ -754,21 +841,29 @@ lav_partable_flat <- function(FLAT = NULL, # nolint
         }
       }
 
-      # latent response scaling
-      if (auto.delta && parameterization == "delta") {
-        if (any(op == "~*~" & group == g) &&
-          ("thresholds" %in% group.equal)) {
-          delta.idx <- which(op == "~*~" & group == g)
-          free[delta.idx] <- 1L
-          ustart[delta.idx] <- as.numeric(NA)
-        }
-      } else if (parameterization == "theta") {
-        if (any(op == "~*~" & group == g) &&
-          ("thresholds" %in% group.equal)) {
-          var.ord.idx <- which(op == "~~" & group == g &
-            lhs %in% ov.names.ord & lhs == rhs)
-          free[var.ord.idx] <- 1L
-          ustart[var.ord.idx] <- as.numeric(NA)
+      # latent response scaling -- categorical only
+      # - if thresholds are equal -> free scalings/residual variances
+      # - but not for binary indicators!
+      if (length(ov.names.ord) > 0L) {
+        nth <- sapply(ov.names.ord,
+          function(x) sum(lhs == x & op == "|" & group == 1L))
+        ov.names.ord.notbinary <- ov.names.ord[nth > 1L]
+        if (auto.delta && parameterization == "delta") {
+          if (any(op == "~*~" & group == g) &&
+            ("thresholds" %in% group.equal)) {
+            delta.idx <- which(op == "~*~" & group == g &
+              lhs %in% ov.names.ord.notbinary)
+            free[delta.idx] <- 1L
+            ustart[delta.idx] <- as.numeric(NA)
+          }
+        } else if (parameterization == "theta") {
+          if (any(op == "~*~" & group == g) &&
+            ("thresholds" %in% group.equal)) {
+            var.ord.idx <- which(op == "~~" & group == g &
+              lhs %in% ov.names.ord.notbinary & lhs == rhs)
+            free[var.ord.idx] <- 1L
+            ustart[var.ord.idx] <- as.numeric(NA)
+          }
         }
       }
 

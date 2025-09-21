@@ -37,6 +37,21 @@ lav_model_loglik <- function(lavdata = NULL,
     logl.ok <- FALSE
   }
 
+  # catch all-zero Sigma (new in 0.6-20)
+  nblocks <- lavmodel@nblocks
+  for (b in seq_len(nblocks)) {
+    if (lavmodel@conditional.x) {
+      if (all(lavimplied$res.cov[[b]] == 0)) {
+        logl.ok <- FALSE
+      }
+    } else {
+      if (all(lavimplied$cov[[b]] == 0)) {
+        logl.ok <- FALSE
+      }
+    }
+  }
+
+
   if (logl.ok) {
     for (g in seq_len(ngroups)) {
       if (lavdata@nlevels > 1L) {
@@ -110,6 +125,7 @@ lav_model_loglik <- function(lavdata = NULL,
         x.idx <- lavsamplestats@x.idx[[g]]
         X.MEAN <- X.COV <- NULL
         if (length(x.idx) > 0L) {
+          # FIXME: should use lavh1 instead!
           X.MEAN <- lavsamplestats@missing.h1[[g]]$mu[x.idx]
           X.COV <- lavsamplestats@missing.h1[[g]]$sigma[x.idx,
             x.idx,

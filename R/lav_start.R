@@ -26,6 +26,9 @@ lav_start <- function(start.method = "default",
   # correlation structure?
   correlation <- any(lavpartable$op == "~*~")
 
+  # composites?
+  composites <- any(lavpartable$op == "<~")
+
   # conditional.x?
   conditional.x <- any(lavpartable$exo == 1L &
     lavpartable$op %in% c("~", "<~"))
@@ -65,6 +68,7 @@ lav_start <- function(start.method = "default",
       start <- numeric(length(lavpartable$ustart))
       # if(categorical || correlation) {
       start[which(lavpartable$op == "=~")] <- 0.7
+      start[which(lavpartable$op == "<~")] <- 1
       # } else {
       #    start[ which(lavpartable$op == "=~") ] <- 1.0
       # }
@@ -178,6 +182,8 @@ lav_start <- function(start.method = "default",
     lv.names <- vnames(lavpartable, "lv", group = group.values[g])
     lv.names.efa <- vnames(lavpartable, "lv.efa", group = group.values[g])
     ov.names.x <- vnames(lavpartable, "ov.x", group = group.values[g])
+    ov.ind.c <- vnames(lavpartable, "ov.cind", group = group.values[g])
+    lv.names.c <- vnames(lavpartable, "lv.composite", group = group.values[g])
 
     # just for the nlevels >1 case
     ov.names <- unique(unlist(ov.names))
@@ -185,7 +191,9 @@ lav_start <- function(start.method = "default",
     lv.names <- unique(unlist(lv.names))
     lv.names.efa <- unique(unlist(lv.names.efa))
     ov.names.x <- unique(unlist(ov.names.x))
-
+    ov.ind.c <- unique(unlist(ov.ind.c))
+    lv.names.c <- unique(unlist(lv.names.c))
+    lv.names.noc <- lv.names[!lv.names %in% lv.names.c]
 
     # residual ov variances (including exo/ind, to be overriden)
     ov.var.idx <- which(lavpartable$group == group.values[g] &
@@ -195,13 +203,14 @@ lav_start <- function(start.method = "default",
     sample.var.idx <- match(lavpartable$lhs[ov.var.idx], ov.names)
     if (model.type == "unrestricted") {
 	  # this does not work if conditional.x = TRUE...
-      if (!is.null(lavsamplestats@missing.h1[[g]])) {
-        start[ov.var.idx] <-
-          diag(lavsamplestats@missing.h1[[g]]$sigma)[sample.var.idx]
+      if (!is.null(lavh1$implied$cov[[g]])) {
+        h1.cov <- lavh1$implied$cov[[g]]
+      } else if (!is.null(lavsamplestats@missing.h1[[g]])) {
+        h1.cov <- lavsamplestats@missing.h1[[g]]$sigma
       } else {
-        start[ov.var.idx] <-
-          diag(lavsamplestats@cov[[g]])[sample.var.idx]
+        h1.cov <- lavsamplestats@cov[[g]]
       }
+      start[ov.var.idx] <- diag(h1.cov)[sample.var.idx]
     } else {
       if (start.initial == "mplus") {
         if (conditional.x && nlevels == 1L) {
@@ -220,13 +229,17 @@ lav_start <- function(start.method = "default",
             (1.0 - 0.50) * diag(lavsamplestats@cov[[g]])[sample.var.idx]
         }
       }
+      # composite indicators: fill in total variances
+      if (composites) {
+        start[ov.var.idx] <- diag(lavsamplestats@cov[[g]])[sample.var.idx]
+      }
     }
 
     # 1-fac measurement models: loadings, psi, theta
     if (start.initial %in% c("lavaan", "mplus") &&
       model.type %in% c("sem", "cfa")) {
       # fabin3 estimator (2sls) of Hagglund (1982) per factor
-      for (f in lv.names) {
+      for (f in lv.names.noc) {
         # not for efa factors
         if (f %in% lv.names.efa) {
           next
@@ -253,10 +266,12 @@ lav_start <- function(start.method = "default",
         ov.idx <- match(lavpartable$rhs[lambda.idx], ov.names)
         if (length(ov.idx) > 0L && !any(is.na(ov.idx))) {
           if (lavsamplestats@missing.flag && nlevels == 1L) {
-            COV <- lavsamplestats@missing.h1[[g]]$sigma[ov.idx,
-              ov.idx,
-              drop = FALSE
-            ]
+            if (!is.null(lavh1$implied$cov[[g]])) {
+              h1.cov <- lavh1$implied$cov[[g]]
+            } else {
+              h1.cov <- lavsamplestats@missing.h1[[g]]$sigma
+            }
+            COV <- h1.cov[ov.idx, ov.idx, drop = FALSE]
           } else {
             if (conditional.x && nlevels == 1L) {
               COV <- lavsamplestats@res.cov[[g]][ov.idx,
@@ -290,6 +305,13 @@ lav_start <- function(start.method = "default",
               tmp <- rep(1.0, length(tmp))
             }
           }
+
+          # check for negative marker
+          if (!std.lv && !is.na(lavpartable$ustart[lambda.idx[1]]) &&
+              lavpartable$ustart[lambda.idx[1]] < 0) {
+            tmp <- -1 * tmp
+          }
+
           start[lambda.idx] <- tmp
 
           # factor variance
@@ -361,10 +383,12 @@ lav_start <- function(start.method = "default",
 
           if (length(ov.idx) > 0L && !any(is.na(ov.idx))) {
             if (lavsamplestats@missing.flag && nlevels == 1L) {
-              COV <- lavsamplestats@missing.h1[[g]]$sigma[ov.idx,
-                ov.idx,
-                drop = FALSE
-              ]
+              if (!is.null(lavh1$implied$cov[[g]])) {
+                h1.cov <- lavh1$implied$cov[[g]]
+              } else {
+                h1.cov <- lavsamplestats@missing.h1[[g]]$sigma
+              }
+              COV <- h1.cov[ov.idx, ov.idx, drop = FALSE]
             } else {
               if (conditional.x) {
                 COV <- lavsamplestats@res.cov[[g]][ov.idx,
@@ -412,15 +436,54 @@ lav_start <- function(start.method = "default",
         lavpartable$lhs != lavpartable$rhs)
       lhs.idx <- match(lavpartable$lhs[cov.idx], ov.names)
       rhs.idx <- match(lavpartable$rhs[cov.idx], ov.names)
-      if (!is.null(lavsamplestats@missing.h1[[g]])) {
-        start[cov.idx] <- lavsamplestats@missing.h1[[g]]$sigma[
-          cbind(lhs.idx, rhs.idx)
-        ]
+      if (!is.null(lavh1$implied$cov[[g]])) {
+        h1.cov <- lavh1$implied$cov[[g]]
+      } else if (!is.null(lavsamplestats@missing.h1[[g]])) {
+        h1.cov <- lavsamplestats@missing.h1[[g]]$sigma
       } else {
-        start[cov.idx] <- lavsamplestats@cov[[g]][
-          cbind(lhs.idx, rhs.idx)
-        ]
+        h1.cov <- lavsamplestats@cov[[g]]
       }
+      start[cov.idx] <- h1.cov[cbind(lhs.idx, rhs.idx)]
+    }
+
+    # composites
+    if (composites) {
+      std.lv <- FALSE
+      var.f.idx <- which(lavpartable$lhs %in% lv.names.c &
+        lavpartable$op == "~~" &
+        lavpartable$group == group.values[g] &
+        lavpartable$rhs %in% lv.names.c)
+      if (length(var.f.idx) > 0L &&
+        all(lavpartable$free[var.f.idx] == 0) &&
+        !all(is.na(lavpartable$ustart[var.f.idx])) &&
+        all(lavpartable$ustart[var.f.idx] == 1)) {
+        std.lv <- TRUE
+      }
+
+      # weights
+      cidx <- which(lavpartable$group == group.values[g] &
+        lavpartable$op == "<~")
+      if (std.lv) {
+        start[cidx] <- 0.10
+      } else {
+        start[cidx] <- 1
+      }
+
+      # fill in 'covariances' from lavsamplestats
+      cov.idx <- which(lavpartable$group == group.values[g] &
+        lavpartable$op == "~~" &
+        lavpartable$rhs %in% ov.ind.c &
+        lavpartable$lhs != lavpartable$rhs)
+      lhs.idx <- match(lavpartable$lhs[cov.idx], ov.names)
+      rhs.idx <- match(lavpartable$rhs[cov.idx], ov.names)
+      if (!is.null(lavh1$implied$cov[[g]])) {
+        h1.cov <- lavh1$implied$cov[[g]]
+      } else if (!is.null(lavsamplestats@missing.h1[[g]])) {
+        h1.cov <- lavsamplestats@missing.h1[[g]]$sigma
+      } else {
+        h1.cov <- lavsamplestats@cov[[g]]
+      }
+      start[cov.idx] <- h1.cov[cbind(lhs.idx, rhs.idx)]
     }
 
     # variances of ordinal variables - set to 1.0
@@ -438,7 +501,14 @@ lav_start <- function(start.method = "default",
       lavpartable$lhs %in% ov.names)
     sample.int.idx <- match(lavpartable$lhs[ov.int.idx], ov.names)
     if (lavsamplestats@missing.flag && nlevels == 1L) {
-      start[ov.int.idx] <- lavsamplestats@missing.h1[[g]]$mu[sample.int.idx]
+      if (!is.null(lavh1$implied$mean[[g]])) {
+        h1.mean <- lavh1$implied$mean[[g]]
+      } else if (!is.null(lavsamplestats@missing.h1[[g]])) {
+        h1.mean <- lavsamplestats@missing.h1[[g]]$mu
+      } else {
+        h1.mean <- lavsamplestats@mean[[g]]
+      }
+      start[ov.int.idx] <- h1.mean[sample.int.idx]
     } else {
       if (conditional.x && nlevels == 1L) {
         start[ov.int.idx] <- lavsamplestats@res.int[[g]][sample.int.idx]
@@ -487,8 +557,14 @@ lav_start <- function(start.method = "default",
         row.idx <- match(lavpartable$lhs[exo.idx], ov.names)
         col.idx <- match(lavpartable$rhs[exo.idx], ov.names)
         if (lavsamplestats@missing.flag && nlevels == 1L) {
-          start[exo.idx] <-
-            lavsamplestats@missing.h1[[g]]$sigma[cbind(row.idx, col.idx)]
+          if (!is.null(lavh1$implied$cov[[g]])) {
+            h1.cov <- lavh1$implied$cov[[g]]
+          } else if (!is.null(lavsamplestats@missing.h1[[g]])) {
+            h1.cov <- lavsamplestats@missing.h1[[g]]$sigma
+          } else {
+            h1.cov <- lavsamplestats@cov[[g]]
+          }
+          start[exo.idx] <- h1.cov[cbind(row.idx, col.idx)]
           # using slightly smaller starting values for free
           # variance/covariances (fixed.x = FALSE);
           # this somehow avoids false convergence in saturated models
@@ -931,14 +1007,19 @@ lav_start <- function(start.method = "default",
 # StartingValues <- lav_start
 
 # sanity check: (user-specified) variances smaller than covariances
+# but not for composites, as we have not 'set' their variances yet
 lav_start_check_cov <- function(lavpartable = NULL, start = lavpartable$start) {
   nblocks <- lav_partable_nblocks(lavpartable)
   block.values <- lav_partable_block_values(lavpartable)
 
   for (g in 1:nblocks) {
+
+    lv.names.c <- lav_partable_vnames(lavpartable, "lv.composite", block = g)
+
     # collect all non-zero covariances
     cov.idx <- which(lavpartable$op == "~~" &
       lavpartable$block == block.values[g] &
+      !lavpartable$lhs %in% lv.names.c &
       lavpartable$lhs != lavpartable$rhs &
       !lavpartable$exo &
       start != 0)

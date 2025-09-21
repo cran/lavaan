@@ -2,6 +2,15 @@
 
 # backward compatibility -- wrapper around lavInspect
 inspect.lavaan <- function(object, what = "free", ...) {
+  dotdotdot <- list(...)
+  if (length(dotdotdot) > 0L) {
+    for (j in seq_along(dotdotdot)) {
+      lav_msg_warn(gettextf(
+        "Unknown argument %s for %s", sQuote(names(dotdotdot)[j]),
+        sQuote("inspect"))
+      )
+    }
+  }
   lavInspect.lavaan(object              = object,
     what                   = what,
     add.labels             = TRUE,
@@ -2655,7 +2664,7 @@ lav_object_inspect_vcov <- function(object, standardized = FALSE,
     if (free.only) {
       if (.hasSlot(object@Model, "ceq.simple.only") &&
         object@Model@ceq.simple.only) {
-        free.idx <- which(object@ParTable$free > 0L &&
+        free.idx <- which(object@ParTable$free > 0L &
           !duplicated(object@ParTable$free))
       } else {
         free.idx <- which(object@ParTable$free > 0L)

@@ -1,16 +1,14 @@
 # lavSimulate: fit the *same* model, on simulated datasets
-# YR - 4 July 2016
+# YR - 4 July 2016: initial version
+# YR - 15 Oct 2024: add iseed (similar to bootstrapLavaan)
+# YR - 26 Oct 2024: rm pop.model, add est.true argument
 
-lavSimulate <- function(pop.model = NULL, # population model
-                        model = NULL, # user model
+lavSimulate <- function(model = NULL, # user model
                         dataFunction = simulateData,
-                        dataFunction.args = list(
-                          model = pop.model,
-                          sample.nobs = 1000L
-                        ),
+                        dataFunction.args = list(),
+                        est.true = NULL,
                         ndat = 1000L,
                         cmd = "sem",
-                        cmd.pop = "sem",
                         ...,
                         store.slots = c("partable"),
                         FUN = NULL,
@@ -18,7 +16,8 @@ lavSimulate <- function(pop.model = NULL, # population model
                         store.failed = FALSE,
                         parallel = c("no", "multicore", "snow"),
                         ncpus = max(1L, parallel::detectCores() - 1L),
-                        cl = NULL) {
+                        cl = NULL,
+                        iseed = NULL) {
   # dotdotdot
   dotdotdot <- list(...)
 
@@ -29,15 +28,16 @@ lavSimulate <- function(pop.model = NULL, # population model
   dotdotdot.pop$data <- NULL
   dotdotdot.pop$sample.cov <- NULL
 
-  # 'fit' population model without data, to get 'true' parameters
-  fit.pop <- do.call(cmd.pop,
-    args = c(list(model = pop.model), dotdotdot.pop)
+  # 'fit' model without data, check 'true' parameters
+  fit.pop <- do.call(cmd,
+    args = c(list(model = model), dotdotdot.pop)
   )
 
-  # check model object
-  if (is.null(model)) {
-    model <- fit.pop@ParTable
-  }
+  # check est.true= argument
+  stopifnot(!missing(est.true), is.numeric(est.true),
+            length(fit.pop@ParTable$lhs) == length(est.true))
+  fit.pop@ParTable$est <- est.true
+  fit.pop@ParTable$start <- est.true
 
   # per default, use 'true' values as starting values
   if (is.null(dotdotdot$start)) {
@@ -56,39 +56,15 @@ lavSimulate <- function(pop.model = NULL, # population model
     store.slots = store.slots, FUN = FUN,
     show.progress = show.progress,
     store.failed = store.failed,
-    parallel = parallel, ncpus = ncpus, cl = cl
+    parallel = parallel, ncpus = ncpus,
+    cl = cl, iseed = iseed
   ), dotdotdot))
 
   # flag this is a simulation
   fit@meta$lavSimulate <- TRUE
 
-  # NOTE!!!
-  # if the model != pop.model, we may need to 'reorder' the
-  # 'true' parameters, so they correspond to the 'model' parameters
-  p2.id <- lav_partable_map_id_p1_in_p2(
-    p1 = fit@ParTable,
-    p2 = fit.pop@ParTable,
-    stopifnotfound = FALSE
-  )
-  est1 <- fit@ParTable$est
-  na.idx <- which(is.na(p2.id))
-  if (length(na.idx) > 0L) {
-    lav_msg_warn(gettext(
-      "some estimated parameters were not mentioned in the population model;
-      partable user model idx = ", lav_msg_view(na.idx, "none")))
-
-    # replace NA by '1' (override later!)
-    p2.id[na.idx] <- 1L
-  }
-  est.pop <- fit.pop@ParTable$est[p2.id]
-
-  # by default, the 'unknown' population values are set to 0.0
-  if (length(na.idx) > 0L) {
-    est.pop[na.idx] <- 0
-  }
-
   # store 'true' parameters in meta$est.true
-  fit@meta$est.true <- est.pop
+  fit@meta$est.true <- est.true
 
   fit
 }

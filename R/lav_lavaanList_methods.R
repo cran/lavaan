@@ -27,10 +27,26 @@ setMethod(
   function(object, header = TRUE,
            estimates = TRUE,
            print = TRUE,
-           nd = 3L) {
+           nd = 3L,
+           simulate.args = list(est.bias = TRUE,
+                                se.bias  = TRUE,
+                                prop.sig = TRUE,
+                                coverage = TRUE,
+                                level    = 0.95,
+                                trim     = 0),
+           ...) {
+    dotdotdot <- list(...)
+    if (length(dotdotdot) > 0L) {
+      for (j in seq_along(dotdotdot)) {
+        lav_msg_warn(gettextf(
+          "Unknown argument %s for %s", sQuote(names(dotdotdot)[j]),
+          sQuote("summary"))
+        )
+      }
+    }
     lav_lavaanList_summary(object,
       header = header, estimates = estimates,
-      print = print, nd = nd
+      print = print, nd = nd, simulate.args = simulate.args
     )
   }
 )
@@ -38,8 +54,12 @@ setMethod(
 lav_lavaanList_summary <- function(object,
                                    header = TRUE,
                                    estimates = TRUE,
-                                   est.bias = TRUE,
-                                   se.bias = TRUE,
+                                   simulate.args = list(est.bias = TRUE,
+                                                        se.bias  = TRUE,
+                                                        prop.sig = TRUE,
+                                                        coverage = TRUE,
+                                                        level    = 0.95,
+                                                        trim     = 0),
                                    zstat = TRUE,
                                    pvalue = TRUE,
                                    print = TRUE,
@@ -66,6 +86,7 @@ lav_lavaanList_summary <- function(object,
       remove.system.eq = FALSE, remove.eq = FALSE,
       remove.ineq = FALSE, remove.def = FALSE,
       remove.nonfree = FALSE, remove.unused = FALSE,
+      remove.step1 = FALSE, # in case we used sam()
       # zstat = FALSE, pvalue = FALSE, ci = FALSE,
       standardized = FALSE,
       output = output
@@ -73,37 +94,108 @@ lav_lavaanList_summary <- function(object,
 
     # scenario 1: simulation
     if (!is.null(object@meta$lavSimulate)) {
+
+      # default behavior
+      sim.args <- list(est.bias = TRUE,
+                       se.bias  = TRUE,
+                       prop.sig = TRUE,
+                       coverage = TRUE,
+                       level    = 0.95,
+                       trim     = 0)
+      sim.args <- modifyList(sim.args, simulate.args)
+      #if (!sim.args$est.bias) {
+      #  sim.args$se.bias <- FALSE
+      #}
+      if (!sim.args$se.bias) {
+        sim.args$prop.sig <- FALSE
+      }
+
       pe$est.true <- object@meta$est.true
       nel <- length(pe$est.true)
 
-      # EST
+      # always compute EST
       EST <- lav_lavaanList_partable(object, what = "est", type = "all")
-      AVE <- rowMeans(EST, na.rm = TRUE)
 
-      # remove things like equality constraints
-      if (length(AVE) > nel) {
-        AVE <- AVE[seq_len(nel)]
+      # sometimes compute SE
+      if (sim.args$se.bias || sim.args$prop.sig || sim.args$coverage) {
+        SE <- lav_lavaanList_partable(object, what = "se", type = "all")
       }
-      pe$est.ave <- AVE
-      if (est.bias) {
+
+      # est.bias?
+      if (sim.args$est.bias) {
+        AVE <- apply(EST, 1L, mean, na.rm = TRUE, trim = sim.args$trim)
+
+        # remove things like equality constraints
+        if (length(AVE) > nel) {
+          AVE <- AVE[seq_len(nel)]
+        }
+        AVE[!is.finite(AVE)] <- as.numeric(NA)
+        pe$est.ave <- AVE
         pe$est.bias <- pe$est.ave - pe$est.true
       }
 
       # SE?
-      if (se.bias) {
-        SE.OBS <- apply(EST, 1L, sd, na.rm = TRUE)
+      if (sim.args$se.bias) {
+        SE.OBS <- apply(EST, 1L, lav_utils_sd, na.rm = TRUE,
+                        trim = sim.args$trim)
         if (length(SE.OBS) > nel) {
           SE.OBS <- SE.OBS[seq_len(nel)]
         }
+        SE.OBS[!is.finite(SE.OBS)] <- as.numeric(NA)
         pe$se.obs <- SE.OBS
-        SE <- lav_lavaanList_partable(object, what = "se", type = "all")
-        SE.AVE <- rowMeans(SE, na.rm = TRUE)
+        SE.AVE <- apply(SE, 1L, mean, na.rm = TRUE, trim = sim.args$trim)
         if (length(SE.AVE) > nel) {
           SE.AVE <- SE.AVE[seq_len(nel)]
         }
+        SE.AVE[!is.finite(SE.AVE)] <- as.numeric(NA)
         pe$se.ave <- SE.AVE
-        pe$se.bias <- pe$se.ave - pe$se.obs
+        se.obs <- SE.OBS
+        se.obs[se.obs < .Machine$double.eps^(1/3)] <- as.numeric(NA)
+        pe$se.bias <- pe$se.ave / se.obs # use ratio!
+        pe$se.bias[!is.finite(pe$se.bias)] <- as.numeric(NA)
       }
+
+      if (sim.args$prop.sig) {
+        SE[SE < sqrt(.Machine$double.eps)] <- as.numeric(NA)
+        WALD <- EST/SE
+        wald <- apply(WALD, 1L, mean, na.rm = TRUE,
+                      trim = sim.args$trim)
+        wald[!is.finite(wald)] <- as.numeric(NA)
+        pe$wald <- wald
+        PVAL <- 2 * (1 - pnorm(abs(WALD)))
+        propsig <- apply(PVAL, 1L, function(x) {
+                        x.ok <- x[is.finite(x)]
+                        nx <- length(x.ok)
+                        sum(x.ok < (1 - sim.args$level))/nx
+                       })
+        propsig[!is.finite(propsig)] <- as.numeric(NA)
+        pe$prop.sig <- propsig
+      }
+
+      if (sim.args$coverage) {
+        # next three lines based on confint.lm
+        a <- (1 - sim.args$level) / 2
+        a <- c(a, 1 - a)
+        fac <- qnorm(a)
+        CI.LOWER <- EST + fac[1]*SE
+        CI.UPPER <- EST + fac[2]*SE
+        ci.lower <- apply(CI.LOWER, 1L, mean, na.rm = TRUE,
+                          trim = sim.args$trim)
+        ci.upper <- apply(CI.UPPER, 1L, mean, na.rm = TRUE,
+                          trim = sim.args$trim)
+        ci.lower[!is.finite(ci.lower)] <- as.numeric(NA)
+        ci.upper[!is.finite(ci.upper)] <- as.numeric(NA)
+        pe$ci.lower <- ci.lower
+        pe$ci.upper <- ci.upper
+        # columnwise comparison
+        inside.flag <- (CI.LOWER <= pe$est.true) & (CI.UPPER >= pe$est.true)
+        coverage <- apply(inside.flag, 1L, mean, na.rm = TRUE)
+        coverage[!is.finite(coverage)] <- as.numeric(NA)
+        pe$coverage <- coverage
+      }
+
+      # if sam(), should we keep or remove the step1 values?
+      # keep them for now
 
       # scenario 2: bootstrap
     } else if (!is.null(object@meta$lavBootstrap)) {
@@ -186,7 +278,16 @@ lav_lavaanList_summary <- function(object,
 
 setMethod(
   "coef", "lavaanList",
-  function(object, type = "free", labels = TRUE) {
+  function(object, type = "free", labels = TRUE, ...) {
+    dotdotdot <- list(...)
+    if (length(dotdotdot) > 0L) {
+      for (j in seq_along(dotdotdot)) {
+        lav_msg_warn(gettextf(
+          "Unknown argument %s for %s", sQuote(names(dotdotdot)[j]),
+          sQuote("coef"))
+        )
+      }
+    }
     lav_lavaanList_partable(
       object = object, what = "est", type = type,
       labels = labels

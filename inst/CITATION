@@ -1,9 +1,27 @@
-citHeader("To cite lavaan in publications use:")
+citHeader("To cite lavaan in publications please use:")
+
+bibentry(
+  bibtype      = "manual",
+  title        = "{lavaan}: Latent Variable Analysis",
+  author       = as.person(c(person(given = "Yves", family = "Rosseel"), 
+                             person(given = "Terrence D.", family = "Jorgensen"), 
+                             person(given = "Luc", family = "De Wilde"))),
+  year         = "2025",
+  note         = "R package version 0.6-20",
+  doi          = "10.32614/CRAN.package.lavaan",
+  url          = "https://CRAN.R-project.org/package=lavaan",
+
+  textVersion =
+  paste("Rosseel Y., Jorgensen T. D., De Wilde L. (2025).", 
+        "lavaan: Latent Variable Analysis.", 
+        "R package version 0.6-20.",
+        "https://doi.org/10.32614/CRAN.package.lavaan")
+)
 
 bibentry(
   bibtype      = "Article",
   title        = "{lavaan}: An {R} Package for Structural Equation Modeling",
-  author       = as.person("Yves Rosseel"),
+  author       = as.person(person(given = "Yves", family = "Rosseel")),
   journal      = "Journal of Statistical Software",
   year         = "2012",
   volume       = "48",
@@ -12,7 +30,7 @@ bibentry(
   doi          = "10.18637/jss.v048.i02",
 
   textVersion  =
-  paste("Yves Rosseel (2012).",
+  paste("Rosseel, Y. (2012).",
         "lavaan: An R Package for Structural Equation Modeling.",
         "Journal of Statistical Software, 48(2), 1-36.",
         "https://doi.org/10.18637/jss.v048.i02")

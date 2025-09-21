@@ -9,11 +9,21 @@
 #                    categorical case
 # - YR 12 Jan 2014: refactoring + lav_predict_fy (to be used by estimator MML)
 #
+# - YR 25 Mar 2025: transformed factor scores (correlation-preserving)
 
 # overload standard R function `predict'
 setMethod(
   "predict", "lavaan",
-  function(object, newdata = NULL) {
+  function(object, newdata = NULL, ...) {
+    dotdotdot <- list(...)
+    if (length(dotdotdot) > 0L) {
+      for (j in seq_along(dotdotdot)) {
+        lav_msg_warn(gettextf(
+          "Unknown argument %s for %s", sQuote(names(dotdotdot)[j]),
+          sQuote("predict"))
+        )
+      }
+    }
     lavPredict(
       object = object, newdata = newdata, type = "lv", method = "EBM",
       fsm = FALSE, rel = FALSE, optim.method = "bfgs"
@@ -73,11 +83,19 @@ lavPredict <- function(object, newdata = NULL, # keep order of predict(), 0.6-7
     )
   }
   lavimplied <- object@implied
+  lavpartable <- object@ParTable
+
+  # warn if the model does not contain any 'regular' latent variables
+  if (length(lavNames(lavpartable, "lv.regular")) == 0L) {
+    lav_msg_warn(gettextf("fitted model does not contain regular
+    (i.e., measured) latent variables; the matrix of factor scores may
+    contain no columns"))
+  }
 
   res <- lav_predict_internal(
     lavmodel = lavmodel, lavdata = lavdata,
     lavsamplestats = lavsamplestats, lavimplied = lavimplied, lavh1 = lavh1,
-    lavpartable = object@ParTable, newdata = newdata, type = type, method = method,
+    lavpartable = lavpartable, newdata = newdata, type = type, method = method,
     transform = transform, se = se, acov = acov, label = label,
     fsm = fsm, rel = rel,
     mdist = mdist, append.data = append.data, assemble = assemble,
@@ -296,11 +314,34 @@ lav_predict_internal <- function(lavmodel = NULL,
     # new in 0.6-16
     # we assume the dummy lv's have already been removed
     if (transform) {
-      VETA <- computeVETA(lavmodel = lavmodel, remove.dummy.lv = TRUE)
+      # VETA <- computeVETA(lavmodel = lavmodel, remove.dummy.lv = TRUE)
       EETA <- computeEETA(
         lavmodel = lavmodel,
         lavsamplestats = lavsamplestats, remove.dummy.lv = TRUE
       )
+      # compute transformation matrix
+      if (tolower(method) %in% c("ebm", "regression")) {
+        tmat <- lav_predict_tmat_green(lavmodel = lavmodel,
+                                       lavimplied = lavimplied)
+      } else {
+        tmat <- lav_predict_tmat_det(lavmodel = lavmodel,
+                                     lavimplied = lavimplied)
+      }
+
+      # update FSM
+      if (fsm) {
+        FSM <- lapply(seq_len(lavdata@ngroups), function(g) {
+          # determine block
+          if (lavdata@nlevels == 1L) {
+            bb <- g
+          } else {
+            bb <- (g - 1) * lavdata@nlevels + level
+          }
+          ret <- tmat[[bb]] %*% FSM[[g]]
+          ret
+        })
+      }
+
       out <- lapply(seq_len(lavdata@ngroups), function(g) {
         # determine block
         if (lavdata@nlevels == 1L) {
@@ -309,25 +350,19 @@ lav_predict_internal <- function(lavmodel = NULL,
           bb <- (g - 1) * lavdata@nlevels + level
         }
 
-        FS.centered <- scale(out[[g]],
-          center = TRUE,
-          scale = FALSE
-        )
-        FS.cov <- crossprod(FS.centered) / nrow(FS.centered)
-        FS.cov.inv <- try(solve(FS.cov), silent = TRUE)
-        if (inherits(FS.cov.inv, "try-error")) {
-          lav_msg_warn(
-            gettext("could not invert (co)variance matrix of factor scores;
-                    returning original factor scores."))
-          return(out[[g]])
-        }
-        fs.inv.sqrt <- lav_matrix_symmetric_sqrt(FS.cov.inv)
-        veta.sqrt <- lav_matrix_symmetric_sqrt(VETA[[g]])
-        if (fsm) {
-          # change FSM
-          FSM[[g]] <<- veta.sqrt %*% fs.inv.sqrt %*% FSM[[g]]
-        }
-        tmp <- FS.centered %*% fs.inv.sqrt %*% veta.sqrt
+        FS.centered <- scale(out[[g]], center = TRUE, scale = FALSE)
+        #FS.cov <- crossprod(FS.centered) / nrow(FS.centered)
+        #FS.cov.inv <- try(solve(FS.cov), silent = TRUE)
+        #if (inherits(FS.cov.inv, "try-error")) {
+        #  lav_msg_warn(
+        #    gettext("could not invert (co)variance matrix of factor scores;
+        #            returning original factor scores."))
+        #  return(out[[g]])
+        #}
+        #fs.inv.sqrt <- lav_matrix_symmetric_sqrt(FS.cov.inv)
+        #veta.sqrt <- lav_matrix_symmetric_sqrt(VETA[[g]])
+        #tmp <- FS.centered %*% fs.inv.sqrt %*% veta.sqrt
+        tmp <- FS.centered %*% t(tmat[[bb]])
         ret <- t(t(tmp) + drop(EETA[[g]]))
 
         ret
@@ -881,6 +916,16 @@ lav_predict_eta_normal <- function(lavobject = NULL, # for convenience
     # center data
     Yc <- t(t(data.obs.g) - EY.g)
 
+    # sampling weights? -- CHECKME: needed??
+    if (.hasSlot(lavdata, "weights") &&
+        !is.null(lavdata@weights[[g]]) && level == 1L) {
+      # EY.g is already weighted
+      # use sampling.weights.normalization == "group"
+      WT <- lavdata@weights[[g]]
+      WT2 <- WT / sum(WT) * lavdata@nobs[[g]]
+      Yc <- Yc * sqrt(WT2)
+    }
+
     # global factor score coefficient matrix 'C'
     FSC <- VETA.g %*% t(LAMBDA.g) %*% Sigma.inv.g
 
@@ -1195,6 +1240,16 @@ lav_predict_eta_bartlett <- function(lavobject = NULL, # for convenience
 
     # center data
     Yc <- t(t(data.obs.g) - EY.g)
+
+    # sampling weights? CHECKME: needed??
+    if (.hasSlot(lavdata, "weights") &&
+        !is.null(lavdata@weights[[g]]) && level == 1L) {
+      # EY.g is already weighted
+      # use sampling.weights.normalization == "group"
+      WT <- lavdata@weights[[g]]
+      WT2 <- WT / sum(WT) * lavdata@nobs[[g]]
+      Yc <- Yc * sqrt(WT2)
+    }
 
     # global factor score coefficient matrix 'C'
     FSC <- (MASS::ginv(t(LAMBDA.g) %*% Sigma.inv.g %*% LAMBDA.g)
@@ -1943,3 +1998,94 @@ lav_predict_fy_eta.i <- function(lavmodel = NULL, lavdata = NULL,
 
   FY
 }
+
+# compute `transformation' matrix to convert regression factor scores
+# to (Green's) correlation-preserving factor scores
+lav_predict_tmat_green <- function(lavobject = NULL,
+                                   lavmodel = NULL, lavimplied = NULL) {
+
+  if (!is.null(lavobject)) {
+    lavmodel <- lavobject@Model
+    lavimplied <- lavobject@implied
+  }
+
+  if (is.null(lavimplied) || length(lavimplied) == 0L) {
+    lavimplied <- lav_model_implied(lavmodel)
+  }
+  if (lavmodel@conditional.x) {
+    lavimplied <- lav_model_implied_cond2uncond(lavimplied)
+  }
+  Sigma <- lavimplied$cov
+  VETA <- computeVETA(lavmodel = lavmodel, remove.dummy.lv = TRUE)
+  LAMBDA <- computeLAMBDA(lavmodel)
+
+  nblocks <- lavmodel@nblocks
+  tmat <- vector("list", length = nblocks)
+
+  # compute tmat per block
+  for(b in seq_len(nblocks)) {
+    Sigma.b <- Sigma[[b]]
+    Sigma.b.inv <- solve(Sigma.b)
+    Veta <- VETA[[b]]
+    Veta.sqrt <- lav_matrix_symmetric_sqrt(Veta)
+    Veta32 <- Veta %*% Veta.sqrt
+    Lambda <- LAMBDA[[b]]
+    tmp <- Veta32 %*% t(Lambda) %*% Sigma.b.inv %*% Lambda %*% Veta32
+    tmp.inv.sqrt <- lav_matrix_symmetric_sqrt(solve(tmp))
+    tmat[[b]] <- Veta.sqrt %*% tmp.inv.sqrt %*% Veta.sqrt
+  }
+
+  tmat
+}
+
+# compute `transformation' matrix to convert Bartlett factor scores
+# to (Krijnen/McDonald) correlation-preserving factor scores
+lav_predict_tmat_det <- function(lavobject = NULL,
+                                 lavmodel = NULL, lavimplied = NULL) {
+
+  if (!is.null(lavobject)) {
+    lavmodel <- lavobject@Model
+    lavimplied <- lavobject@implied
+  }
+
+  if (is.null(lavimplied) || length(lavimplied) == 0L) {
+    lavimplied <- lav_model_implied(lavmodel)
+  }
+  if (lavmodel@conditional.x) {
+    lavimplied <- lav_model_implied_cond2uncond(lavimplied)
+  }
+  Sigma <- lavimplied$cov
+  VETA <- computeVETA(lavmodel = lavmodel, remove.dummy.lv = TRUE)
+  LAMBDA <- computeLAMBDA(lavmodel)
+
+  nblocks <- lavmodel@nblocks
+  tmat <- vector("list", length = nblocks)
+
+  # compute tmat per block
+  for(b in seq_len(nblocks)) {
+    Sigma.b <- Sigma[[b]]
+    Sigma.b.inv <- solve(Sigma.b)
+    Veta <- VETA[[b]]
+    Veta.sqrt <- lav_matrix_symmetric_sqrt(Veta)
+    Veta.inv.sqrt <- lav_matrix_symmetric_sqrt(solve(Veta))
+    Lambda <- LAMBDA[[b]]
+    tmp <- Veta.sqrt %*% t(Lambda) %*% Sigma.b.inv %*% Lambda %*% Veta.sqrt
+    tmp.sqrt <- lav_matrix_symmetric_sqrt(tmp)
+    tmat[[b]] <- Veta.sqrt %*% tmp.sqrt %*% Veta.inv.sqrt
+  }
+
+  tmat
+}
+
+# single block only, for internal use in lav_sam_step1_local()
+lav_predict_tmat_det_internal <- function(Sigma = NULL, Veta = NULL,
+                                          Lambda = NULL) {
+    Sigma.inv <- solve(Sigma)
+    Veta.sqrt <- lav_matrix_symmetric_sqrt(Veta)
+    Veta.inv.sqrt <- lav_matrix_symmetric_sqrt(solve(Veta))
+    tmp <- Veta.sqrt %*% t(Lambda) %*% Sigma.inv %*% Lambda %*% Veta.sqrt
+    tmp.sqrt <- lav_matrix_symmetric_sqrt(tmp)
+    tmat <- Veta.sqrt %*% tmp.sqrt %*% Veta.inv.sqrt
+    tmat
+}
+

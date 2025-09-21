@@ -189,7 +189,11 @@ lav_partable_add_bounds <- function(partable = NULL,
 
     # OV.VAR for this group
     if (lavsamplestats@missing.flag && lavdata@nlevels == 1L) {
-      OV.VAR <- diag(lavsamplestats@missing.h1[[g]]$sigma)
+      if (!is.null(lavh1$implied$cov[[g]])) {
+        OV.VAR <- diag(lavh1$implied$cov[[g]])
+      } else {
+        OV.VAR <- diag(lavsamplestats@missing.h1[[g]]$sigma)
+      }
     } else {
       if (lavoptions$conditional.x) {
         OV.VAR <- diag(lavsamplestats@res.cov[[g]])
@@ -255,6 +259,14 @@ lav_partable_add_bounds <- function(partable = NULL,
         factor <- upper.factor[which(optim.bounds$upper == "ov.var")]
         if (is.finite(factor) && factor != 1.0) {
           new.range <- bound.range * factor
+          diff <- abs(new.range - bound.range)
+          upper.auto[par.idx] <- upper.auto[par.idx] + diff
+        } else if (is.finite(factor) && factor == 1.0) {
+          # new in 0.6-20
+          # enlarge anyway, but only with 0.5%
+          # this is in particular useful for exogenous variances, otherwise,
+          # they will always end up on the boundary
+          new.range <- bound.range * 1.005
           diff <- abs(new.range - bound.range)
           upper.auto[par.idx] <- upper.auto[par.idx] + diff
         }

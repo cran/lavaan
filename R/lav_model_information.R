@@ -17,13 +17,13 @@ lav_model_information <- function(lavmodel = NULL,
                                   augmented = FALSE,
                                   inverted = FALSE,
                                   use.ginv = FALSE) {
-  if (.hasSlot(lavmodel, "estimator")) {
-    estimator <- lavmodel@estimator
-  } else {
-    estmator <- lavoptions$estimator
-  }
+  # if (.hasSlot(lavmodel, "estimator")) {
+  #   estimator <- lavmodel@estimator
+  # } else {
+  #   estmator <- lavoptions$estimator
+  # }
   information <- lavoptions$information[1] # ALWAYS used the first one
-  # called can control it
+  # caller can control it
 
   # rotation?
   # if(!is.null(lavoptions$rotation) && lavoptions$rotation != "none") {
@@ -160,8 +160,18 @@ lav_model_information_expected <- function(lavmodel = NULL,
         Info.group[[g]] <- fg * crossprod(Delta2)
       } else {
         # full weight matrix
-        Info.group[[g]] <-
-          fg * (crossprod(Delta[[g]], A1[[g]]) %*% Delta[[g]])
+        # if (lav_use_lavaanC()) {
+        # # (i) use of m_crossprod with sparse matrix on the left:
+        # # Info.group[[g]] <- fg * lavaanC::m_crossprod(Delta[[g]],
+        # #                     lavaanC::m_prod(A1[[g]], Delta[[g]], "R"), "L")
+        # #
+        # # (ii) use of m_prod on transposed sparse first matrix, faster than (i):
+        #   Info.group[[g]] <- fg * lavaanC::m_prod(t(Delta[[g]]),
+        #                       lavaanC::m_prod(A1[[g]], Delta[[g]], "R"), "L")
+        # } else {
+          Info.group[[g]] <-
+            fg * (crossprod(Delta[[g]], A1[[g]]) %*% Delta[[g]])
+        # }
       }
     }
   } # g

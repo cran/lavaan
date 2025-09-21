@@ -17,13 +17,14 @@
 # Question: if fixed.x=TRUE, should we not keep X fixed, and bootstrap Y
 #           only, conditional on X?? How to implement the conditional part?
 
-# YR 27 Aug: - add keep.idx argument
-#            - always return 'full' set of bootstrap results, including
-#              failed runs (as NAs)
-#            - idx nonadmissible/error solutions as an attribute
-#            - thanks to keep.idx, it is easy to replicate/investigate these
-#              cases if needed
+# YR 27 Aug 2022: - add keep.idx argument
+#                 - always return 'full' set of bootstrap results, including
+#                   failed runs (as NAs)
+#                 - idx nonadmissible/error solutions as an attribute
+#                 - thanks to keep.idx, it is easy to replicate/investigate
+#                   these cases if needed
 
+# YR 10 Nov 2024: - detect sam object
 
 bootstrapLavaan <- function(object,
                             R = 1000L,
@@ -34,11 +35,12 @@ bootstrapLavaan <- function(object,
                             #                      # sample indices differently
                             keep.idx = FALSE,
                             parallel = c("no", "multicore", "snow"),
-                            ncpus = 1L,
+                            ncpus = max(1L, parallel::detectCores() - 2L),
                             cl = NULL,
                             iseed = NULL,
                             h0.rmsea = NULL,
                             ...) {
+
   # checks
   type. <- tolower(type) # overwritten if nonparametric
   stopifnot(
@@ -90,6 +92,7 @@ bootstrapLavaan <- function(object,
     lavoptions. = lavoptions.,
     lavpartable. = NULL,
     R = R,
+    show.progress = verbose,
     type = type.,
     FUN = FUN,
     keep.idx = keep.idx,
@@ -122,6 +125,7 @@ lav_bootstrap_internal <- function(object = NULL,
                                    lavoptions. = NULL,
                                    lavpartable. = NULL,
                                    R = 1000L,
+                                   show.progress = FALSE,
                                    type = "ordinary",
                                    FUN = "coef",
                                    check.post = TRUE,
@@ -138,7 +142,13 @@ lav_bootstrap_internal <- function(object = NULL,
 
   # object slots
   FUN.orig <- FUN
+  has.sam.object.flag <- FALSE
   if (!is.null(object)) {
+    stopifnot(inherits(object, "lavaan"))
+    # check for sam object
+    if (!is.null(object@internal$sam.method)) {
+      has.sam.object.flag <- TRUE
+    }
     lavdata <- object@Data
     lavmodel <- object@Model
     lavsamplestats <- object@SampleStats
@@ -175,6 +185,9 @@ lav_bootstrap_internal <- function(object = NULL,
 
   # always shut off some options:
   current.verbose <- lav_verbose()
+  if (missing(show.progress)) {
+    show.progress <- current.verbose
+  }
   if (lav_verbose(FALSE)) on.exit(lav_verbose(current.verbose))
   lavoptions$check.start <- FALSE
   lavoptions$check.post <- FALSE
@@ -349,15 +362,16 @@ lav_bootstrap_internal <- function(object = NULL,
       )
     }
 
-    # verbose
-    lav_verbose(current.verbose) # reset if needed
-    if (lav_verbose()) cat("  ... bootstrap draw number:", sprintf("%4d", b))
+    # show progress?
+    if (show.progress) {
+      cat("  ... bootstrap draw number:", sprintf("%4d", b))
+    }
     bootSampleStats <- try(lav_samplestats_from_data(
       lavdata       = newData,
       lavoptions    = lavoptions
     ), silent = TRUE)
     if (inherits(bootSampleStats, "try-error")) {
-      if (lav_verbose()) {
+      if (show.progress) {
         cat("     FAILED: creating sample statistics\n")
         cat(bootSampleStats[1])
       }
@@ -368,6 +382,12 @@ lav_bootstrap_internal <- function(object = NULL,
       }
       return(out)
     }
+    if (has.sam.object.flag) {
+      # also need h1
+      booth1 <- lav_h1_implied_logl(lavdata = newData,
+        lavsamplestats = bootSampleStats, lavpartable = lavpartable,
+        lavoptions = lavoptions)
+    }
 
     # do we need to update Model slot? only if we have fixed exogenous
     # covariates, as their variances/covariances are stored in GLIST
@@ -377,18 +397,39 @@ lav_bootstrap_internal <- function(object = NULL,
       model.boot <- lavmodel
     }
 
-    # override option
-
     # fit model on bootstrap sample
-    fit.boot <- suppressWarnings(lavaan(
-      slotOptions = lavoptions,
-      slotParTable = lavpartable,
-      slotModel = model.boot,
-      slotSampleStats = bootSampleStats,
-      slotData = lavdata
-    ))
+    if (has.sam.object.flag) {
+      new_object <- object
+      new_object@Data <- newData
+      new_object@SampleStats <- bootSampleStats
+      new_object@h1 <- booth1
+      # what about lavoptions?
+      fit.boot <- suppressWarnings(try(sam(new_object, se = "none"),
+                                       silent = FALSE)) # show what is wrong
+    } else {
+      fit.boot <- suppressWarnings(try(lavaan(
+        slotOptions = lavoptions,
+        slotParTable = lavpartable,
+        slotModel = model.boot,
+        slotSampleStats = bootSampleStats,
+        slotData = newData
+      ), silent = FALSE))
+    }
+    if (inherits(fit.boot, "try-error")) {
+      if (show.progress) {
+        cat("     FAILED: with ERROR message\n")
+      }
+      out <- as.numeric(NA)
+      attr(out, "nonadmissible.flag") <- TRUE
+      if (keep.idx) {
+        attr(out, "BOOT.idx") <- BOOT.idx
+      }
+      return(out)
+    }
     if (!fit.boot@optim$converged) {
-      if (lav_verbose()) cat("     FAILED: no convergence\n")
+      if (show.progress) {
+        cat("     FAILED: no convergence\n")
+      }
       out <- as.numeric(NA)
       attr(out, "nonadmissible.flag") <- TRUE
       if (keep.idx) {
@@ -410,7 +451,9 @@ lav_bootstrap_internal <- function(object = NULL,
       out <- try(as.numeric(FUN(fit.boot, ...)), silent = TRUE)
     }
     if (inherits(out, "try-error")) {
-      if (lav_verbose()) cat("     FAILED: applying FUN to fit.boot\n")
+      if (show.progress) {
+        cat("     FAILED: applying FUN to fit.boot\n")
+      }
       out <- as.numeric(NA)
       attr(out, "nonadmissible.flag") <- TRUE
       if (keep.idx) {
@@ -423,7 +466,7 @@ lav_bootstrap_internal <- function(object = NULL,
     admissible.flag <- suppressWarnings(lavInspect(fit.boot, "post.check"))
     attr(out, "nonadmissible.flag") <- !admissible.flag
 
-    if (lav_verbose()) {
+    if (show.progress) {
       cat(
         "   OK -- niter = ",
         sprintf("%3d", fit.boot@optim$iterations), " fx = ",
@@ -446,7 +489,7 @@ lav_bootstrap_internal <- function(object = NULL,
   cl <- lavoptions[["cl"]] # often NULL
   iseed <- lavoptions[["iseed"]] # often NULL
 
-  # the next 10 lines are borrowed from the boot package
+  # the next 8 lines are borrowed from the boot package
   have_mc <- have_snow <- FALSE
   if (parallel != "no" && ncpus > 1L) {
     if (parallel == "multicore") {
@@ -489,7 +532,7 @@ lav_bootstrap_internal <- function(object = NULL,
 
   # this is adapted from the boot function in package boot
   RR <- R
-  if (lav_verbose()) {
+  if (show.progress) {
     cat("\n")
   }
   res <- if (ncpus > 1L && (have_mc || have_snow)) {

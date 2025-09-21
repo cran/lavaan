@@ -16,7 +16,8 @@ lavaanify(model = NULL, meanstructure = FALSE, int.ov.free = FALSE,
     int.lv.free = FALSE, marker.int.zero = FALSE,
     orthogonal = FALSE, orthogonal.y = FALSE,
     orthogonal.x = FALSE, orthogonal.efa = FALSE, std.lv = FALSE,
-    correlation = FALSE, effect.coding = "", conditional.x = FALSE, 
+    correlation = FALSE, composites = TRUE,
+    effect.coding = "", conditional.x = FALSE, 
     fixed.x = FALSE, parameterization = "delta", constraints = NULL, 
     ceq.simple = FALSE, auto = FALSE, model.type = "sem", 
     auto.fix.first = FALSE, auto.fix.single = FALSE, auto.var = FALSE, 
@@ -30,7 +31,8 @@ lavParTable(model = NULL, meanstructure = FALSE, int.ov.free = FALSE,
     int.lv.free = FALSE, marker.int.zero = FALSE,
     orthogonal = FALSE, orthogonal.y = FALSE, 
     orthogonal.x = FALSE, orthogonal.efa = FALSE, std.lv = FALSE,
-    correlation = FALSE, effect.coding = "", conditional.x = FALSE, 
+    correlation = FALSE, composites = TRUE,
+    effect.coding = "", conditional.x = FALSE, 
     fixed.x = FALSE, parameterization = "delta", constraints = NULL, 
     ceq.simple = FALSE, auto = FALSE, model.type = "sem",
     auto.fix.first = FALSE, auto.fix.single = FALSE, auto.var = FALSE,
@@ -82,6 +84,8 @@ the model both for both observed and latent variables.}
 \item{correlation}{If \code{TRUE}, a correlation structure is fitted. For
     continuous data, this implies that the (residual) variances are no
     longer parameters of the model.}
+\item{composites}{Logical. If \code{TRUE}, use the new (0.6-20) approach
+     to handle composites.}
 \item{effect.coding}{Can be logical or character string. If
      logical and \code{TRUE}, this implies     
      \code{effect.coding = c("loadings", "intercepts")}. If logical and 
@@ -168,7 +172,8 @@ the model both for both observed and latent variables.}
 \item{as.data.frame.}{If \code{TRUE}, return the list of model parameters
     as a \code{data.frame}.}
 \item{parser}{Character. If \code{"old"}, use the original/classic parser.
-    If \code{"new"}, use the new/ldw parser. The default is \code{"new"}.}
+    If \code{"new"}, use the new/ldw parser. The default (as of version 0.6-18)
+    is \code{"new"}.}
 \item{warn}{If \code{TRUE}, some (possibly harmless) warnings are printed
     out.}
 \item{debug}{If \code{TRUE}, debugging information is printed out.}

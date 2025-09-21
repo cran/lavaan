@@ -1,6 +1,7 @@
 # parse lavaan syntax
 # YR 14 Jan 2014: move to lav_syntax.R
 # YR 17 Oct 2023: add ldw parser
+# YR 23 Oct 2024: switch to "c.r"
 
 lavParseModelString <- function(model.syntax = "", as.data.frame. = FALSE,
                                 parser = "new", warn = TRUE, debug = FALSE) {
@@ -15,13 +16,19 @@ lavParseModelString <- function(model.syntax = "", as.data.frame. = FALSE,
       on.exit(lav_warn(current.warn), TRUE)
   }
   parser <- tolower(parser)
-  if (!parser %in% c("old", "new")) {
-    lav_msg_stop(gettext("parser= argument should be \"old\" or \"new\""))
+  if (!parser %in% c("old", "new", "c.r")) {
+    lav_msg_stop(gettext("parser= argument should be \"old\", \"new\" or \"c.r\""))
   }
 
   if (parser == "old") {
     # original/classic parser
     out <- lav_parse_model_string_orig(
+      model.syntax = model.syntax,
+      as.data.frame. = as.data.frame.
+    )
+  } else if (parser == "c.r") {
+    # new parser
+    out <- ldw_parse_model_string_cr(
       model.syntax = model.syntax,
       as.data.frame. = as.data.frame.
     )
@@ -41,7 +48,7 @@ lav_parse_model_string_orig <- function(model.syntax = "",
                                         as.data.frame. = FALSE) {
   # check for empty syntax
   if (length(model.syntax) == 0) {
-    stop("lavaan ERROR: empty model syntax")
+    lav_msg_stop(gettextf("lavaan ERROR: empty model syntax"))
   }
 
   # remove comments prior to split:
@@ -81,7 +88,8 @@ lav_parse_model_string_orig <- function(model.syntax = "",
 
   # check for empty start.idx: no operator found (new in 0.6-1)
   if (length(start.idx) == 0L) {
-    stop("lavaan ERROR: model does not contain lavaan syntax (no operators found)")
+    lav_msg_stop(gettext("lavaan ERROR: model does not contain lavaan
+                          syntax (no operators found)"))
   }
 
   # check for lonely lhs modifiers (only efa() for now):
@@ -105,7 +113,9 @@ lav_parse_model_string_orig <- function(model.syntax = "",
     for (el in 1:(start.idx[1] - 1L)) {
       # not empty?
       if (nchar(model.simple[el]) > 0L) {
-        warning("lavaan WARNING: no operator found in this syntax line: ", model.simple[el], "\n", "                  This syntax line will be ignored!")
+        lav_msg_warn(gettextf("lavaan WARNING: no operator found in this
+                               syntax line: ", model.simple[el], "\n",
+                              "     This syntax line will be ignored!"))
       }
     }
   }
@@ -127,7 +137,7 @@ lav_parse_model_string_orig <- function(model.syntax = "",
   if (length(idx.wrong) > 0) {
     cat("lavaan: missing operator in formula(s):\n")
     print(model[idx.wrong])
-    stop("lavaan ERROR: syntax error in lavaan model syntax")
+    lav_msg_stop(gettext("lavaan ERROR: syntax error in lavaan model syntax"))
   }
 
   # but perhaps we have a '+' as the first character?
@@ -135,7 +145,7 @@ lav_parse_model_string_orig <- function(model.syntax = "",
   if (length(idx.wrong) > 0) {
     cat("lavaan: some formula(s) start with a plus (+) sign:\n")
     print(model[idx.wrong])
-    stop("lavaan ERROR: syntax error in lavaan model syntax")
+    lav_msg_stop(gettext("lavaan ERROR: syntax error in lavaan model syntax"))
   }
 
 
@@ -210,13 +220,13 @@ lav_parse_model_string_orig <- function(model.syntax = "",
     } else if (grepl("%", line.simple, fixed = TRUE)) {
       op <- "%"
     } else {
-      stop("unknown operator in ", model[i])
+      lav_msg_stop(gettext("unknown operator in ", model[i]))
     }
 
     # 2. split by operator (only the *first* occurence!)
     # check first if equal/label modifier has been used on the LEFT!
     if (substr(x, 1, 6) == "label(") {
-      stop("label modifier can not be used on the left-hand side of the operator")
+      lav_msg_stop(gettext("label modifier can not be used on the left-hand side of the operator"))
     }
     if (op == "|") {
       op.idx <- regexpr("\\|", x)
@@ -338,7 +348,7 @@ lav_parse_model_string_orig <- function(model.syntax = "",
     RHS.names <- gsub("^\\S*\\*", "", RHS)
     BAD <- c("if", "else", "repeat", "while", "function", "for", "in")
     if (any(RHS.names %in% c(BAD, "NA"))) { # "NA" added in 0.6-8
-      stop(
+      lav_msg_stop(gettextf(
         "lavaan ERROR: right hand side (rhs) of this formula:\n    ",
         lhs, " ", op, " ", rhs,
         "\n    contains either a reserved word (in R) or an illegal character: ",
@@ -346,14 +356,14 @@ lav_parse_model_string_orig <- function(model.syntax = "",
         "\n    See ?reserved for a list of reserved words in R",
         "\n    Please use a variable name that is not a reserved word in R",
         "\n    and use only characters, digits, or the dot symbol."
-      )
+      ))
     }
     # new in 0.6-6, check for rhs LABELS that are reserved names
     # like in foo =~ in*bar
     RHS <- strsplit(rhs, split = "+", fixed = TRUE)[[1]]
     RHS.labels <- gsub("\\*\\S*$", "", RHS)
     if (any(RHS.labels %in% BAD)) {
-      stop(
+      lav_msg_stop(gettextf(
         "lavaan ERROR: right hand side (rhs) of this formula:\n    ",
         lhs, " ", op, " ", rhs,
         "\n    contains either a reserved word (in R) or an illegal character: ",
@@ -361,7 +371,7 @@ lav_parse_model_string_orig <- function(model.syntax = "",
         "\n    See ?reserved for a list of reserved words in R",
         "\n    Please use a variable name that is not a reserved word in R",
         "\n    and use only characters, digits, or the dot symbol."
-      )
+      ))
     }
     # new in 0.6-12: check for three-way interaction terms (which we do
     # NOT support)
@@ -396,7 +406,8 @@ other (observed) variable in the model syntax. Problematic term is: "),
             rhs.name <- ""
           } else {
             # either number (1), or reserved name?
-            stop("lavaan ERROR: right-hand side of formula contains an invalid variable name:\n    ", x)
+            lav_msg_stop(gettextf("lavaan ERROR: right-hand side of
+             formula contains an invalid variable name:\n    %s", x))
           }
         } else if (names(out)[j] == "..zero.." && op == "~") {
           rhs.name <- ""
@@ -419,7 +430,7 @@ other (observed) variable in the model syntax. Problematic term is: "),
 
         # catch lhs = rhs and op = "=~"
         if (op == "=~" && lhs.names[l] == names(out)[j]) {
-          stop("lavaan ERROR: latent variable `", lhs.names[l], "' can not be measured by itself")
+          lav_msg_stop(gettextf("lavaan ERROR: latent variable `", lhs.names[l], "' can not be measured by itself"))
         }
 
         # check if we not already have this combination (in this group)
@@ -430,7 +441,7 @@ other (observed) variable in the model syntax. Problematic term is: "),
             FLAT.block == BLOCK &
             FLAT.rhs == rhs.name)
           if (length(idx) > 0L) {
-            stop("lavaan ERROR: duplicate model element in: ", model[i])
+            lav_msg_stop(gettextf("lavaan ERROR: duplicate model element in: ", model[i]))
           }
         } else {
           # 2. symmetric (~~)
@@ -439,7 +450,7 @@ other (observed) variable in the model syntax. Problematic term is: "),
             FLAT.block == BLOCK &
             FLAT.rhs == lhs.names[l])
           if (length(idx) > 0L) {
-            stop("lavaan ERROR: duplicate model element in: ", model[i])
+            lav_msg_stop(gettextf("lavaan ERROR: duplicate model element in: ", model[i]))
           }
         }
 
@@ -448,10 +459,10 @@ other (observed) variable in the model syntax. Problematic term is: "),
           # stop("lavaan ERROR: lhs and rhs are the same in: ",
           #     model[i])
           # this breaks pompom package, example uSEM
-          warning(
+          lav_msg_warn(gettextf(
             "lavaan WARNING: lhs and rhs are the same in: ",
             model[i]
-          )
+          ))
         }
 
 
@@ -564,13 +575,13 @@ other (observed) variable in the model syntax. Problematic term is: "),
     op.idx <- which(FLAT$op == ":")
     if (length(op.idx) < 2L) {
       # only 1 block identifier? this is weird -> give warning
-      warning("lavaan WARNING: syntax contains only a single block identifier: ", FLAT$lhs[op.idx])
+      lav_msg_warn(gettextf("lavaan WARNING: syntax contains only a single block identifier: ", FLAT$lhs[op.idx]))
     } else {
       first.block <- FLAT$lhs[op.idx[1L]]
       second.block <- FLAT$lhs[op.idx[2L]]
       if (first.block == "level" &&
         second.block == "group") {
-        stop("lavaan ERROR: groups can not be nested within levels")
+        lav_msg_stop(gettextf("lavaan ERROR: groups can not be nested within levels"))
       }
     }
   }
@@ -712,7 +723,7 @@ lav_syntax_parse_rhs <- function(rhs, op = "") {
       # next element
       rhs <- rhs[[2L]]
     } else {
-      stop("lavaan ERROR: I'm confused parsing this line: ", rhs, "\n")
+      lav_msg_stop(gettextf("lavaan ERROR: I'm confused parsing this line: ", rhs, "\n"))
     }
   }
 
@@ -791,7 +802,7 @@ lav_syntax_get_modifier <- function(mod) {
       envir = NULL, enclos = NULL
     ))
     if (anyNA(rv)) {
-      stop("lavaan ERROR: some rv() labels are NA")
+      lav_msg_stop(gettextf("lavaan ERROR: some rv() labels are NA"))
     }
     return(list(rv = rv))
   } else if (mod[[1L]] == "prior") {
@@ -820,7 +831,7 @@ lav_syntax_get_modifier <- function(mod) {
       cof[is.na(cof)] <- "" # catch 'NA' elements in a label
       return(list(label = cof))
     } else {
-      stop("lavaan ERROR: can not parse modifier:", mod, "\n")
+      lav_msg_stop(gettextf("lavaan ERROR: can not parse modifier:", mod, "\n"))
     }
   } else {
     # unknown expression
@@ -828,19 +839,19 @@ lav_syntax_get_modifier <- function(mod) {
     # to either a numeric or character (vector)
     cof <- try(eval(mod, envir = NULL, enclos = NULL), silent = TRUE)
     if (inherits(cof, "try-error")) {
-      stop(
+      lav_msg_stop(gettextf(
         "lavaan ERROR: evaluating modifier failed: ",
         paste(as.character(mod)[[1]], "()*", sep = ""), "\n"
-      )
+      ))
     } else if (is.numeric(cof)) {
       return(list(fixed = cof))
     } else if (is.character(cof)) {
       return(list(label = cof))
     } else {
-      stop(
+      lav_msg_stop(gettextf(
         "lavaan ERROR: can not parse modifier: ",
         paste(as.character(mod)[[1]], "()*", sep = ""), "\n"
-      )
+      ))
     }
   }
 }

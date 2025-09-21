@@ -68,10 +68,14 @@ lavData <- function(data = NULL, # data.frame
     std.ov <- FALSE
   }
 
-  # missing?
-  missing <- lavoptions$missing
+  # missing? (lavCor() does not parse options before calling lavdata...)
+  missing <- tolower(lavoptions$missing)
   if (is.null(missing) || missing == "default") {
     missing <- "listwise"
+  } else if (missing %in% c("ml", "fiml", "direct")) {
+    missing <- "ml"
+  } else if (missing %in% c("ml.x", "fiml.x", "direct.x")) {
+    missing <- "ml.x"
   }
 
   # warn?
@@ -114,7 +118,7 @@ lavData <- function(data = NULL, # data.frame
         data <- as.data.frame(data, stringsAsFactors = FALSE)
       } else {
         lav_msg_stop(gettextf(
-          "data= argument is not a data.frame, but of class ",
+          "data= argument is not a data.frame, but of class %s",
           sQuote(class(data))))
       }
     }
@@ -822,6 +826,26 @@ lav_data_full <- function(data = NULL, # data.frame
     lav_msg_warn(gettext(
       "all observed variables are exogenous; model may not be identified"))
   }
+  # check for perfect correlations (NOT including exo variables)
+  if (!allow.single.case && any(ov$type == "numeric")) {
+    num.idx <- which(ov$type == "numeric" & ov$exo == 0L)
+    COR <- try(cor(data[,ov$idx[num.idx]], use = "pairwise.complete.obs"),
+               silent = TRUE)
+    # replace any NAs by 0 (as we only wish to detect perfect correlations)
+    COR[is.na(COR)] <- 0
+    if (!inherits(COR, "try-error") &&
+        any(lav_matrix_vech(COR, diagonal = FALSE) == 1)) {
+      COR[upper.tri(COR, diag = TRUE)] <- 0
+      idx <- which(COR == 1)
+      this.names <- ov$name[num.idx]
+      bad.names <- this.names[ sort(unique(c(row(COR)[idx], col(COR)[idx]))) ]
+      # should we make this a hard stop? things will most likely fail later...
+      lav_msg_warn(gettextf(
+      "some observed variables are perfectly correlated;
+       please check your data; variables involved are: %s",
+       paste(bad.names, collapse = " ")))
+    }
+  }
 
   # prepare empty lists
 
@@ -858,6 +882,13 @@ lav_data_full <- function(data = NULL, # data.frame
           complete.cases(data[all.idx]))
         nobs[[g]] <- length(case.idx[[g]])
         norig[[g]] <- length(which(data[[group]] == group.label[g]))
+        # check for empty data
+        if (nobs[[g]] == 0L) {
+          lav_msg_stop(gettextf("all observations were deleted due to missing
+                                 data after listwise deletion in group [%s];
+                                 check your data
+                                 or consider a different option for the missing=                                 argument.", group.label[g]))
+        }
         # } else if(missing == "pairwise" && length(exo.idx) > 0L) {
         #    case.idx[[g]] <- which(data[[group]] == group.label[g] &
         #                           complete.cases(data[exo.idx]))
@@ -883,6 +914,12 @@ lav_data_full <- function(data = NULL, # data.frame
         case.idx[[g]] <- which(complete.cases(data[all.idx]))
         nobs[[g]] <- length(case.idx[[g]])
         norig[[g]] <- nrow(data)
+        if (nobs[[g]] == 0L) {
+          lav_msg_stop(gettext("all observations were deleted due to missing
+                                data after listwise deletion;
+                                check your data
+                                or consider a different option for the missing=                                 argument."))
+        }
         # } else if(missing == "pairwise" && length(exo.idx) > 0L) {
         #    case.idx[[g]] <- which(complete.cases(data[exo.idx]))
         #    nobs[[g]] <- length(case.idx[[g]])
@@ -1162,6 +1199,11 @@ lav_data_full <- function(data = NULL, # data.frame
 	    small.idx <- which(coverage.vech < 0.1)
 	    if (all(coverage.vech[small.idx] == 0)) {
 		  # 0.6-18: no warning --> this could be due to missing by design
+          # 0.6-20: give warning anyway (as EM is ignoring this)
+          lav_msg_warn(gettext(
+            "due to missing values, some pairwise combinations have zero
+             coverage; the corresponding covariances are not identified;
+             use lavInspect(fit, \"coverage\") to investigate."))
 		} else {
           lav_msg_warn(gettext(
             "due to missing values, some pairwise combinations have less than

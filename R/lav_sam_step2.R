@@ -7,31 +7,47 @@ lav_sam_step2 <- function(STEP1 = NULL, FIT = NULL,
   nlevels <- lavpta$nlevels
   PT <- STEP1$PT
 
+  # Gamma available?
+  gamma.flag <- FALSE
+  if (sam.method %in% c("local", "fsr", "cfsr") &&
+      !is.null(STEP1$Gamma.eta[[1]])) {
+    gamma.flag <- TRUE
+  }
+
   LV.names <- unique(unlist(FIT@pta$vnames$lv.regular))
 
   # adjust options
   lavoptions.PA <- lavoptions
   if (lavoptions.PA$se == "naive") {
     lavoptions.PA$se <- "standard"
+  } else if (gamma.flag) {
+    lavoptions.PA$se <- "robust.sem"
+    lavoptions.PA$test <- "satorra.bentler"
   } else {
     # twostep or none -> none
     lavoptions.PA$se <- "none"
   }
   # lavoptions.PA$fixed.x <- TRUE # may be false if indicator is predictor
-  lavoptions.PA$fixed.x <- FALSE # until we fix this...
+  if (!lavoptions.PA$conditional.x) {
+    lavoptions.PA$fixed.x <- FALSE # until we fix this...
+  }
   lavoptions.PA$categorical <- FALSE
   lavoptions.PA$.categorical <- FALSE
   lavoptions.PA$rotation <- "none"
   lavoptions.PA <- modifyList(lavoptions.PA, struc.args)
 
+  if (gamma.flag) {
+    lavoptions.PA$check.vcov <- FALSE # always non-pd if interactions + fixed.x = FALSE
+  }
+
   # override, no matter what
   lavoptions.PA$do.fit <- TRUE
 
-  if (sam.method %in% c("local", "fsr")) {
+  if (sam.method %in% c("local", "fsr", "cfsr")) {
     lavoptions.PA$missing <- "listwise"
     lavoptions.PA$sample.cov.rescale <- FALSE
     # lavoptions.PA$baseline <- FALSE
-    lavoptions.PA$h1 <- FALSE
+    # lavoptions.PA$h1 <- FALSE
     # lavoptions.PA$implied <- FALSE
     lavoptions.PA$loglik <- FALSE
   } else {
@@ -42,12 +58,14 @@ lav_sam_step2 <- function(STEP1 = NULL, FIT = NULL,
 
 
   # construct PTS
-  if (sam.method %in% c("local", "fsr")) {
+  if (sam.method %in% c("local", "fsr", "cfsr")) {
     # extract structural part
     PTS <- lav_partable_subset_structural_model(PT,
       add.idx = TRUE,
       add.exo.cov = TRUE,
       fixed.x = lavoptions.PA$fixed.x,
+      conditional.x = lavoptions.PA$conditional.x,
+      free.fixed.var = TRUE,
       meanstructure = lavoptions.PA$meanstructure
     )
 
@@ -104,7 +122,8 @@ lav_sam_step2 <- function(STEP1 = NULL, FIT = NULL,
     # remove 'exogenous' factor variances (if any) from reg.idx
     lv.names.x <- LV.names[LV.names %in% unlist(lavpta$vnames$eqs.x) &
       !LV.names %in% unlist(lavpta$vnames$eqs.y)]
-    if (lavoptions.PA$fixed.x && length(lv.names.x) > 0L) {
+    if ((lavoptions.PA$fixed.x || lavoptions.PA$std.lv) &&
+        length(lv.names.x) > 0L) {
       var.idx <- which(PT$lhs %in% lv.names.x &
         PT$op == "~~" &
         PT$lhs == PT$rhs)
@@ -132,7 +151,14 @@ lav_sam_step2 <- function(STEP1 = NULL, FIT = NULL,
     PTS$est <- NULL
     PTS$se <- NULL
 
+    # 'fix' step 1 parameters
     PTS$free[!PTS$id %in% reg.idx & PTS$free > 0L] <- 0L
+
+    # but free up residual variances if fixed (eg std.lv = TRUE) (new in 0.6-20)
+    var.idx <- reg.idx[which(PT$free[reg.idx] == 0L &
+                             PT$user[reg.idx] != 1L &
+                             PT$op[reg.idx] == "~~")] # FIXME: more?
+    PTS$free[var.idx] <- max(PTS$free) + seq_len(length(var.idx))
 
     # set 'ustart' values for free FIT.PA parameter to NA
     PTS$ustart[PTS$free > 0L] <- as.numeric(NA)
@@ -146,13 +172,21 @@ lav_sam_step2 <- function(STEP1 = NULL, FIT = NULL,
   if (lav_verbose()) {
     cat("Fitting the structural part ... \n")
   }
-  if (sam.method %in% c("local", "fsr")) {
+  if (sam.method %in% c("local", "fsr", "cfsr")) {
+    if (gamma.flag) {
+      NACOV <- STEP1$Gamma.eta
+      ov.order <- "data"
+    } else {
+      NACOV <- NULL
+      ov.order <- "model"
+    }
     FIT.PA <- lavaan::lavaan(PTS,
-      sample.cov = STEP1$VETA,
+      sample.cov  = STEP1$VETA,
       sample.mean = STEP1$EETA,
       sample.nobs = NOBS,
+      NACOV       = NACOV,
       slotOptions = lavoptions.PA,
-      verbose = FALSE
+      verbose     = FALSE
     )
   } else {
     FIT.PA <- lavaan::lavaan(
@@ -192,7 +226,8 @@ lav_sam_step2 <- function(STEP1 = NULL, FIT = NULL,
 
   STEP2 <- list(
     FIT.PA = FIT.PA, PT = PT, reg.idx = reg.idx,
-    step2.free.idx = step2.free.idx, extra.id = extra.id
+    step2.free.idx = step2.free.idx, extra.id = extra.id,
+    pt.idx = pt.idx, pts.idx = pts.idx
   )
 
   STEP2

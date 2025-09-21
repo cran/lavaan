@@ -503,7 +503,7 @@ lav_model_estimate <- function(lavmodel = NULL,
         attr(fx, "fx.group") <- rep(as.numeric(NA), ngroups)
         attr(x, "converged") <- FALSE
         attr(x, "iterations") <- 0L
-        attr(x, "control") <- lavoptions@control
+        attr(x, "control") <- lavoptions$control
         attr(x, "fx") <- fx
         return(x)
       }
@@ -893,7 +893,7 @@ lav_model_estimate <- function(lavmodel = NULL,
     # if inequality constraints, add con.jac/lambda
     # needed for df!
     if (length(lavmodel@ceq.nonlinear.idx) == 0L &&
-        (lavmodel@cin.simple.only || 
+        (lavmodel@cin.simple.only ||
          (length(lavmodel@cin.linear.idx) == 0L &&
           length(lavmodel@cin.nonlinear.idx) == 0L))) {
       optim.out <- list()
@@ -1003,7 +1003,7 @@ lav_model_estimate <- function(lavmodel = NULL,
     attr(JAC, "cin.idx") <- seq_len(nrow(cin.JAC))
     attr(JAC, "ceq.idx") <- nrow(cin.JAC) + seq_len(nrow(ceq.JAC))
     lambda <- c(cin.lambda, ceq.lambda)
-    
+
     optim.out$con.jac <- JAC
     optim.out$lambda <- lambda
   }

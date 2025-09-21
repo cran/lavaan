@@ -123,11 +123,25 @@ lavaan <- function(
   timing <- ldw_add_timing(timing, "init")
 
   # ------------ ov.names 1 -----  initial flat model --------------------
+  # if parser not specified, take default one
+  if (is.null(dotdotdot$parser)) {
+    opt.default <- lav_options_default()
+    useparser <- opt.default$parser
+  } else {
+    useparser <- dotdotdot$parser
+  }
+
   flat.model <- lav_lavaan_step01_ovnames_initflat(
     slotParTable     = slotParTable,
     model            = model,
-    dotdotdot.parser = dotdotdot$parser
+    dotdotdot.parser = useparser
   )
+
+  # ------------ ov.names 1b ----- handle 'old way' for composites -------
+  if (!is.null(dotdotdot$composites) && !dotdotdot$composites &&
+     any(flat.model$op == "<~")) {
+    flat.model <- lav_lavaan_step01_ovnames_composites(flat.model)
+  }
 
   # ------------ ov.names 2 ------ handle ov.order -----------------------
   flat.model <- lav_lavaan_step01_ovnames_ovorder(
@@ -155,6 +169,7 @@ lavaan <- function(
   # ------------ ov.names 4 ------ sanity checks ------------------
   lav_lavaan_step01_ovnames_checklv(
     lv.names    = lv.names,
+    ov.names    = ov.names,
     data        = data,
     sample.cov  = sample.cov,
     dotdotdot   = dotdotdot,
@@ -462,9 +477,13 @@ lavaan <- function(
     start.time0    = start.time0
   )
 
-  # restore random seed (if needed)
+  # restore random seed
   if (!is.null(temp.seed)) {
     assign(".Random.seed", temp.seed, envir = .GlobalEnv)
+  } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+    # initially there was no .Random.seed, but we created one along the way
+    # clean up
+    remove(".Random.seed", envir = .GlobalEnv)
   }
 
   out

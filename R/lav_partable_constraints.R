@@ -444,7 +444,7 @@ lav_partable_constraints_ciq <- function(partable, con = NULL, debug = FALSE,
       xlab <- paste(".x.[", FREE[ineq.idx[i]], "]", sep = "")
       ineq.string <- paste(xlab, " - (", val, ")", sep = "")
     }
- 
+
     BODY.txt <- paste(BODY.txt, "out[", i, "] <- ", ineq.string, "\n", sep = "")
   }
 

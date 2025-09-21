@@ -31,7 +31,16 @@
 
 setMethod(
   "residuals", "lavaan",
-  function(object, type = "raw", labels = TRUE) {
+  function(object, type = "raw", labels = TRUE, ...) {
+    dotdotdot <- list(...)
+    if (length(dotdotdot) > 0L) {
+      for (j in seq_along(dotdotdot)) {
+        lav_msg_warn(gettextf(
+          "Unknown argument %s for %s", sQuote(names(dotdotdot)[j]),
+          sQuote("residuals"))
+        )
+      }
+    }
     # lowercase type
     type <- tolower(type)
 
@@ -56,7 +65,16 @@ setMethod(
 
 setMethod(
   "resid", "lavaan",
-  function(object, type = "raw") {
+  function(object, type = "raw", ...) {
+    dotdotdot <- list(...)
+    if (length(dotdotdot) > 0L) {
+      for (j in seq_along(dotdotdot)) {
+        lav_msg_warn(gettextf(
+          "Unknown argument %s for %s", sQuote(names(dotdotdot)[j]),
+          sQuote("resid"))
+        )
+      }
+    }
     residuals(object, type = type, labels = TRUE)
   }
 )
@@ -625,7 +643,7 @@ lav_residuals_se <- function(object, type = "raw", z.type = "standardized",
       cov.se <- lav_matrix_vech_reverse(tmp, diagonal = FALSE)
 
       # MEAN
-      mean.se <- rep(as.numeric(NA), nth)
+      mean.se <- rep(as.numeric(NA), nvar)
 
       # TH
       th.se <- sqrt(diag.ACOV[1:nth])
@@ -644,7 +662,6 @@ lav_residuals_se <- function(object, type = "raw", z.type = "standardized",
         cov.se = cov.se, mean.se = mean.se,
         th.se = th.se
       )
-
 
       # continuous -- single level
     } else if (lavdata@nlevels == 1L) {
@@ -1057,7 +1074,11 @@ lav_residuals_summary <- function(object, type = c("rmr", "srmr", "crmr"),
           pstar <- length(STATS)
           if (type[typ] == "crmr") {
             # pstar <- pstar - ( nvar - nvar.x )
-            pstar <- pstar - nvar
+            if (conditional.x) {
+              pstar <- pstar - nrow(rmsList.g[["res.cov"]])
+            } else {
+              pstar <- pstar - nvar
+            }
           }
 
           ACOV <- NULL

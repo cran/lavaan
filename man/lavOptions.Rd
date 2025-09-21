@@ -24,7 +24,7 @@ This is the full list of options that are accepted by the \code{lavaan()}
 function, organized in several sections:
 
 
-Model features (always available):
+Model features:
 
 \describe{
     \item{\code{meanstructure}:}{If \code{TRUE}, the means of the observed
@@ -91,11 +91,6 @@ Model features (always available):
      WLS, which produce correct standard errors and a correct test statistic
      under normal and non-normal conditions respectively. Always assuming
      \code{fixed.x = FALSE} and \code{conditional.x = FALSE} (for now).}
-}
-
-Model features (only available for the \code{lavaan()} function):
-
-\describe{
     \item{\code{auto.fix.first}:}{If \code{TRUE}, the factor loading of the 
       first indicator is set to 1.0 for every latent variable.}
     \item{\code{auto.fix.single}:}{If \code{TRUE}, the residual variance (if 
@@ -221,7 +216,7 @@ Multiple group options:
       selected, in the order as they appear in the data.}
     \item{\code{group.equal}:}{A vector of character strings. Only used in
       a multiple group analysis. Can be one or more of the following:
-      \code{"loadings"}, \code{"composite.loadings"}, 
+      \code{"loadings"}, \code{"composite.weights"}, 
       \code{"intercepts"}, \code{"means"},
       \code{"thresholds"}, \code{"regressions"}, \code{"residuals"},
       \code{"residual.covariances"}, \code{"lv.variances"} or
@@ -460,22 +455,28 @@ Categorical estimation options:
       one or more cells of a bivariate frequency table are empty.}
     \item{\code{allow.empty.cell}:}{Logical. If \code{TRUE}, ignore
       situations where an ordinal variable has fewer categories than
-      expected, or where a category is empty in a specific group.}
+      expected, or where a category is empty in a specific group. This
+    argument is currently used by the blavaan package (which
+    uses lavaan to set up the model). The argument is not expected to
+    salvage a lavaan model that results in errors.}
 }
 
 Starting values options:
 
 \describe{
     \item{\code{start}:}{If it is a character string, the two options are 
-      currently \code{"simple"} and \code{"Mplus"}. In the first case, all 
+      currently \code{"simple"} and \code{"default"}. In the first case, all 
       parameter values are set to zero, except the factor loadings and
-      (residual) variances, which are set to one.
-      When \code{start} is \code{"Mplus"}, the factor loadings are
+      (residual) variances, which are set to 0.7 and 1.0 respectively.
+      When \code{start} is \code{"default"}, the factor loadings are
       estimated using the fabin3 estimator (tsls) per factor. The
       residual variances of observed variables are set tot half the 
       observed variance, and all other (residual) variances are set to 0.05.
       The remaining parameters (regression coefficients, covariances) are
       set to zero.
+      If \code{start} is a numerical vector, it should contain the starting
+      values for all the free parameters (in the same order as the parameter
+      table).
       If \code{start} is a fitted object of class \code{\linkS4class{lavaan}},
       the estimated values of the corresponding parameters will be extracted.
       If it is a parameter table, for example the output of the

@@ -214,11 +214,19 @@ lav_samplestats_from_data <- function(lavdata = NULL,
     if (is.null(WT[[g]])) {
       if (nobs[[g]] < 2L) {
         if (nobs[[g]] == 0L) {
-          lav_msg_stop(gettext("data contains no observations"),
-            if (ngroups > 1L) gettextf("in group %s", g) else "")
+          if (ngroups > 1L) {
+            lav_msg_stop(gettextf("data contains no observations in
+                                   group %s", g))
+          } else {
+            lav_msg_stop(gettext("data contains no observations"))
+          }
         } else {
-          lav_msg_stop(gettext("data contains only a single observation"),
-           if (ngroups > 1L) gettextf("in group %s", g) else "")
+          if (ngroups > 1L) {
+            lav_msg_stop(gettextf("data contains only a single observation
+                                   in group %s", g))
+          } else {
+            lav_msg_stop(gettext("data contains only a single observation"))
+          }
         }
       }
     }
@@ -604,17 +612,26 @@ lav_samplestats_from_data <- function(lavdata = NULL,
           current.warn <- lav_warn()
           if (lav_warn(lavoptions$em.h1.warn))
             on.exit(lav_warn(current.warn), TRUE)
-          out <- lav_mvnorm_missing_h1_estimate_moments(
-            Y = X[[g]],
-            wt = WT[[g]],
-            Mp = Mp[[g]], Yp = missing.[[g]],
-            max.iter = lavoptions$em.h1.iter.max,
-            tol = lavoptions$em.h1.tol
-          )
+          # zero coverage?
+          if (any(lav_matrix_vech(Mp[[g]]$coverage, diagonal = FALSE) == 0)) {
+            #out <- lav_mvnorm_missing_h1_estimate_moments_chol(
+            #         lavdata = lavdata, lavoptions = lavoptions, group = g)
+            #missing.h1.[[g]]$sigma <- out$Sigma
+            #missing.h1.[[g]]$mu <- out$Mu
+            #missing.h1.[[g]]$h1 <- out$fx
+          } else {
+            out <- lav_mvnorm_missing_h1_estimate_moments(
+              Y = X[[g]],
+              wt = WT[[g]],
+              Mp = Mp[[g]], Yp = missing.[[g]],
+              max.iter = lavoptions$em.h1.iter.max,
+              tol = lavoptions$em.h1.tol
+            )
+            missing.h1.[[g]]$sigma <- out$Sigma
+            missing.h1.[[g]]$mu <- out$Mu
+            missing.h1.[[g]]$h1 <- out$fx
+          }
           lav_warn(current.warn)
-          missing.h1.[[g]]$sigma <- out$Sigma
-          missing.h1.[[g]]$mu <- out$Mu
-          missing.h1.[[g]]$h1 <- out$fx
         }
 
         if (!is.null(WT[[g]])) {
@@ -825,11 +842,15 @@ lav_samplestats_from_data <- function(lavdata = NULL,
             pstar <- pstar + (nvar * nexo)
           }
           if (nrow(X[[g]]) < pstar) {
-            lav_msg_warn(gettextf(
+            if (ngroups > 1L) {
+              lav_msg_warn(gettextf(
               "number of observations (%s) too small to compute Gamma",
-              nrow(X[[g]])),
-              if (ngroups > 1L) gettextf("in group %s", g) else ""
-            )
+              nrow(X[[g]]), " in group %s", g))
+            } else {
+              lav_msg_warn(gettextf(
+              "number of observations (%s) too small to compute Gamma",
+              nrow(X[[g]])))
+            }
           }
           if (conditional.x) {
             Y <- Y

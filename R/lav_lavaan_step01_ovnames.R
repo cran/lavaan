@@ -95,7 +95,6 @@ lav_lavaan_step01_ovnames_initflat <- function(slotParTable     = NULL, # nolint
     } else {
       bare.minimum <- c("lhs", "op", "rhs", "free")
       missing.idx <- is.na(match(bare.minimum, names(model)))
-      missing.txt <- paste(bare.minimum[missing.idx], collapse = ", ")
       lav_msg_stop(
         gettextf("model is a list, but not a parameterTable?
                  missing column(s) in parameter table: [%s]",
@@ -108,6 +107,77 @@ lav_lavaan_step01_ovnames_initflat <- function(slotParTable     = NULL, # nolint
   # Ok, we got a flattened model; usually this a flat.model object, but it
   # could also be an already lavaanified parTable, or a bare-minimum list with
   # lhs/op/rhs/free elements
+  flat.model
+}
+
+# this function is only needed for backwards compatibility: it falls back
+# to the old (<0.6-20) way of handling composites (defined by the '<~' operator)
+# we do this by substituting the '<~' operator by '~', and by creating
+# phantom latent variables for the LHS, and setting the residual variance
+# to zero
+#
+# For example: "f <~ 1*income + occup + educ" is replaced by:
+# "f =~ 0; f ~~ 0*f; f ~ 1*income + occup + educ"
+#
+lav_lavaan_step01_ovnames_composites <- function(flat.model = NULL) {  # nolint
+
+  # get composite idx
+  c.idx <- which(flat.model$op == "<~")
+  if (length(c.idx) == 0L) {
+    return(flat.model)
+  }
+
+  # flat.model info
+  nel <- length(flat.model$lhs)
+  flat.names <- names(flat.model)
+  c.names <- unique(flat.model$lhs[c.idx])
+  nc <- length(c.names)
+  mod.val <- max(flat.model$mod.idx)
+
+  # check block numbers
+  max.block <- max(flat.model$block)
+  if (max.block > 1L) {
+    lav_msg_stop(gettext("composites = FALSE is not support when multiple blocks are supported; manually replace f <~ rhs by f =~ 0; f ~~ 0*f; f ~ rhs"))
+  }
+
+  block <- 1L
+
+  # replace '<~' by '~'
+  flat.model$op[c.idx] <- "~"
+
+  # add phantom latent variables
+  flat.model$lhs     <- c(flat.model$lhs, c.names)
+  flat.model$op      <- c(flat.model$op,  rep("=~", nc))
+  flat.model$rhs     <- c(flat.model$rhs, c.names)
+  flat.model$fixed   <- c(flat.model$fixed, rep("", nc))
+  flat.model$mod.idx <- c(flat.model$mod.idx, rep(0L, nc))
+  flat.model$block   <- c(flat.model$block, rep(block, nc))
+
+  # fix residual variances
+  flat.model$lhs     <- c(flat.model$lhs, c.names)
+  flat.model$op      <- c(flat.model$op,  rep("~~", nc))
+  flat.model$rhs     <- c(flat.model$rhs, c.names)
+  flat.model$fixed   <- c(flat.model$fixed, rep("0", nc)) # just for show
+  flat.model$mod.idx <- c(flat.model$mod.idx, mod.val + seq_len(nc))
+  flat.model$block   <- c(flat.model$block, rep(block, nc))
+
+  # extend the 'other' columns
+  other <- flat.names[!flat.names %in% c("lhs", "op", "rhs",
+                                         "fixed", "mod.idx", "block")]
+  for (o in other) {
+    if (is.character(flat.model[[o]])) {
+      flat.model[[o]] <- c(flat.model[[o]], rep("", nc*2))
+    } else if(is.integer(flat.model[[o]])) {
+      flat.model[[o]] <- c(flat.model[[o]], rep(0L, nc*2))
+    } else {
+      flat.model[[o]] <- c(flat.model[[o]], rep(as.numeric(NA), nc*2))
+    }
+  }
+
+  # add fixed values to the modifier attribute
+  attr(flat.model, "modifiers") <- c(attr(flat.model, "modifiers"),
+                                     rep(list(list(fixed = 0)), nc))
+
   flat.model
 }
 
@@ -272,56 +342,50 @@ lav_lavaan_step01_ovnames_group <- function(flat.model = NULL,        # nolint
 
 lav_lavaan_step01_ovnames_checklv <- function(                    # nolint
     lv.names    = character(0L),
+    ov.names    = character(0L),
     data        = NULL,
     sample.cov  = NULL,
     dotdotdot   = NULL,
     slotOptions = NULL) {                                         # nolint
-  # latent variables cannot appear in data --> *** error ***
-  #   (except when explicitly requested)
+
+  # latent variable names should not appear in the subset of the data
+  #   that is formed by merging ov+lv names --> **warning**
   # latent interactions are not supported ---> *** error ***
 
-  # sanity check: ov.names.x should NOT appear in ov.names.y
-  # this may happen if 'x' is exogenous in one block, but not in another...
-  # endo.idx <- which(ov.names.x %in% ov.names.y)
-  # if (length(endo.idx) > 0L) {
-  #    # remove from x! (new in 0.6-8)
-  #    ov.names.x <- ov.names.x[-endo.idx]
-  # }
-
+  if (is.null(data) && is.null(sample.cov)) {
+    return(invisible(NULL))
+  }
 
   # handle for lv.names that are also observed variables (new in 0.6-6)
   lv.lv.names <- unique(unlist(lv.names))
+  ov.ov.names <- unique(unlist(ov.names))
   if (length(lv.lv.names) > 0L) {
-    # check for lv.names in data/cov
+
+    # get data-based variable names
+    data_names <- character(0L)
     if (!is.null(data)) {
-      bad.idx <- which(lv.lv.names %in% names(data))
+      data_names <- names(data)
     } else if (!is.null(sample.cov)) {
-      bad.idx <- which(lv.lv.names %in% rownames(sample.cov))
-    } else {
-      bad.idx <- integer(0L)
+      data_names <- rownames(sample.cov)
     }
 
-        # if found, hard stop
+    # create subset of variable names, based on the model
+    model_names <- unique(c(ov.ov.names, lv.lv.names))
+    subset_names <- data_names[data_names %in% model_names]
+    bad.idx <- which(lv.lv.names %in% subset_names)
+
     if (length(bad.idx) > 0L) {
       if (!is.null(dotdotdot$check.lv.names) &&
         !dotdotdot$check.lv.names) {
         # ignore it, user switched this check off -- new in 0.6-7
       } else {
-        lav_msg_stop(gettext(
-          "some latent variable names collide with observed variable names:"),
-          paste(lv.lv.names[bad.idx], collapse = " ")
+        lav_msg_warn(gettextf(
+          "Some latent variable names collide with observed variable names in
+           the dataset: %s. Please provide alternative names for the latent
+           variables, or switch off this check using check.lv.names = FALSE",
+           paste(lv.lv.names[bad.idx], collapse = " "))
         )
       }
-
-      # rename latent variables (by adding 'lat')
-      # flat.model.idx <- which(flat.model$op == "=~" &
-      #                  flat.model$lhs %in% lv.names[bad.idx])
-      # flat.model$lhs[flat.model.idx] <-
-      #   paste(flat.model$lhs[flat.model.idx], "lat", sep = "")
-
-      # add names to ov.names
-      # ov.names <- c(ov.names, lv.names[bad.idx])
-      # what about ov.names.y and ov.names.x?
     }
   }
 
@@ -336,9 +400,8 @@ lav_lavaan_step01_ovnames_checklv <- function(                    # nolint
     } else {
       lav_msg_stop(gettextf(
         "Interaction terms involving latent variables (%s) are not supported.
-        You may consider creating product indicators to define
-        the latent interaction term. See the indProd() function
-        in the semTools package.", lv.lv.names[lv.int.idx[1]]))
+         Either use the sam() function, or consider using the modsem package.",
+         lv.lv.names[lv.int.idx[1]]))
     }
   }
 

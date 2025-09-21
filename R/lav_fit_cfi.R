@@ -16,6 +16,8 @@
 
 # CFI - comparative fit index (Bentler, 1990)
 # robust version: Brosseau-Liard & Savalei MBR 2014, equation 15
+# Brosseau-Liard, P. E., & Savalei, V. (2014). Adjusting incremental fit
+# indices for nonnormality. Multivariate behavioral research, 49(5), 460-470.
 
 # robust version MLMV (scaled.shifted)
 # Savalei, V. (2018). On the computation of the RMSEA and CFI from the
@@ -275,7 +277,10 @@ lav_fit_cfi_lavobject <- function(lavobject = NULL, fit.measures = "cfi",
     } else {
       version <- "V6"
     }
-    fiml <- try(lav_fit_fiml_corrected(lavobject, version = version),
+    fiml <- try(
+      lav_fit_fiml_corrected(lavobject, baseline.model,
+        version = version
+      ),
       silent = TRUE
     )
     if (inherits(fiml, "try-error")) {
@@ -641,7 +646,8 @@ lav_fit_measures_check_baseline <- function(fit.indep = NULL, object = NULL,
     return(NULL)
   } else if (!inherits(fit.indep, "lavaan")) {
     lav_msg_warn(gettext(
-      "(user-provided) baseline model is not a fitted lavaan object"))
+      "(user-provided) baseline model is not a fitted lavaan object"
+    ))
     return(NULL)
   } else if (!fit.indep@optim$converged) {
     lav_msg_warn(gettext("baseline model did not converge"))
@@ -655,7 +661,8 @@ lav_fit_measures_check_baseline <- function(fit.indep = NULL, object = NULL,
         "Baseline model was using test(s) = %1$s, but original model was using
         test(s) = %2$s. Refitting baseline model!",
         lav_msg_view(fit.indep@Options$test, "none"),
-        lav_msg_view(object@Options$test, "none")))
+        lav_msg_view(object@Options$test, "none")
+      ))
     }
     sameEstimator <- (object@Options$estimator ==
       fit.indep@Options$estimator)
@@ -664,7 +671,8 @@ lav_fit_measures_check_baseline <- function(fit.indep = NULL, object = NULL,
         "Baseline model was using estimator = %1$s, but original model was
         using estimator = %2$s. Refitting baseline model!",
         dQuote(fit.indep@Options$estimator),
-        dQuote(object@Options$estimator)))
+        dQuote(object@Options$estimator)
+      ))
     }
     if (!sameTest || !sameEstimator) {
       lavoptions <- object@Options
@@ -677,11 +685,11 @@ lav_fit_measures_check_baseline <- function(fit.indep = NULL, object = NULL,
       lavoptions$test <- object@Options$test
       fit.indep <- try(
         lavaan(fit.indep,
-          slotOptions     = lavoptions,
-          slotData        = object@Data,
+          slotOptions = lavoptions,
+          slotData = object@Data,
           slotSampleStats = object@SampleStats,
-          sloth1          = object@h1,
-          slotCache       = object@Cache,
+          sloth1 = object@h1,
+          slotCache = object@Cache,
           verbose = FALSE
         ),
         silent = TRUE
@@ -704,7 +712,7 @@ lav_fit_measures_check_baseline <- function(fit.indep = NULL, object = NULL,
   #        1. user-provided h1 model
   #        2. h1 model in @external slot
   #        3. default h1 model (already in @h1 slot, no update necessary)
-  #FIXME? user-supplied h1 model in object might be in fit.indep, too
+  # FIXME? user-supplied h1 model in object might be in fit.indep, too
 
   user_h1_exists <- FALSE
   # 1. user-provided h1 model
@@ -721,8 +729,10 @@ lav_fit_measures_check_baseline <- function(fit.indep = NULL, object = NULL,
 
   if (user_h1_exists) {
     ## update @test slot
-    TEST <- lav_update_test_custom_h1(lav_obj_h0 = fit.indep,
-                                      lav_obj_h1 = fit.h1)@test
+    TEST <- lav_update_test_custom_h1(
+      lav_obj_h0 = fit.indep,
+      lav_obj_h1 = fit.h1
+    )@test
   }
 
   TEST

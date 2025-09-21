@@ -198,9 +198,9 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
       ))
 
       # format c1/c2
-      c1 <- format(c1, width = 38L)
+      c1 <- format(c1, width = 37L)
       c2 <- format(c2,
-        width = 13L + max(0, (nd - 3L)) * 4L, justify = "right"
+        width = 14L + max(0, (nd - 3L)) * 4L, justify = "right"
       )
 
       # create character matrix
@@ -330,9 +330,9 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
       }
 
       # format c1/c2
-      c1 <- format(c1, width = 38L)
+      c1 <- format(c1, width = 37L)
       c2 <- format(c2,
-        width = 13L + max(0, (nd - 3L)) * 4L, justify = "right"
+        width = 14L + max(0, (nd - 3L)) * 4L, justify = "right"
       )
 
       # create character matrix
@@ -398,6 +398,8 @@ print.lavaan.parameterEstimates <- function(x, ..., nd = 3L) {
     lapply(x, function(x) {
       if (is.integer(x)) {
         sprintf(int.format, x)
+      } else if (is.character(x)) { # perhaps plabel
+        sprintf(char.format, x)
       } else if (is.numeric(x)) {
         sprintf(num.format, x)
       } else {

@@ -4,7 +4,6 @@ computeSigmaHat <- function(lavmodel = NULL, GLIST = NULL, extra = FALSE,
   if (is.null(GLIST)) GLIST <- lavmodel@GLIST
 
   nmat <- lavmodel@nmat
-  nvar <- lavmodel@nvar
   nblocks <- lavmodel@nblocks
   representation <- lavmodel@representation
 
@@ -77,7 +76,6 @@ computeSigmaHatJoint <- function(lavmodel = NULL, GLIST = NULL, extra = FALSE,
   if (is.null(GLIST)) GLIST <- lavmodel@GLIST
 
   nmat <- lavmodel@nmat
-  nvar <- lavmodel@nvar
   nblocks <- lavmodel@nblocks
   representation <- lavmodel@representation
 
@@ -91,7 +89,7 @@ computeSigmaHatJoint <- function(lavmodel = NULL, GLIST = NULL, extra = FALSE,
 
     if (representation == "LISREL") {
       res.Sigma <- computeSigmaHat.LISREL(MLIST = MLIST, delta = delta)
-      res.int <- computeMuHat.LISREL(MLIST = MLIST)
+      # res.int <- computeMuHat.LISREL(MLIST = MLIST)
       res.slopes <- computePI.LISREL(MLIST = MLIST)
       S.xx <- MLIST$cov.x
 
@@ -157,6 +155,19 @@ computeMuHat <- function(lavmodel = NULL, GLIST = NULL) {
     } else {
       lav_msg_stop(gettext(
         "only RAM and LISREL representation has been implemented for now"))
+    }
+
+    # new in 0.6-20: if a variable is ordinal, set its mean to zero
+    # (even if NU is not all zero, as in a multiple group analysis with
+    # group.equal = "thresholds")
+    #
+    # the logic is: Mu.hat is about 'y', not 'y-star'
+    # the non-free intercepts (in TAU) are used when computing the
+    # model-implied thresholds, but the do not say anything about the
+    # 'observed' mean of 'y'
+    if (lavmodel@categorical) {
+      ord.idx <- unique(lavmodel@th.idx[[g]][lavmodel@th.idx[[g]] > 0L])
+      Mu.hat[[g]][ord.idx] <- 0
     }
   } # nblocks
 

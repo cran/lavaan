@@ -155,9 +155,9 @@ lav_options_set <- function(opt = NULL) {                     # nolint
   opt <- lav_options_check(opt, opt.check, "")
 
   # check option 'start'
-  if (is.character(opt$start) && all(opt$start != c("default", "simple", "est")))
+  if (is.character(opt$start) && all(opt$start != c("default", "simple")))
     lav_msg_stop(gettext(
-      "start option must be 'default', 'simple', 'est' or a parametertable"))
+      "start option must be 'default', 'simple', a fitted object, a vector of parameter values, or a parameter table"))
 
   # first of all: set estimator ####
   if (opt$estimator == "default") {
@@ -240,12 +240,13 @@ lav_options_set <- function(opt = NULL) {                     # nolint
 
   # if categorical, and group.equal contains "intercepts", also add
   # thresholds (and vice versa)
-  if (opt$.categorical && any("intercepts" == opt$group.equal)) {
-    opt$group.equal <- unique(c(opt$group.equal, "thresholds"))
-  }
-  if (opt$.categorical && any("thresholds" == opt$group.equal)) {
-    opt$group.equal <- unique(c(opt$group.equal, "intercepts"))
-  }
+  # not any longer since 0.6-20
+  #if (opt$.categorical && any("intercepts" == opt$group.equal)) {
+  #  opt$group.equal <- unique(c(opt$group.equal, "thresholds"))
+  #}
+  #if (opt$.categorical && any("thresholds" == opt$group.equal)) {
+  #  opt$group.equal <- unique(c(opt$group.equal, "intercepts"))
+  #}
 
   # clustered ####
   # brute-force override (for now)
@@ -367,7 +368,8 @@ lav_options_set <- function(opt = NULL) {                     # nolint
     ))) {
       lav_msg_stop(gettextf(
         "missing=%1$s is not allowed for estimator %2$s",
-        dQuote(opt$missing), dQuote(lav_options_estimatorgroup(opt$estimator))))
+        dQuote(opt$missing),
+        dQuote(lav_options_estimatorgroup(opt$estimator.orig))))
     }
   } else if (opt$missing == "ml.x") {
     if (opt$.categorical) {
@@ -381,7 +383,8 @@ lav_options_set <- function(opt = NULL) {                     # nolint
     ))) {
       lav_msg_stop(gettextf(
         "missing=%1$s is not allowed for estimator %2$s",
-        dQuote(opt$missing), dQuote(lav_options_estimatorgroup(opt$estimator))))
+        dQuote(opt$missing),
+        dQuote(lav_options_estimatorgroup(opt$estimator.orig))))
     }
   } else if (opt$missing == "two.stage") {
     if (opt$.categorical) {
@@ -395,7 +398,8 @@ lav_options_set <- function(opt = NULL) {                     # nolint
     ))) {
       lav_msg_stop(gettextf(
         "missing=%1$s is not allowed for estimator %2$s",
-        dQuote(opt$missing), dQuote(lav_options_estimatorgroup(opt$estimator))))
+        dQuote(opt$missing),
+        dQuote(lav_options_estimatorgroup(opt$estimator.orig))))
     }
   } else if (opt$missing == "robust.two.stage") {
     if (opt$.categorical) {
@@ -409,7 +413,8 @@ lav_options_set <- function(opt = NULL) {                     # nolint
     ))) {
       lav_msg_stop(gettextf(
         "missing=%1$s is not allowed for estimator %2$s",
-        dQuote(opt$missing), dQuote(lav_options_estimatorgroup(opt$estimator))))
+        dQuote(opt$missing),
+        dQuote(lav_options_estimatorgroup(opt$estimator.orig))))
     }
   } else if (opt$missing == "doubly.robust") {
     if (opt$estimator != "pml") {
@@ -997,7 +1002,7 @@ lav_options_set <- function(opt = NULL) {                     # nolint
   }
 
   # if target, check target matrix, and set order.lv.by to = "none"
-  if (opt$rotation == "target" || opt$rotation == "pst") {
+  if (opt$rotation == "target.strict" || opt$rotation == "pst") {
     target <- opt$rotation.args$target
     if (is.null(target)) {
       lav_msg_stop(gettext("rotation target matrix is NULL"))
@@ -1015,8 +1020,21 @@ lav_options_set <- function(opt = NULL) {                     # nolint
 
   if (opt$rotation == "pst") {
     target.mask <- opt$rotation.args$target.mask
-    if (is.null(target.mask)) {
-      lav_msg_stop(gettext("rotation target.mask matrix is NULL"))
+    if (is.null(target.mask) || length(target.mask) == 0L) {
+      #lav_msg_stop(gettext("rotation target.mask matrix is NULL"))
+      if (is.matrix(target)) {
+        tmp <- matrix(1L, nrow = nrow(target), ncol = ncol(target))
+        tmp[target != 0] <- 0L # ignore these (non-zero) elements
+        opt$rotation.args$target.mask <- target.mask <- tmp
+      } else if (is.list(target)) {
+        out <- lapply(1:length(target), function(g) {
+                 tmp <- matrix(1L, nrow = nrow(target[[g]]),
+                                   ncol = ncol(target[[g]]))
+                 tmp[target[[g]] != 0] <- 0L # ignore these (non-zero) elements
+                 tmp
+               })
+        opt$rotation.args$target.mask <- target.mask <- out
+      }
     }
     if (is.list(target.mask)) {
       if (!all(sapply(target.mask, is.matrix))) {
@@ -1040,9 +1058,11 @@ lav_options_set <- function(opt = NULL) {                     # nolint
   }
 
   # if NAs, force opt$rotation to be 'pst' and create target.mask
-  if (opt$rotation == "target") {
+  if (opt$rotation == "target.strict") {
     # matrix
+    warn.flag <- FALSE
     if (is.matrix(target) && anyNA(target)) {
+      warn.flag <- TRUE
       opt$rotation <- "pst"
       target.mask <- matrix(1, nrow = nrow(target), ncol = ncol(target))
       target.mask[is.na(target)] <- 0
@@ -1053,6 +1073,7 @@ lav_options_set <- function(opt = NULL) {                     # nolint
       ngroups <- length(target)
       for (g in seq_len(ngroups)) {
         if (anyNA(target[[g]])) {
+          warn.flag <- TRUE
 		  # is target.mask just a <0 x 0 matrix>? create list!
 		  if (is.matrix(opt$rotation.args$target.mask)) {
 		    opt$rotation.args$target.mask <- vector("list", length = ngroups)
@@ -1064,6 +1085,9 @@ lav_options_set <- function(opt = NULL) {                     # nolint
           opt$rotation.args$target.mask[[g]] <- target.mask
         }
       }
+    }
+    if (warn.flag) {
+       lav_msg_warn(gettext("switching to PST rotation as target matrix contains NA values"))
     }
   }
 

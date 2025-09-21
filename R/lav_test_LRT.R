@@ -11,7 +11,8 @@
 #     method = "Satorra.Bentler.2010"
 #     method = "mean.var.adjusted.PLRT"
 #
-# - 0.6-13: RMSEA.D (also known as 'RDR') is added to the table (unless scaled)
+# - 0.6-13: RMSEA.D (also known as 'RDR') is added to the table (also if scaled,
+#           since 0.6-20)
 # - 0.6-13: fix multiple-group UG^2 bug in Satorra.2000 (reported by
 #           Gronneberg, Foldnes and Moss)
 #
@@ -281,24 +282,9 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
     lav_msg_stop(gettextf("test type unknown: %s", type))
   }
 
-
   # difference statistics
-  STAT.delta <- c(NA, diff(STAT))
-  Df.delta <- c(NA, diff(Df))
-  if (method == "satorra.2000" && scaled.shifted) {
-    a.delta <- b.delta <- rep(as.numeric(NA), length(STAT))
-  } else if (method %in% c("satorra.bentler.2001","satorra.bentler.2010",
-                           "satorra.2000")) {
-    c.delta <- rep(as.numeric(NA), length(STAT))
-  }
-  # new in 0.6-13
-  if (!scaled) {
-    RMSEA.delta <- c(NA, lav_fit_rmsea(
-      X2 = STAT.delta[-1],
-      df = Df.delta[-1],
-      N = ntotal, G = ngroups
-    ))
-  }
+  STAT.delta <- STAT.delta.orig <- c(NA, diff(STAT))
+  Df.delta <- Df.delta.orig <- c(NA, diff(Df))
 
   # check for negative values in STAT.delta
   # but with a tolerance (0.6-12)!
@@ -307,6 +293,15 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
       "Some restricted models fit better than less restricted models; either
       these models are not nested, or the less restricted model failed to reach
       a global optimum.Smallest difference = %s.", min(STAT.delta[-1])))
+  }
+
+  # prepare for scaling versions
+  if (method == "satorra.2000" && scaled.shifted) {
+    a.delta <- b.delta <- rep(as.numeric(NA), length(STAT))
+    c.delta <- NULL
+  } else if (method %in% c("satorra.bentler.2001","satorra.bentler.2010",
+                           "satorra.2000")) {
+    c.delta <- rep(as.numeric(NA), length(STAT))
   }
 
   # correction for scaled test statistics
@@ -347,7 +342,7 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
           Satterthwaite <- FALSE
         } else {
           Satterthwaite <- TRUE
-        }
+         }
         out <- lav_test_diff_Satorra2000(mods[[m]], mods[[m + 1]],
           H1 = TRUE,
           Satterthwaite = Satterthwaite,
@@ -366,9 +361,47 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
     }
   }
 
+  # check if scaled diff failed somehow
+  if (scaled &&
+     ( (method %in% c("satorra.bentler.2001", "satorra.bentler.2010") &&
+          is.na(out$scaling.factor)) ||
+         (method == "satorra.2000" && scaled.shifted && is.na(out$a)) ||
+         (method == "satorra.2000" && !scaled.shifted &&
+          is.na(out$scaling.factor)) )
+     ) {
+    scaled <- FALSE
+  }
+
+
+  # unname
+  STAT.delta <- unname(STAT.delta)
+  Df.delta <- unname(Df.delta)
+  STAT.delta.orig <- unname(STAT.delta.orig)
+  Df.delta.orig <- unname(Df.delta.orig)
+  if (scaled && !is.null(c.delta)) {
+    c.delta <- unname(c.delta)
+  }
+
   # Pvalue
   Pvalue.delta <- pchisq(STAT.delta, Df.delta, lower.tail = FALSE)
 
+  # new in 0.6-13: RMSEA (RMSEA.D or RDR)
+  if (object@Options$missing == "listwise") {
+    if (scaled && !is.null(c.delta)) {
+      c.hat <- c.delta[-1]
+    } else {
+      c.hat <- rep(1, length(STAT.delta.orig) - 1L)
+    }
+    RMSEA.delta <- c(NA, lav_fit_rmsea(
+      X2 = STAT.delta.orig[-1],
+      df = Df.delta.orig[-1],
+      N = ntotal,
+      G = ngroups,
+      c.hat = c.hat
+    ))
+  }
+
+  # AIC/BIC
   aic <- bic <- rep(NA, length(mods))
   if (estimator == "ML") {
     aic <- sapply(mods, FUN = AIC)
@@ -391,33 +424,32 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
       row.names = names(mods),
       check.names = FALSE
     )
+  } else if (object@Options$missing == "listwise") {
+    val <- data.frame(
+      Df = Df,
+      AIC = aic,
+      BIC = bic,
+      Chisq = STAT,
+      "Chisq diff" = STAT.delta,
+      "RMSEA" = RMSEA.delta,
+      "Df diff" = Df.delta,
+      "Pr(>Chisq)" = Pvalue.delta,
+      row.names = names(mods),
+      check.names = FALSE
+    )
   } else {
-    if (scaled) {
-      val <- data.frame(
-        Df = Df,
-        AIC = aic,
-        BIC = bic,
-        Chisq = STAT,
-        "Chisq diff" = STAT.delta,
-        "Df diff" = Df.delta,
-        "Pr(>Chisq)" = Pvalue.delta,
-        row.names = names(mods),
-        check.names = FALSE
-      )
-    } else {
-      val <- data.frame(
-        Df = Df,
-        AIC = aic,
-        BIC = bic,
-        Chisq = STAT,
-        "Chisq diff" = STAT.delta,
-        "RMSEA" = RMSEA.delta,
-        "Df diff" = Df.delta,
-        "Pr(>Chisq)" = Pvalue.delta,
-        row.names = names(mods),
-        check.names = FALSE
-      )
-    }
+    val <- data.frame(
+      Df = Df,
+      AIC = aic,
+      BIC = bic,
+      Chisq = STAT,
+      "Chisq diff" = STAT.delta,
+      #"RMSEA" = RMSEA.delta, # if missing, not yet...
+      "Df diff" = Df.delta,
+      "Pr(>Chisq)" = Pvalue.delta,
+      row.names = names(mods),
+      check.names = FALSE
+    )
   }
 
   # catch Df.delta == 0 cases (reported by Florian Zsok in Zurich)
@@ -448,7 +480,8 @@ lavTestLRT <- function(object, ..., method = "default", test = "default",
       attr(val, "heading") <-
         paste("\nScaled Chi-Squared Difference Test (method = ",
           dQuote(method), ")\n\n",
-          lav_msg(paste("lavaan NOTE:", txt)),
+          lav_msg(paste("lavaan NOTE:", txt), showheader = TRUE),
+          "\n",
           sep = ""
         )
       if (method == "satorra.2000" && scaled.shifted) {

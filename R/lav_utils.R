@@ -2,6 +2,170 @@
 #
 # initial version: YR 25/03/2009
 
+# sd with trimming
+lav_utils_sd <- function(x, na.rm = TRUE, trim = 0) {
+  if (isTRUE(na.rm))
+    x <- x[!is.na(x)]
+  n <- length(x)
+  if (trim > 0 && n) {
+      if (is.complex(x))
+          lav_msg_stop(gettext("trimmed means are not defined for complex data"))
+      if (anyNA(x))
+          return(NA_real_)
+      if (trim >= 0.5)
+          return(stats::median(x, na.rm = FALSE))
+      lo <- floor(n * trim) + 1
+      hi <- n + 1 - lo
+      x <- sort.int(x, partial = unique(c(lo, hi)))[lo:hi]
+  }
+  sd(x)
+}
+
+# find index of 'ancestors' (predictors) for all nodes in a DAG
+# given an adjacency matrix B (rows are y's, columns are x's)
+#
+# this (speedy!) version is written by Luc De Wilde
+lav_utils_get_ancestors <- function(B = NULL) {
+  B <- abs(B)
+  nr <- nrow(B)
+  OUTENV <- new.env(parent = emptyenv())
+
+  # container to hold ancestor indices per node
+  out.idx <- vector("list", length = nr)
+
+  get_ancestors <- function(nr, callers) {
+    if (any(callers == nr)) {
+      lav_msg_warn(gettextf("Cycle detected for element nr %d !", nr))
+      return(integer(0));
+    }
+    x = get0(as.character(nr), envir = OUTENV, ifnotfound = NULL)
+    if (!is.null(x)) return(x);
+    retval <- integer(0L);
+    x.direct.idx <- which(B[nr,] != 0)
+    for (j in seq_along(x.direct.idx)) {
+      thisone <- x.direct.idx[j]
+      retval <- c(retval, thisone)
+      sub <- get_ancestors(thisone, c(callers, nr))
+      if (all(sub != nr)) retval = c(retval, sub)
+    }
+    retval <- sort.int(unique(retval))
+    assign(as.character(nr), retval, envir = OUTENV)
+    return(retval)
+  }
+
+  # run over each node
+  for (i in seq_len(nr)) {
+    out.idx[[i]] <- get_ancestors(i, integer(0));
+  } # all nodes
+  out.idx
+}
+
+# cluster rows/cols that are linked/connected
+# return list of connected nodes
+# we assume A is the square/symmetric (binary) adjacency matrix of an
+# undirected graph
+#
+# this version written by Luc De Wilde
+lav_utils_get_connected_nodes <- function(A) {
+
+  # make sure we have square symmetric matrix
+  A <- as.matrix(A)
+
+  # A must be square
+  stopifnot(nrow(A) == ncol(A))
+
+  # A must be symmetric
+  stopifnot(isSymmetric(A))
+
+  # set diagonal to zero (just in case)
+  diag(A) <- 0L
+
+  # make it logical
+  A <- (A != 0)
+
+  # number of cols/rows
+  M <- ncol(A)
+
+  # catch diagonal A
+  if (all(lavaan::lav_matrix_vech(A, diagonal = FALSE) == 0L)) {
+    return(seq_len(M))
+  }
+
+  visited <- rep(FALSE, M)         # track visited nodes
+  membership <- integer(M)         # component id for each node
+  component.id <- 0L               # current component id
+
+  put_node_in_component <- function(node, componentid) {
+    visited[node] <<- TRUE
+    membership[node] <<- componentid
+    toadd <- which(A[, node])
+    for (n in toadd) {
+      if (!visited[n]) put_node_in_component(n, componentid)
+    }
+  }
+
+  for (node in seq_len(M)) {
+    if (!visited[node]) {
+      component.id <- component.id + 1L
+      put_node_in_component(node, component.id)
+    }
+  }
+
+  membership
+}
+
+
+# find the residual variances (diagonal element of PSI) in such a way
+# so that the diagonal elements of IB.inv %*% PSI %*% t(IB.inv) are
+# equal to the elements of target.psi (usually the 1 vector)
+#
+# YR 01 Nov 2024: initial version; no bounds for now... (so we may end up
+#                 with negative variances)
+lav_utils_find_residuals <- function(BETA = NULL, IB.inv = NULL, PSI = NULL,
+                                     target.psi = NULL, y.idx = NULL) {
+
+  nr <- nrow(PSI)
+
+  # IB.inv (if not given)
+  if (is.null(IB.inv)) {
+    IB <- -BETA
+    IB[lav_matrix_diag_idx(nr)] <- 1
+    IB.inv <- solve(IB)
+  }
+
+  # target.psi
+  if (is.null(target.psi)) {
+    target.psi <- rep(1, nr)
+  }
+
+  # y.idx
+  if (is.null(y.idx)) {
+    y.idx <- seq_len(nr)
+  }
+
+  # cast the problem as a nonlinear optimization problem
+  obj <- function(x) {
+    #cat("x = ", x, "\n")
+    # x are the diagonal elements of PSI
+    this.PSI <- PSI
+    diag(this.PSI)[y.idx] <- x
+    VETA <- IB.inv %*% this.PSI %*% t(IB.inv)
+    current.diag <- diag(VETA)
+    # ratio or difference?
+    diff <- target.psi[y.idx] - current.diag[y.idx]
+    out <- sum(diff * diff) # least squares
+    out
+  }
+
+  VETA <- IB.inv %*% PSI %*% t(IB.inv)
+  x.start <- diag(VETA)[y.idx]
+  out <- nlminb(start = x.start, objective = obj)
+
+  # return updated PSI matrix
+  diag(PSI)[y.idx] <- out$par
+  PSI
+}
+
 # get 'test'
 # make sure we return a single element
 lav_utils_get_test <- function(lavobject) {

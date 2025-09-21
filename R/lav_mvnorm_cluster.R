@@ -1,6 +1,8 @@
 # loglikelihood clustered/twolevel data
 
 # YR: first version around Feb 2017
+# YR 28 Oct 2024: [EM steps:] if fx.delta is NA, check if we have (near)-perfect
+#                 correlations, and provide an informative warning
 
 
 # take model-implied mean+variance matrices, and reorder/augment them
@@ -1010,7 +1012,11 @@ lav_mvnorm_cluster_information_expected <- function(Lp = NULL,
     omega.j.inv <- solve(omega.j)
 
     I11.j <- omega.j.inv
-    I22.j <- 0.5 * lav_matrix_duplication_pre_post(omega.j.inv %x% omega.j.inv)
+    # if (lav_use_lavaanC()) {
+    #   I22.j <- lavaanC::m_kronecker_dup_pre_post(omega.j.inv, multiplicator = 0.5)
+    # } else {
+      I22.j <- 0.5 * lav_matrix_duplication_pre_post(omega.j.inv %x% omega.j.inv)
+    # }
     I.j <- lav_matrix_bdiag(I11.j, I22.j)
     info.j <- t(Delta.j) %*% I.j %*% Delta.j
 
@@ -1026,7 +1032,11 @@ lav_mvnorm_cluster_information_expected <- function(Lp = NULL,
   Sigma.W.inv.tilde[ov.idx[[1]], ov.idx[[1]]] <- Sigma.W.inv
 
   I11.w <- Sigma.W.inv.tilde
-  I22.w <- 0.5 * lav_matrix_duplication_pre_post(Sigma.W.inv.tilde %x% Sigma.W.inv.tilde)
+  # if (lav_use_lavaanC()) {
+  #   I22.W <- lavaanC::m_kronecker_dup_pre_post(Sigma.W.inv.tilde, multiplicator = 0.5)
+  # } else {
+    I22.w <- 0.5 * lav_matrix_duplication_pre_post(Sigma.W.inv.tilde %x% Sigma.W.inv.tilde)
+  # }
   I.w <- lav_matrix_bdiag(I11.w, I22.w)
   information.w <- (nobs - nclusters) *
     (t(Delta.W.tilde) %*% I.w %*% Delta.W.tilde)
@@ -1158,7 +1168,11 @@ lav_mvnorm_cluster_information_expected_delta <- function(Lp = NULL,
     omega.j.inv <- solve(omega.j)
 
     I11.j <- omega.j.inv
-    I22.j <- 0.5 * lav_matrix_duplication_pre_post(omega.j.inv %x% omega.j.inv)
+    # if (lav_use_lavaanC()) {
+    #   I22.j <- lavaanC::m_kronecker_dup_pre_post(omega.j.inv, multiplicator = 0.5)
+    # } else {
+      I22.j <- 0.5 * lav_matrix_duplication_pre_post(omega.j.inv %x% omega.j.inv)
+    # }
     I.j <- lav_matrix_bdiag(I11.j, I22.j)
     info.j <- t(Delta.j) %*% I.j %*% Delta.j
 
@@ -1171,7 +1185,11 @@ lav_mvnorm_cluster_information_expected_delta <- function(Lp = NULL,
     Sinv.method = Sinv.method
   )
   I11.w <- Sigma.W.inv
-  I22.w <- 0.5 * lav_matrix_duplication_pre_post(Sigma.W.inv %x% Sigma.W.inv)
+  # if (lav_use_lavaanC()) {
+  #   I22.w <- lavaanC::m_kronecker_dup_pre_post(Sigma.W.inv, multiplicator = 0.5)
+  # } else {
+    I22.w <- 0.5 * lav_matrix_duplication_pre_post(Sigma.W.inv %x% Sigma.W.inv)
+  # }
   I.w <- lav_matrix_bdiag(I11.w, I22.w)
 
   # force zero for means both.idx in within part
@@ -1409,6 +1427,23 @@ lav_mvnorm_cluster_em_sat <- function(YLp = NULL,
 
     # fx.delta
     fx.delta <- fx - fx.old
+
+    # check if fx.delta is finite
+    if (!is.finite(fx.delta)) {
+      # not good ... something is very wrong; perhaps near-singular
+      # matrices?
+      cat("\n")
+      cat("FATAL problem: dumping Sigma.W and Sigma.B matrices:\n\n")
+      cat("Sigma.W:\n")
+      print(Sigma.W)
+      cat("\n")
+      cat("Sigma.B:\n")
+      print(implied2$Sigma.B)
+      cat("\n")
+      lav_msg_stop(gettext(
+        "EM steps of the saturated (H1) model failed; some matrices may
+         be singular; please check your data for (near-)perfect correlations."))
+    }
 
     # what if fx.delta is negative?
     if (fx.delta < 0) {
